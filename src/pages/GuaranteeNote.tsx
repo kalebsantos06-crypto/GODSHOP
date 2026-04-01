@@ -223,7 +223,12 @@ export default function GuaranteeNote() {
             <h2 className="text-lg font-bold border-b border-[#d1d5db] mb-3 pb-1">Detalhes da Venda</h2>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <p><span className="font-semibold">Valor da Venda:</span> {formatBRL(sale.sell_price)}</p>
-              <p><span className="font-semibold">Forma de Pagamento:</span> {sale.payment_method}</p>
+              <p>
+                <span className="font-semibold">Forma de Pagamento:</span> {sale.payment_method}
+                {sale.installments && sale.installments > 1 && (
+                  ` (${sale.installments}x ${sale.installment_frequency === 'Semanal' ? 'Semanal' : 'Mensal'})`
+                )}
+              </p>
               <p><span className="font-semibold">Data da Compra:</span> {format(new Date(sale.sale_date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
               <p><span className="font-semibold">Vendedor:</span> Kaleb Santos</p>
             </div>

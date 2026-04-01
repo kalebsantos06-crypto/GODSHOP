@@ -70,6 +70,8 @@ export default function Sales() {
       client_id: formData.get('client_id'),
       sell_price: Number(formData.get('sell_price')),
       payment_method: formData.get('payment_method'),
+      installments: Number(formData.get('installments')) || 1,
+      installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Mensal',
       sale_date: new Date().toISOString(),
     });
   };
@@ -85,6 +87,8 @@ export default function Sales() {
         client_id: formData.get('client_id'),
         sell_price: Number(formData.get('sell_price')),
         payment_method: formData.get('payment_method'),
+        installments: Number(formData.get('installments')) || 1,
+        installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Mensal',
       }
     });
   };
@@ -169,6 +173,16 @@ export default function Sales() {
                 <option value="Cartão">Cartão</option>
               </select>
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Parcelas</label>
+              <div className="flex gap-2">
+                <input name="installments" defaultValue={editingSale?.installments || 1} type="number" min="1" max="24" required className="w-1/2 p-2 border rounded-md" />
+                <select name="installment_frequency" defaultValue={editingSale?.installment_frequency || 'Mensal'} className="w-1/2 p-2 border rounded-md bg-background">
+                  <option value="Mensal">Mensal</option>
+                  <option value="Semanal">Semanal</option>
+                </select>
+              </div>
+            </div>
             <div className="lg:col-span-4 flex justify-end gap-2 mt-2">
               <button type="button" onClick={() => { setIsAdding(false); setEditingSale(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
                 Cancelar
@@ -235,7 +249,14 @@ export default function Sales() {
                     <td className="px-4 py-3">{client?.name || 'N/A'}</td>
                     <td className="px-4 py-3">{formatBRL(sale.sell_price)}</td>
                     <td className="px-4 py-3 text-emerald-600 font-medium">{formatBRL(profit)}</td>
-                    <td className="px-4 py-3">{sale.payment_method}</td>
+                    <td className="px-4 py-3">
+                      {sale.payment_method}
+                      {sale.installments && sale.installments > 1 && (
+                        <span className="text-xs text-muted-foreground block">
+                          {sale.installments}x {sale.installment_frequency === 'Semanal' ? 'Semanal' : 'Mensal'}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button 

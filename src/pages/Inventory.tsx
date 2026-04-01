@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Edit2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -10,6 +10,7 @@ import { ptBR } from 'date-fns/locale';
 export default function Inventory() {
   const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
+  const [editingIphone, setEditingIphone] = useState<any>(null);
   
   const { data: iphones = [], isLoading } = useQuery({
     queryKey: ['iphones'],
@@ -31,6 +32,16 @@ export default function Inventory() {
     onError: () => toast.error('Erro ao adicionar iPhone.')
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string, data: any }) => db.iphones.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['iphones'] });
+      setEditingIphone(null);
+      toast.success('Aparelho atualizado!');
+    },
+    onError: () => toast.error('Erro ao atualizar aparelho.')
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => db.iphones.delete(id),
     onSuccess: () => {
@@ -42,15 +53,23 @@ export default function Inventory() {
   const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    addMutation.mutate({
+    const data = {
       model: formData.get('model'),
       storage: formData.get('storage'),
       color: formData.get('color'),
       buy_price: Number(formData.get('buy_price')),
       supplier_id: formData.get('supplier_id'),
-      buy_date: new Date().toISOString(),
-      status: 'disponivel'
-    });
+    };
+
+    if (editingIphone) {
+      updateMutation.mutate({ id: editingIphone.id, data });
+    } else {
+      addMutation.mutate({
+        ...data,
+        buy_date: new Date().toISOString(),
+        status: 'disponivel'
+      });
+    }
   };
 
   if (isLoading) return <div>Carregando...</div>;
@@ -63,25 +82,28 @@ export default function Inventory() {
           <p className="text-muted-foreground text-sm mt-1">Gerencie seus aparelhos</p>
         </div>
         <button 
-          onClick={() => setIsAdding(!isAdding)}
+          onClick={() => {
+            setIsAdding(!isAdding);
+            setEditingIphone(null);
+          }}
           className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-primary/90"
         >
           <Plus className="h-4 w-4" />
-          Adicionar iPhone
+          {isAdding ? 'Fechar' : 'Adicionar iPhone'}
         </button>
       </div>
 
-      {isAdding && (
+      {(isAdding || editingIphone) && (
         <div className="bg-card border rounded-xl p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-4">Novo Aparelho</h2>
+          <h2 className="text-lg font-semibold mb-4">{editingIphone ? 'Editar Aparelho' : 'Novo Aparelho'}</h2>
           <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Modelo</label>
-              <input name="model" required className="w-full p-2 border rounded-md" placeholder="Ex: iPhone 13" />
+              <input name="model" defaultValue={editingIphone?.model} required className="w-full p-2 border rounded-md" placeholder="Ex: iPhone 13" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Armazenamento</label>
-              <select name="storage" required className="w-full p-2 border rounded-md bg-background">
+              <select name="storage" defaultValue={editingIphone?.storage || '128GB'} required className="w-full p-2 border rounded-md bg-background">
                 <option value="64GB">64GB</option>
                 <option value="128GB">128GB</option>
                 <option value="256GB">256GB</option>
@@ -91,15 +113,15 @@ export default function Inventory() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Cor</label>
-              <input name="color" required className="w-full p-2 border rounded-md" placeholder="Ex: Midnight" />
+              <input name="color" defaultValue={editingIphone?.color} required className="w-full p-2 border rounded-md" placeholder="Ex: Midnight" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Preço de Compra</label>
-              <input name="buy_price" type="number" step="0.01" required className="w-full p-2 border rounded-md" placeholder="R$ 0,00" />
+              <input name="buy_price" defaultValue={editingIphone?.buy_price} type="number" step="0.01" required className="w-full p-2 border rounded-md" placeholder="R$ 0,00" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Fornecedor</label>
-              <select name="supplier_id" required className="w-full p-2 border rounded-md bg-background">
+              <select name="supplier_id" defaultValue={editingIphone?.supplier_id} required className="w-full p-2 border rounded-md bg-background">
                 <option value="">Selecione...</option>
                 {suppliers.map(s => (
                   <option key={s.id} value={s.id}>{s.name}</option>
@@ -108,9 +130,9 @@ export default function Inventory() {
             </div>
             <div className="flex items-end gap-2">
               <button type="submit" className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium flex-1">
-                Salvar
+                {editingIphone ? 'Atualizar' : 'Salvar'}
               </button>
-              <button type="button" onClick={() => setIsAdding(false)} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
+              <button type="button" onClick={() => { setIsAdding(false); setEditingIphone(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
                 Cancelar
               </button>
             </div>
@@ -148,14 +170,26 @@ export default function Inventory() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button 
-                      onClick={() => {
-                        if(confirm('Tem certeza?')) deleteMutation.mutate(iphone.id);
-                      }}
-                      className="text-destructive hover:bg-destructive/10 p-2 rounded-md transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button 
+                        onClick={() => {
+                          setEditingIphone(iphone);
+                          setIsAdding(false);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="text-muted-foreground hover:text-foreground p-2 rounded-md transition-colors"
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </button>
+                      <button 
+                        onClick={() => {
+                          if(confirm('Tem certeza?')) deleteMutation.mutate(iphone.id);
+                        }}
+                        className="text-destructive hover:bg-destructive/10 p-2 rounded-md transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -31,6 +31,15 @@ export interface Sale {
   iphone_id: string;
   client_id: string;
   sell_price: number;
-  payment_method: 'PIX' | 'Dinheiro' | 'Cartão';
+  payment_method: string;
   sale_date: string;
+  installments?: number;
+  installment_frequency?: 'Semanal' | 'Mensal';
+}
+
+export interface PriceTableItem {
+  id: string;
+  model: string;
+  storage: string;
+  price: number;
 }

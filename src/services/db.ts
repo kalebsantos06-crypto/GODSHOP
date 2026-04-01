@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { iPhone, Client, Supplier, Sale } from '../types';
+import { iPhone, Client, Supplier, Sale, PriceTableItem } from '../types';
 
 // Helper to simulate network delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -24,6 +24,10 @@ const initDB = () => {
     setStorage('sales', [
       { id: uuidv4(), iphone_id: iId, client_id: cId, sell_price: 3800, payment_method: 'PIX', sale_date: new Date().toISOString() }
     ]);
+    setStorage('prices', [
+      { id: uuidv4(), model: 'iPhone 13', storage: '128GB', price: 3800 },
+      { id: uuidv4(), model: 'iPhone 14 Pro', storage: '256GB', price: 5500 }
+    ]);
   }
 };
 
@@ -31,6 +35,26 @@ initDB();
 
 // Simulated Supabase Client
 export const db = {
+  prices: {
+    list: async () => { await delay(300); return getStorage<PriceTableItem>('prices'); },
+    create: async (data: Omit<PriceTableItem, 'id'>) => {
+      await delay(300);
+      const newItem = { ...data, id: uuidv4() };
+      const items = getStorage<PriceTableItem>('prices');
+      setStorage('prices', [...items, newItem]);
+      return newItem;
+    },
+    update: async (id: string, data: Partial<PriceTableItem>) => {
+      await delay(300);
+      const items = getStorage<PriceTableItem>('prices');
+      const updated = items.map(i => i.id === id ? { ...i, ...data } : i);
+      setStorage('prices', updated);
+    },
+    delete: async (id: string) => {
+      await delay(300);
+      setStorage('prices', getStorage<PriceTableItem>('prices').filter(i => i.id !== id));
+    }
+  },
   iphones: {
     list: async () => { await delay(300); return getStorage<iPhone>('iphones'); },
     create: async (data: Omit<iPhone, 'id'>) => {

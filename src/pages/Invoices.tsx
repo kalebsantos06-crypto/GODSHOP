@@ -53,7 +53,12 @@ export default function Invoices() {
               <div className="space-y-1 mb-6 text-sm">
                 <p><span className="font-medium">Aparelho:</span> {iphone?.model} {iphone?.storage}</p>
                 <p><span className="font-medium">Valor:</span> {formatBRL(sale.sell_price)}</p>
-                <p><span className="font-medium">Pagamento:</span> {sale.payment_method}</p>
+                <p>
+                  <span className="font-medium">Pagamento:</span> {sale.payment_method}
+                  {sale.installments && sale.installments > 1 && (
+                    ` (${sale.installments}x ${sale.installment_frequency === 'Semanal' ? 'Semanal' : 'Mensal'})`
+                  )}
+                </p>
               </div>
               <div className="mt-auto pt-4 border-t">
                 <Link 
