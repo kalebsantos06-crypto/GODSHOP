@@ -58,6 +58,7 @@ export default function Inventory() {
       storage: formData.get('storage'),
       color: formData.get('color'),
       buy_price: Number(formData.get('buy_price')),
+      imei: formData.get('imei'),
       supplier_id: formData.get('supplier_id'),
     };
 
@@ -116,6 +117,10 @@ export default function Inventory() {
               <input name="color" defaultValue={editingIphone?.color} required className="w-full p-2 border rounded-md" placeholder="Ex: Midnight" />
             </div>
             <div className="space-y-2">
+              <label className="text-sm font-medium">IMEI / Serial</label>
+              <input name="imei" defaultValue={editingIphone?.imei} className="w-full p-2 border rounded-md" placeholder="Ex: 35..." />
+            </div>
+            <div className="space-y-2">
               <label className="text-sm font-medium">Preço de Compra</label>
               <input name="buy_price" defaultValue={editingIphone?.buy_price} type="number" step="0.01" required className="w-full p-2 border rounded-md" placeholder="R$ 0,00" />
             </div>
@@ -147,6 +152,7 @@ export default function Inventory() {
               <tr>
                 <th className="px-4 py-3 font-medium">Modelo</th>
                 <th className="px-4 py-3 font-medium">Armazenamento</th>
+                <th className="px-4 py-3 font-medium">IMEI</th>
                 <th className="px-4 py-3 font-medium">Cor</th>
                 <th className="px-4 py-3 font-medium">Preço (Compra)</th>
                 <th className="px-4 py-3 font-medium">Data</th>
@@ -159,6 +165,7 @@ export default function Inventory() {
                 <tr key={iphone.id} className="hover:bg-muted/50">
                   <td className="px-4 py-3 font-medium">{iphone.model}</td>
                   <td className="px-4 py-3">{iphone.storage}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{iphone.imei || 'N/A'}</td>
                   <td className="px-4 py-3">{iphone.color}</td>
                   <td className="px-4 py-3">{formatBRL(iphone.buy_price)}</td>
                   <td className="px-4 py-3">{format(new Date(iphone.buy_date), 'dd/MM/yyyy', { locale: ptBR })}</td>

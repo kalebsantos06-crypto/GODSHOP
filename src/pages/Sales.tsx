@@ -14,6 +14,8 @@ export default function Sales() {
   const [editingSale, setEditingSale] = useState<any>(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [tempPrice, setTempPrice] = useState<number>(0);
+  const [tempInstallments, setTempInstallments] = useState<number>(1);
   
   const { data: sales = [], isLoading } = useQuery({
     queryKey: ['sales'],
@@ -125,6 +127,8 @@ export default function Sales() {
             onClick={() => {
               setIsAdding(!isAdding);
               setEditingSale(null);
+              setTempPrice(0);
+              setTempInstallments(1);
             }}
             className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-primary/90"
           >
@@ -163,7 +167,16 @@ export default function Sales() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Valor da Venda</label>
-              <input name="sell_price" defaultValue={editingSale?.sell_price} type="number" step="0.01" required className="w-full p-2 border rounded-md" placeholder="R$ 0,00" />
+              <input 
+                name="sell_price" 
+                defaultValue={editingSale?.sell_price} 
+                type="number" 
+                step="0.01" 
+                required 
+                className="w-full p-2 border rounded-md" 
+                placeholder="R$ 0,00"
+                onChange={(e) => setTempPrice(Number(e.target.value))}
+              />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Forma de Pagamento</label>
@@ -176,12 +189,26 @@ export default function Sales() {
             <div className="space-y-2">
               <label className="text-sm font-medium">Parcelas</label>
               <div className="flex gap-2">
-                <input name="installments" defaultValue={editingSale?.installments || 1} type="number" min="1" max="24" required className="w-1/2 p-2 border rounded-md" />
+                <input 
+                  name="installments" 
+                  defaultValue={editingSale?.installments || 1} 
+                  type="number" 
+                  min="1" 
+                  max="24" 
+                  required 
+                  className="w-1/2 p-2 border rounded-md"
+                  onChange={(e) => setTempInstallments(Number(e.target.value))}
+                />
                 <select name="installment_frequency" defaultValue={editingSale?.installment_frequency || 'Mensal'} className="w-1/2 p-2 border rounded-md bg-background">
                   <option value="Mensal">Mensal</option>
                   <option value="Semanal">Semanal</option>
                 </select>
               </div>
+              {tempInstallments > 1 && tempPrice > 0 && (
+                <p className="text-xs text-emerald-600 font-medium mt-1">
+                  Valor por parcela: {formatBRL(tempPrice / tempInstallments)}
+                </p>
+              )}
             </div>
             <div className="lg:col-span-4 flex justify-end gap-2 mt-2">
               <button type="button" onClick={() => { setIsAdding(false); setEditingSale(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
@@ -263,6 +290,8 @@ export default function Sales() {
                           onClick={() => {
                             setEditingSale(sale);
                             setIsAdding(false);
+                            setTempPrice(sale.sell_price);
+                            setTempInstallments(sale.installments || 1);
                             window.scrollTo({ top: 0, behavior: 'smooth' });
                           }}
                           className="text-muted-foreground hover:text-foreground transition-colors p-1"

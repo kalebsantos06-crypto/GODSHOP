@@ -4,6 +4,7 @@ export interface iPhone {
   storage: string;
   color: string;
   buy_price: number;
+  imei?: string;
   supplier_id: string;
   buy_date: string;
   status: 'disponivel' | 'vendido';

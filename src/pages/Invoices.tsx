@@ -44,7 +44,11 @@ export default function Invoices() {
               <div className="flex justify-between items-start mb-4">
                 <div>
                   <h3 className="font-semibold text-lg">{client?.name || 'Cliente Desconhecido'}</h3>
-                  <p className="text-sm text-muted-foreground">{format(new Date(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</p>
+                  <div className="flex gap-2 text-xs text-muted-foreground">
+                    <p>{format(new Date(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</p>
+                    <span>•</span>
+                    <p className="font-mono">#{sale.id.split('-')[0].toUpperCase()}</p>
+                  </div>
                 </div>
                 <div className="p-2 bg-primary/10 rounded-full text-primary">
                   <Receipt className="h-5 w-5" />
