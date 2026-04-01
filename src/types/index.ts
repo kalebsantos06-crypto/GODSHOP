@@ -36,6 +36,7 @@ export interface Sale {
   sale_date: string;
   installments?: number;
   installment_frequency?: 'Semanal' | 'Mensal';
+  down_payment?: number;
 }
 
 export interface PriceTableItem {

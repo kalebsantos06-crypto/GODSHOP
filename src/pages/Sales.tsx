@@ -16,6 +16,7 @@ export default function Sales() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [tempPrice, setTempPrice] = useState<number>(0);
+  const [tempDownPayment, setTempDownPayment] = useState<number>(0);
   const [tempInstallments, setTempInstallments] = useState<number>(1);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   
@@ -73,6 +74,7 @@ export default function Sales() {
       iphone_id: formData.get('iphone_id'),
       client_id: formData.get('client_id'),
       sell_price: Number(formData.get('sell_price')),
+      down_payment: Number(formData.get('down_payment')) || 0,
       payment_method: formData.get('payment_method'),
       installments: Number(formData.get('installments')) || 1,
       installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Mensal',
@@ -90,6 +92,7 @@ export default function Sales() {
         iphone_id: formData.get('iphone_id'),
         client_id: formData.get('client_id'),
         sell_price: Number(formData.get('sell_price')),
+        down_payment: Number(formData.get('down_payment')) || 0,
         payment_method: formData.get('payment_method'),
         installments: Number(formData.get('installments')) || 1,
         installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Mensal',
@@ -182,6 +185,18 @@ export default function Sales() {
               />
             </div>
             <div className="space-y-2">
+              <label className="text-sm font-medium">Entrada</label>
+              <input 
+                name="down_payment" 
+                defaultValue={editingSale?.down_payment || 0} 
+                type="number" 
+                step="0.01" 
+                className="w-full p-2 border rounded-md" 
+                placeholder="R$ 0,00"
+                onChange={(e) => setTempDownPayment(Number(e.target.value))}
+              />
+            </div>
+            <div className="space-y-2">
               <label className="text-sm font-medium">Forma de Pagamento</label>
               <select name="payment_method" defaultValue={editingSale?.payment_method} required className="w-full p-2 border rounded-md bg-background">
                 <option value="PIX">PIX</option>
@@ -209,7 +224,7 @@ export default function Sales() {
               </div>
               {tempInstallments > 1 && tempPrice > 0 && (
                 <p className="text-xs text-emerald-600 font-medium mt-1">
-                  Valor por parcela: {formatBRL(tempPrice / tempInstallments)}
+                  Valor por parcela: {formatBRL((tempPrice - tempDownPayment) / tempInstallments)}
                 </p>
               )}
             </div>
@@ -281,19 +296,28 @@ export default function Sales() {
                 const iphone = iphones.find(i => i.id === sale.iphone_id);
                 const client = clients.find(c => c.id === sale.client_id);
                 const profit = iphone ? sale.sell_price - iphone.buy_price : 0;
+                const remaining = sale.sell_price - (sale.down_payment || 0);
 
                 return (
                   <tr key={sale.id} className="hover:bg-muted/50">
                     <td className="px-4 py-3">{format(new Date(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</td>
                     <td className="px-4 py-3 font-medium">{iphone ? `${iphone.model} ${iphone.storage}` : 'N/A'}</td>
                     <td className="px-4 py-3">{client?.name || 'N/A'}</td>
-                    <td className="px-4 py-3">{formatBRL(sale.sell_price)}</td>
+                    <td className="px-4 py-3">
+                      {formatBRL(sale.sell_price)}
+                      {sale.down_payment && sale.down_payment > 0 && (
+                        <span className="text-xs text-muted-foreground block">
+                          Entrada: {formatBRL(sale.down_payment)}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-emerald-600 font-medium">{formatBRL(profit)}</td>
                     <td className="px-4 py-3">
                       {sale.payment_method}
                       {sale.installments && sale.installments > 1 && (
                         <span className="text-xs text-muted-foreground block">
                           {sale.installments}x {sale.installment_frequency === 'Semanal' ? 'Semanal' : 'Mensal'}
+                          {sale.down_payment && sale.down_payment > 0 && ` (Restante: ${formatBRL(remaining)})`}
                         </span>
                       )}
                     </td>
@@ -304,6 +328,7 @@ export default function Sales() {
                             setEditingSale(sale);
                             setIsAdding(false);
                             setTempPrice(sale.sell_price);
+                            setTempDownPayment(sale.down_payment || 0);
                             setTempInstallments(sale.installments || 1);
                             window.scrollTo({ top: 0, behavior: 'smooth' });
                           }}

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
-import { format } from 'date-fns';
+import { format, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Printer, ArrowLeft, Download } from 'lucide-react';
 import { toast } from 'sonner';
@@ -35,6 +35,9 @@ export default function GuaranteeNote() {
 
   const sale = sales.find(s => s.id === id);
   if (!sale) return <div>Venda não encontrada.</div>;
+
+  const saleDate = new Date(sale.sale_date);
+  const endDate = addMonths(saleDate, 6);
 
   const iphone = iphones.find(i => i.id === sale.iphone_id);
   const client = clients.find(c => c.id === sale.client_id);
@@ -241,7 +244,7 @@ export default function GuaranteeNote() {
 
           <section className="bg-[#f9fafb] p-4 rounded-lg border border-[#e5e7eb] text-sm space-y-3">
             <h3 className="font-bold text-base mb-2">Termos e Condições de Garantia</h3>
-            <p>1. <strong>Prazo e Cobertura:</strong> Este aparelho possui garantia de 6 (seis) meses, conforme o Código de Defesa do Consumidor, cobrindo exclusivamente defeitos de funcionamento de hardware decorrentes de vícios de fabricação, contados a partir da data de emissão deste termo.</p>
+            <p>1. <strong>Prazo e Cobertura:</strong> Este aparelho possui garantia de 6 (seis) meses, cobrindo exclusivamente defeitos de funcionamento de hardware decorrentes de vícios de fabricação. A garantia é válida de {format(saleDate, "dd/MM/yyyy")} até {format(endDate, "dd/MM/yyyy")}.</p>
             <p>2. <strong>Exclusões:</strong> Esta garantia não cobre danos decorrentes de mau uso, negligência, acidentes, contato com líquidos (oxidação), quedas, quebra de tela, ou qualquer dano físico. Estão excluídos também danos causados por software de terceiros, modificações não autorizadas (jailbreak/root) e uso de acessórios não compatíveis ou não originais.</p>
             <p>3. <strong>Violação de Selos:</strong> A remoção, dano ou violação de selos de garantia ou de segurança implica na perda imediata da cobertura.</p>
             <p>4. <strong>Procedimento:</strong> Para acionar a garantia, é obrigatória a apresentação deste termo. O prazo para análise técnica é de até 30 (trinta) dias, conforme legislação vigente.</p>
