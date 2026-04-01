@@ -1,0 +1,5 @@
+{
+  "name": "GODSHOP",
+  "description": "Dashboard para gerenciamento de estoque e vendas de iPhones com gráficos de lucro mensal.",
+  "requestFramePermissions": []
+}
