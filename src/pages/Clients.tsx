@@ -3,11 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { Plus, Trash2, Phone, Edit2 } from 'lucide-react';
 import { toast } from 'sonner';
+import ConfirmationModal from '../components/ui/ConfirmationModal';
 
 export default function Clients() {
   const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
   const [editingClient, setEditingClient] = useState<any>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   
   const { data: clients = [], isLoading } = useQuery({
     queryKey: ['clients'],
@@ -163,9 +165,7 @@ export default function Clients() {
                     <Edit2 className="h-4 w-4" />
                   </button>
                   <button 
-                    onClick={() => {
-                      if(confirm('Tem certeza?')) deleteMutation.mutate(client.id);
-                    }}
+                    onClick={() => setDeleteId(client.id)}
                     className="text-destructive hover:bg-destructive/10 p-1.5 rounded-md transition-colors"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -197,6 +197,15 @@ export default function Clients() {
           </div>
         )}
       </div>
+
+      <ConfirmationModal
+        isOpen={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId && deleteMutation.mutate(deleteId)}
+        title="Excluir Cliente"
+        message="Tem certeza que deseja remover este cliente? Esta ação não pode ser desfeita."
+        confirmText="Excluir"
+      />
     </div>
   );
 }

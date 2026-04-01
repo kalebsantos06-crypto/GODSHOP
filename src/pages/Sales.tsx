@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { format, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
+import ConfirmationModal from '../components/ui/ConfirmationModal';
 
 export default function Sales() {
   const queryClient = useQueryClient();
@@ -16,6 +17,7 @@ export default function Sales() {
   const [endDate, setEndDate] = useState('');
   const [tempPrice, setTempPrice] = useState<number>(0);
   const [tempInstallments, setTempInstallments] = useState<number>(1);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   
   const { data: sales = [], isLoading } = useQuery({
     queryKey: ['sales'],
@@ -74,7 +76,7 @@ export default function Sales() {
       payment_method: formData.get('payment_method'),
       installments: Number(formData.get('installments')) || 1,
       installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Mensal',
-      sale_date: new Date().toISOString(),
+      sale_date: formData.get('sale_date') ? new Date(formData.get('sale_date') as string).toISOString() : new Date().toISOString(),
     });
   };
 
@@ -91,6 +93,7 @@ export default function Sales() {
         payment_method: formData.get('payment_method'),
         installments: Number(formData.get('installments')) || 1,
         installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Mensal',
+        sale_date: formData.get('sale_date') ? new Date(formData.get('sale_date') as string).toISOString() : editingSale.sale_date,
       }
     });
   };
@@ -210,6 +213,16 @@ export default function Sales() {
                 </p>
               )}
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Data da Venda</label>
+              <input 
+                name="sale_date" 
+                type="date" 
+                defaultValue={editingSale ? format(new Date(editingSale.sale_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
+                required 
+                className="w-full p-2 border rounded-md bg-background" 
+              />
+            </div>
             <div className="lg:col-span-4 flex justify-end gap-2 mt-2">
               <button type="button" onClick={() => { setIsAdding(false); setEditingSale(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
                 Cancelar
@@ -300,9 +313,7 @@ export default function Sales() {
                           <Edit2 className="h-4 w-4" />
                         </button>
                         <button 
-                          onClick={() => {
-                            if(confirm('Tem certeza que deseja excluir esta venda? O aparelho voltará para o estoque.')) deleteMutation.mutate(sale.id);
-                          }}
+                          onClick={() => setDeleteId(sale.id)}
                           className="text-destructive hover:bg-destructive/10 transition-colors p-1 rounded-md"
                           title="Excluir Venda"
                         >
@@ -330,6 +341,15 @@ export default function Sales() {
           </table>
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId && deleteMutation.mutate(deleteId)}
+        title="Excluir Venda"
+        message="Tem certeza que deseja excluir esta venda? O aparelho voltará para o estoque como disponível."
+        confirmText="Excluir"
+      />
     </div>
   );
 }

@@ -4,11 +4,13 @@ import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
 import { Plus, Trash2, Edit2 } from 'lucide-react';
 import { toast } from 'sonner';
+import ConfirmationModal from '../components/ui/ConfirmationModal';
 
 export default function PriceTable() {
   const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
   const [editingPrice, setEditingPrice] = useState<any>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const { data: prices = [], isLoading } = useQuery({
     queryKey: ['prices'],
@@ -144,9 +146,7 @@ export default function PriceTable() {
                         <Edit2 className="h-4 w-4" />
                       </button>
                       <button 
-                        onClick={() => {
-                          if(confirm('Tem certeza?')) deleteMutation.mutate(item.id);
-                        }}
+                        onClick={() => setDeleteId(item.id)}
                         className="text-destructive hover:bg-destructive/10 p-2 rounded-md transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -166,6 +166,15 @@ export default function PriceTable() {
           </table>
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId && deleteMutation.mutate(deleteId)}
+        title="Excluir Preço"
+        message="Tem certeza que deseja remover este item da tabela de preços? Esta ação não pode ser desfeita."
+        confirmText="Excluir"
+      />
     </div>
   );
 }

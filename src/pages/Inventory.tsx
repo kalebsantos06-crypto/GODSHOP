@@ -6,11 +6,13 @@ import { Plus, Trash2, Edit2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import ConfirmationModal from '../components/ui/ConfirmationModal';
 
 export default function Inventory() {
   const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
   const [editingIphone, setEditingIphone] = useState<any>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   
   const { data: iphones = [], isLoading } = useQuery({
     queryKey: ['iphones'],
@@ -189,9 +191,7 @@ export default function Inventory() {
                         <Edit2 className="h-4 w-4" />
                       </button>
                       <button 
-                        onClick={() => {
-                          if(confirm('Tem certeza?')) deleteMutation.mutate(iphone.id);
-                        }}
+                        onClick={() => setDeleteId(iphone.id)}
                         className="text-destructive hover:bg-destructive/10 p-2 rounded-md transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -211,6 +211,15 @@ export default function Inventory() {
           </table>
         </div>
       </div>
+
+      <ConfirmationModal
+        isOpen={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId && deleteMutation.mutate(deleteId)}
+        title="Excluir Aparelho"
+        message="Tem certeza que deseja remover este iPhone do estoque? Esta ação não pode ser desfeita."
+        confirmText="Excluir"
+      />
     </div>
   );
 }

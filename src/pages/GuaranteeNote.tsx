@@ -241,7 +241,7 @@ export default function GuaranteeNote() {
 
           <section className="bg-[#f9fafb] p-4 rounded-lg border border-[#e5e7eb] text-sm space-y-3">
             <h3 className="font-bold text-base mb-2">Termos e Condições de Garantia</h3>
-            <p>1. <strong>Prazo e Cobertura:</strong> Este aparelho possui garantia de 90 (noventa) dias, conforme o Código de Defesa do Consumidor, cobrindo exclusivamente defeitos de funcionamento de hardware decorrentes de vícios de fabricação, contados a partir da data de emissão deste termo.</p>
+            <p>1. <strong>Prazo e Cobertura:</strong> Este aparelho possui garantia de 6 (seis) meses, conforme o Código de Defesa do Consumidor, cobrindo exclusivamente defeitos de funcionamento de hardware decorrentes de vícios de fabricação, contados a partir da data de emissão deste termo.</p>
             <p>2. <strong>Exclusões:</strong> Esta garantia não cobre danos decorrentes de mau uso, negligência, acidentes, contato com líquidos (oxidação), quedas, quebra de tela, ou qualquer dano físico. Estão excluídos também danos causados por software de terceiros, modificações não autorizadas (jailbreak/root) e uso de acessórios não compatíveis ou não originais.</p>
             <p>3. <strong>Violação de Selos:</strong> A remoção, dano ou violação de selos de garantia ou de segurança implica na perda imediata da cobertura.</p>
             <p>4. <strong>Procedimento:</strong> Para acionar a garantia, é obrigatória a apresentação deste termo. O prazo para análise técnica é de até 30 (trinta) dias, conforme legislação vigente.</p>

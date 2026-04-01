@@ -3,11 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { Plus, Trash2, Building2, Edit2 } from 'lucide-react';
 import { toast } from 'sonner';
+import ConfirmationModal from '../components/ui/ConfirmationModal';
 
 export default function Suppliers() {
   const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<any>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   
   const { data: suppliers = [], isLoading } = useQuery({
     queryKey: ['suppliers'],
@@ -133,9 +135,7 @@ export default function Suppliers() {
                     <Edit2 className="h-4 w-4" />
                   </button>
                   <button 
-                    onClick={() => {
-                      if(confirm('Tem certeza?')) deleteMutation.mutate(supplier.id);
-                    }}
+                    onClick={() => setDeleteId(supplier.id)}
                     className="text-destructive hover:bg-destructive/10 p-1.5 rounded-md transition-colors"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -160,6 +160,15 @@ export default function Suppliers() {
           </div>
         )}
       </div>
+
+      <ConfirmationModal
+        isOpen={!!deleteId}
+        onClose={() => setDeleteId(null)}
+        onConfirm={() => deleteId && deleteMutation.mutate(deleteId)}
+        title="Excluir Fornecedor"
+        message="Tem certeza que deseja remover este fornecedor? Esta ação não pode ser desfeita."
+        confirmText="Excluir"
+      />
     </div>
   );
 }
