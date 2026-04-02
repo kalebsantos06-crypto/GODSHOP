@@ -116,34 +116,36 @@ export default function GuaranteeNote() {
       
       // 1. Carregar bibliotecas
       toast.loading('Carregando ferramentas...', { id: toastId });
-      const [{ jsPDF }, { toCanvas }] = await Promise.all([
+      const [{ jsPDF }, { toJpeg }] = await Promise.all([
         import('jspdf'),
         import('html-to-image')
       ]);
       
-      // 2. Capturar imagem
+      // 2. Capturar imagem (JPEG é mais leve e rápido para mobile)
       toast.loading('Capturando imagem...', { id: toastId });
       
-      // Pequeno delay para garantir renderização
+      // Pequeno delay para garantir renderização total
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      const canvas = await toCanvas(element, {
+      const imgData = await toJpeg(element, {
+        quality: 0.8,
         backgroundColor: '#ffffff',
-        pixelRatio: 1, // Escala 1 para ser rápido
-        skipFonts: false,
+        pixelRatio: 1.5, // Melhor qualidade sem pesar muito
       });
       
-      // 3. Criar PDF
+      // 3. Criar PDF (Usando formato A4 padrão para evitar erros de redimensionamento)
       toast.loading('Gerando arquivo PDF...', { id: toastId });
       
-      const imgData = canvas.toDataURL('image/jpeg', 0.6);
       const pdf = new jsPDF({
         orientation: 'portrait',
-        unit: 'px',
-        format: [canvas.width, canvas.height]
+        unit: 'mm',
+        format: 'a4'
       });
       
-      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
       
       const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `Garantia_${safeName}.pdf`;
@@ -153,84 +155,51 @@ export default function GuaranteeNote() {
       
       const pdfBlob = pdf.output('blob');
 
-      // Função auxiliar para download direto (mais compatível com WebViews)
-      const triggerDirectDownload = () => {
+      // Função para download direto (Fallback definitivo)
+      const triggerDownload = () => {
         try {
-          // 1. Tenta o método padrão do jsPDF (mais chance de passar o nome do arquivo)
+          // Tenta o método padrão do jsPDF
           pdf.save(fileName);
           toast.success('Download solicitado!', { id: toastId });
-        } catch (saveError) {
-          console.warn('pdf.save failed, trying manual link:', saveError);
-          try {
-            // 2. Tenta link com Blob URL
-            const blobUrl = URL.createObjectURL(pdfBlob);
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = fileName;
-            document.body.appendChild(link);
-            link.click();
-            
-            setTimeout(() => {
-              if (document.body.contains(link)) document.body.removeChild(link);
-              URL.revokeObjectURL(blobUrl);
-            }, 1000);
-            
-            toast.success('Download iniciado!', { id: toastId });
-          } catch (blobError) {
-            console.error('Blob download failed, trying Data URI:', blobError);
-            // 3. Tenta Data URI (último recurso, muito compatível com WebViews)
-            const dataUri = pdf.output('datauristring');
-            const link = document.createElement('a');
-            link.href = dataUri;
-            link.download = fileName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            toast.success('Download via Data URI!', { id: toastId });
-          }
+        } catch (e) {
+          console.warn('pdf.save failed, trying Data URI:', e);
+          // Fallback para Data URI (muito compatível com WebViews que bloqueiam Blobs)
+          const dataUri = pdf.output('datauristring');
+          const link = document.createElement('a');
+          link.href = dataUri;
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          toast.success('Download via link!', { id: toastId });
         }
       };
 
-      // Tenta compartilhar primeiro (permite escolher local no mobile)
-      // No Android WebView, navigator.share as vezes trava se não houver interação ou suporte incompleto
-      if (navigator.share && navigator.canShare) {
+      // No Android/WebView, o Share API é o método mais confiável para salvar com nome
+      if (navigator.share) {
         const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
         
-        if (navigator.canShare({ files: [file] })) {
-          try {
-            // Adicionamos um timeout para o share não travar a UI para sempre
-            const sharePromise = navigator.share({
-              files: [file],
-              title: `Garantia - ${client.name}`,
-              text: `Nota de Garantia - ${client.name}`
-            });
-
-            // Se o share demorar mais de 3 segundos sem resposta, tentamos o download direto
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout')), 3000)
-            );
-
-            await Promise.race([sharePromise, timeoutPromise]);
-            toast.success('Processo concluído!', { id: toastId });
-            setIsDownloading(false);
-            return;
-          } catch (shareError) {
-            console.warn('Share API failed or timed out, falling back:', shareError);
-            // Se não for cancelamento do usuário, tenta o download direto
-            if ((shareError as Error).name !== 'AbortError') {
-              toast.info('Iniciando download alternativo...', { id: toastId });
-              triggerDirectDownload();
-            } else {
-              toast.dismiss(toastId);
-            }
-            setIsDownloading(false);
-            return;
+        try {
+          // Tenta compartilhar. Isso abrirá o menu do Android onde o usuário pode escolher "Salvar no dispositivo"
+          // ou enviar diretamente para WhatsApp/Drive, o que evita o erro de "Save As" vazio.
+          await navigator.share({
+            files: [file],
+            title: `Garantia - ${client.name}`,
+          });
+          toast.success('Nota salva com sucesso!', { id: toastId });
+        } catch (shareError) {
+          // Se o usuário cancelar ou o WebView não suportar compartilhamento de arquivos
+          if ((shareError as Error).name !== 'AbortError') {
+            console.warn('Share failed, trying direct download:', shareError);
+            triggerDownload();
+          } else {
+            toast.dismiss(toastId);
           }
         }
+      } else {
+        // Se não houver Share API (Desktop ou navegadores antigos)
+        triggerDownload();
       }
-      
-      // Fallback: Download direto para Desktop ou WebViews sem Share funcional
-      triggerDirectDownload();
 
     } catch (error) {
       console.error('PDF Error:', error);
