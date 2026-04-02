@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { db } from '../services/db';
@@ -13,6 +13,12 @@ export default function GuaranteeNote() {
   const navigate = useNavigate();
   const printRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+
+  useEffect(() => {
+    // Pre-load libraries for faster PDF generation and better user gesture preservation
+    import('jspdf');
+    import('html2canvas');
+  }, []);
 
   const { data: sales = [], isLoading: isLoadingSales } = useQuery({
     queryKey: ['sales'],
@@ -99,70 +105,75 @@ export default function GuaranteeNote() {
     
     try {
       setIsDownloading(true);
-      toast.info('Gerando PDF para download...');
+      toast.info('Iniciando geração da nota...');
       
       const element = printRef.current;
       
-      const { jsPDF } = await import('jspdf');
-      const html2canvas = (await import('html2canvas')).default;
+      // Pre-import libraries
+      const [{ jsPDF }, html2canvas] = await Promise.all([
+        import('jspdf'),
+        import('html2canvas').then(m => m.default)
+      ]);
       
-      // Captura o elemento como canvas (mais estável no mobile)
+      toast.info('Processando imagem (isso pode levar alguns segundos)...');
+      
+      // Pequeno delay para garantir que o DOM esteja totalmente renderizado
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const canvas = await html2canvas(element, {
-        scale: 2,
+        scale: 1.5, // Reduzido de 2 para 1.5 para economizar memória no mobile
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
         onclone: (clonedDoc) => {
-          // Garante que o elemento clonado esteja visível e com fundo branco
           const el = clonedDoc.getElementById('guarantee-note-content');
           if (el instanceof HTMLElement) {
             el.style.display = 'block';
             el.style.backgroundColor = '#ffffff';
-            el.style.padding = '40px'; // Mantém o padding na captura
+            el.style.padding = '40px';
           }
         }
       });
       
-      const imgData = canvas.toDataURL('image/png');
+      toast.info('Convertendo para PDF...');
       
+      const imgData = canvas.toDataURL('image/jpeg', 0.8); // Usando JPEG com compressão para ser mais leve
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'px',
-        format: [canvas.width / 2, canvas.height / 2]
+        format: [canvas.width / 1.5, canvas.height / 1.5]
       });
       
-      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
+      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width / 1.5, canvas.height / 1.5);
       
       const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `Garantia_${safeName}.pdf`;
       
       // Tenta usar a Web Share API no mobile para permitir escolher onde salvar
-      const pdfBlob = pdf.output('blob');
-      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      if (navigator.share && navigator.canShare) {
         try {
-          await navigator.share({
-            files: [file],
-            title: `Garantia - ${client.name}`,
-            text: `Termo de Garantia de ${client.name}`
-          });
-          toast.success('Compartilhado com sucesso!');
-        } catch (shareError) {
-          // Se o usuário cancelar ou der erro no share, tenta o download direto
-          if ((shareError as Error).name !== 'AbortError') {
-            pdf.save(fileName);
-            toast.success('Download iniciado!');
+          const pdfBlob = pdf.output('blob');
+          const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+          
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: `Garantia - ${client.name}`,
+            });
+            toast.success('Nota compartilhada!');
+            return;
           }
+        } catch (shareError) {
+          console.warn('Share API failed, falling back to download:', shareError);
         }
-      } else {
-        // Fallback para download direto no desktop
-        pdf.save(fileName);
-        toast.success('Download concluído!');
       }
+      
+      // Fallback para download direto
+      pdf.save(fileName);
+      toast.success('Download concluído!');
     } catch (error) {
-      console.error(error);
-      toast.error('Erro ao gerar o PDF para download.');
+      console.error('PDF Generation Error:', error);
+      toast.error('Erro ao gerar nota. Tente novamente.');
     } finally {
       setIsDownloading(false);
     }
