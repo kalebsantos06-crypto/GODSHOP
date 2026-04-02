@@ -136,10 +136,30 @@ export default function GuaranteeNote() {
       const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `Garantia_${safeName}.pdf`;
       
-      // Download direto
-      pdf.save(fileName);
-      
-      toast.success('Download concluído!');
+      // Tenta usar a Web Share API no mobile para permitir escolher onde salvar
+      const pdfBlob = pdf.output('blob');
+      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Garantia - ${client.name}`,
+            text: `Termo de Garantia de ${client.name}`
+          });
+          toast.success('Compartilhado com sucesso!');
+        } catch (shareError) {
+          // Se o usuário cancelar ou der erro no share, tenta o download direto
+          if ((shareError as Error).name !== 'AbortError') {
+            pdf.save(fileName);
+            toast.success('Download iniciado!');
+          }
+        }
+      } else {
+        // Fallback para download direto no desktop
+        pdf.save(fileName);
+        toast.success('Download concluído!');
+      }
     } catch (error) {
       console.error(error);
       toast.error('Erro ao gerar o PDF para download.');

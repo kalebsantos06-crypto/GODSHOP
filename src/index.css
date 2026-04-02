@@ -140,6 +140,14 @@
   width: 8px;
   height: 8px;
 }
+
+@media (max-width: 768px) {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+}
+
 .custom-scrollbar::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.02);
 }
@@ -148,6 +156,11 @@
   border-radius: 10px;
   border: 2px solid transparent;
   background-clip: content-box;
+}
+@media (max-width: 768px) {
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+  }
 }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.3);
