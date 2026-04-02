@@ -156,26 +156,38 @@ export default function GuaranteeNote() {
       // Função auxiliar para download direto (mais compatível com WebViews)
       const triggerDirectDownload = () => {
         try {
-          const blobUrl = URL.createObjectURL(pdfBlob);
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = fileName;
-          document.body.appendChild(link);
-          link.click();
-          
-          // Limpeza
-          setTimeout(() => {
-            if (document.body.contains(link)) document.body.removeChild(link);
-            URL.revokeObjectURL(blobUrl);
-          }, 1000);
-          
-          toast.success('Download iniciado!', { id: toastId });
-        } catch (err) {
-          console.error('Direct download failed:', err);
-          // Última tentativa: abrir em nova aba
-          const blobUrl = URL.createObjectURL(pdfBlob);
-          window.open(blobUrl, '_blank');
-          toast.success('Nota aberta em nova aba!', { id: toastId });
+          // 1. Tenta o método padrão do jsPDF (mais chance de passar o nome do arquivo)
+          pdf.save(fileName);
+          toast.success('Download solicitado!', { id: toastId });
+        } catch (saveError) {
+          console.warn('pdf.save failed, trying manual link:', saveError);
+          try {
+            // 2. Tenta link com Blob URL
+            const blobUrl = URL.createObjectURL(pdfBlob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            
+            setTimeout(() => {
+              if (document.body.contains(link)) document.body.removeChild(link);
+              URL.revokeObjectURL(blobUrl);
+            }, 1000);
+            
+            toast.success('Download iniciado!', { id: toastId });
+          } catch (blobError) {
+            console.error('Blob download failed, trying Data URI:', blobError);
+            // 3. Tenta Data URI (último recurso, muito compatível com WebViews)
+            const dataUri = pdf.output('datauristring');
+            const link = document.createElement('a');
+            link.href = dataUri;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            toast.success('Download via Data URI!', { id: toastId });
+          }
         }
       };
 
@@ -193,9 +205,9 @@ export default function GuaranteeNote() {
               text: `Nota de Garantia - ${client.name}`
             });
 
-            // Se o share demorar mais de 6 segundos sem resposta, tentamos o download direto
+            // Se o share demorar mais de 3 segundos sem resposta, tentamos o download direto
             const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Timeout')), 6000)
+              setTimeout(() => reject(new Error('Timeout')), 3000)
             );
 
             await Promise.race([sharePromise, timeoutPromise]);
@@ -206,6 +218,7 @@ export default function GuaranteeNote() {
             console.warn('Share API failed or timed out, falling back:', shareError);
             // Se não for cancelamento do usuário, tenta o download direto
             if ((shareError as Error).name !== 'AbortError') {
+              toast.info('Iniciando download alternativo...', { id: toastId });
               triggerDirectDownload();
             } else {
               toast.dismiss(toastId);
