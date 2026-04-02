@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon } from 'lucide-react';
+import { LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp } from 'lucide-react';
 import { useAuth } from '../types/AuthContext';
 import { cn } from '../lib/utils';
 
 export default function Layout() {
   const location = useLocation();
   const { logout } = useAuth();
+  const mainRef = useRef<HTMLDivElement>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   
   const [bgImage, setBgImage] = useState<string>('/background.jpg');
   const [logoImage, setLogoImage] = useState<string | null>(null);
@@ -34,6 +36,30 @@ export default function Layout() {
       document.documentElement.classList.remove('dark');
     }
   }, [theme]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (mainRef.current) {
+        setShowScrollTop(mainRef.current.scrollTop > 300);
+      }
+    };
+
+    const mainElement = mainRef.current;
+    if (mainElement) {
+      mainElement.addEventListener('scroll', handleScroll);
+    }
+    return () => {
+      if (mainElement) {
+        mainElement.removeEventListener('scroll', handleScroll);
+      }
+    };
+  }, []);
+
+  const scrollToTop = () => {
+    if (mainRef.current) {
+      mainRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
 
   const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
 
@@ -153,11 +179,30 @@ export default function Layout() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-4 sm:p-8 relative z-10 overscroll-contain touch-pan-y scroll-smooth">
+      <main 
+        ref={mainRef}
+        className="flex-1 overflow-y-auto p-4 sm:p-8 relative z-10 touch-pan-y scroll-smooth custom-scrollbar"
+      >
         <div className="max-w-6xl mx-auto pb-24 sm:pb-6 animate-fade-in">
           <Outlet />
         </div>
       </main>
+
+      {/* Scroll to Top Button */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          className={cn(
+            "fixed bottom-24 right-6 z-[60] p-3 rounded-full shadow-2xl transition-all duration-300 animate-in fade-in slide-in-from-bottom-4",
+            theme === 'dark'
+              ? "bg-white/20 text-white hover:bg-white/30 backdrop-blur-md border border-white/10"
+              : "bg-black/10 text-slate-900 hover:bg-black/20 backdrop-blur-md border border-black/5"
+          )}
+          title="Voltar ao topo"
+        >
+          <ChevronUp className="h-6 w-6" />
+        </button>
+      )}
 
       {/* Bottom Navigation */}
       <nav className={cn(
