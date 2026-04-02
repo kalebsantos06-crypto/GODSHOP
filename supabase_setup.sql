@@ -1,5 +1,5 @@
 -- 1. Create Suppliers table
-CREATE TABLE suppliers (
+CREATE TABLE IF NOT EXISTS suppliers (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   contact TEXT,
@@ -7,7 +7,7 @@ CREATE TABLE suppliers (
 );
 
 -- 2. Create Clients table
-CREATE TABLE clients (
+CREATE TABLE IF NOT EXISTS clients (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
   phone TEXT,
@@ -20,7 +20,7 @@ CREATE TABLE clients (
 );
 
 -- 3. Create iPhones table
-CREATE TABLE iphones (
+CREATE TABLE IF NOT EXISTS iphones (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   model TEXT NOT NULL,
   storage TEXT NOT NULL,
@@ -33,12 +33,25 @@ CREATE TABLE iphones (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. Create Sales table
-CREATE TABLE sales (
+-- 4. Create Consoles table
+CREATE TABLE IF NOT EXISTS consoles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  model TEXT NOT NULL,
+  version TEXT NOT NULL,
+  buy_price DECIMAL(10, 2) NOT NULL,
+  buy_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  status TEXT DEFAULT 'disponivel' CHECK (status IN ('disponivel', 'vendido')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 5. Create Sales table
+CREATE TABLE IF NOT EXISTS sales (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   iphone_id UUID REFERENCES iphones(id) ON DELETE CASCADE,
+  console_id UUID REFERENCES consoles(id) ON DELETE CASCADE,
   client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
   sell_price DECIMAL(10, 2) NOT NULL,
+  down_payment DECIMAL(10, 2) DEFAULT 0,
   payment_method TEXT NOT NULL,
   sale_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   installments INTEGER DEFAULT 1,
@@ -46,11 +59,15 @@ CREATE TABLE sales (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 5. Create Prices table (Price Table feature)
-CREATE TABLE prices (
+-- 6. Create Prices table (Price Table feature)
+CREATE TABLE IF NOT EXISTS prices (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  category TEXT NOT NULL DEFAULT 'iphone' CHECK (category IN ('iphone', 'console')),
   model TEXT NOT NULL,
+  version TEXT,
   storage TEXT NOT NULL,
+  color TEXT,
+  condition TEXT,
   price DECIMAL(10, 2) NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
