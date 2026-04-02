@@ -15,22 +15,103 @@ export default function Dashboard() {
     queryFn: () => db.iphones.list(),
   });
 
+  const { data: consoles = [], isLoading: isLoadingConsoles } = useQuery({
+    queryKey: ['consoles'],
+    queryFn: () => db.consoles.list(),
+  });
+
   const { data: sales = [], isLoading: isLoadingSales } = useQuery({
     queryKey: ['sales'],
     queryFn: () => db.sales.list(),
   });
 
-  const availableCount = iphones.filter(p => p.status === 'disponivel').length;
-  const soldCount = iphones.filter(p => p.status === 'vendido').length;
+  const availableIphones = iphones.filter(p => p.status === 'disponivel');
+  const availableConsoles = consoles.filter(p => p.status === 'disponivel');
+  const availableCount = availableIphones.length + availableConsoles.length;
+  
+  const soldIphones = iphones.filter(p => p.status === 'vendido');
+  const soldConsoles = consoles.filter(p => p.status === 'vendido');
+  const soldCount = soldIphones.length + soldConsoles.length;
   
   // Calculate profit
   const totalProfit = sales.reduce((sum, sale) => {
-    const iphone = iphones.find(i => i.id === sale.iphone_id);
-    if (iphone) {
-      return sum + (sale.sell_price - iphone.buy_price);
+    let buyPrice = 0;
+    if (sale.iphone_id) {
+      const iphone = iphones.find(i => i.id === sale.iphone_id);
+      if (iphone) buyPrice = iphone.buy_price;
+    } else if (sale.console_id) {
+      const consoleItem = consoles.find(c => c.id === sale.console_id);
+      if (consoleItem) buyPrice = consoleItem.buy_price;
     }
-    return sum;
+    return sum + (sale.sell_price - buyPrice);
   }, 0);
+
+  // Previews
+  const profitPreview = sales.slice(0, 3).map(sale => {
+    let label = 'Venda';
+    let buyPrice = 0;
+    if (sale.iphone_id) {
+      const item = iphones.find(i => i.id === sale.iphone_id);
+      label = item ? `${item.model} ${item.storage}` : 'iPhone';
+      buyPrice = item?.buy_price || 0;
+    } else if (sale.console_id) {
+      const item = consoles.find(c => c.id === sale.console_id);
+      label = item ? `${item.model} ${item.version}` : 'Console';
+      buyPrice = item?.buy_price || 0;
+    }
+    return {
+      label,
+      value: formatBRL(sale.sell_price - buyPrice),
+      sublabel: format(new Date(sale.sale_date), 'dd/MM')
+    };
+  });
+
+  const salesPreview = sales.slice(0, 3).map(sale => {
+    let label = 'Venda';
+    if (sale.iphone_id) {
+      const item = iphones.find(i => i.id === sale.iphone_id);
+      label = item ? `${item.model}` : 'iPhone';
+    } else if (sale.console_id) {
+      const item = consoles.find(c => c.id === sale.console_id);
+      label = item ? `${item.model}` : 'Console';
+    }
+    return {
+      label,
+      value: formatBRL(sale.sell_price),
+      sublabel: sale.payment_method
+    };
+  });
+
+  const stockPreview = [...availableIphones, ...availableConsoles]
+    .sort((a, b) => new Date(b.buy_date).getTime() - new Date(a.buy_date).getTime())
+    .slice(0, 3)
+    .map(item => ({
+      label: item.model,
+      value: 'Disponível',
+      sublabel: 'storage' in item ? item.storage : item.version
+    }));
+
+  const avgProfitPreview = Array.from(new Set([...iphones, ...consoles].map(i => i.model)))
+    .map(model => {
+      const modelSales = sales.filter(s => {
+        const item = s.iphone_id ? iphones.find(i => i.id === s.iphone_id) : consoles.find(c => c.id === s.console_id);
+        return item?.model === model;
+      });
+      if (modelSales.length === 0) return null;
+      const profit = modelSales.reduce((sum, s) => {
+        const item = s.iphone_id ? iphones.find(i => i.id === s.iphone_id) : consoles.find(c => c.id === s.console_id);
+        return sum + (s.sell_price - (item?.buy_price || 0));
+      }, 0);
+      return { model, avg: profit / modelSales.length };
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b?.avg || 0) - (a?.avg || 0))
+    .slice(0, 3)
+    .map(item => ({
+      label: item!.model,
+      value: formatBRL(item!.avg),
+      sublabel: 'Média por modelo'
+    }));
 
   // Monthly profit data for last 6 months
   const now = new Date();
@@ -47,8 +128,15 @@ export default function Dashboard() {
       return d >= monthStart && d <= monthEnd;
     });
     const profit = monthSales.reduce((sum, sale) => {
-      const iphone = iphones.find(i => i.id === sale.iphone_id);
-      return sum + (iphone ? sale.sell_price - iphone.buy_price : 0);
+      let buyPrice = 0;
+      if (sale.iphone_id) {
+        const item = iphones.find(i => i.id === sale.iphone_id);
+        if (item) buyPrice = item.buy_price;
+      } else if (sale.console_id) {
+        const item = consoles.find(c => c.id === sale.console_id);
+        if (item) buyPrice = item.buy_price;
+      }
+      return sum + (sale.sell_price - buyPrice);
     }, 0);
     return {
       name: format(month, 'MMM', { locale: ptBR }),
@@ -56,7 +144,7 @@ export default function Dashboard() {
     };
   });
 
-  if (isLoadingIphones || isLoadingSales) {
+  if (isLoadingIphones || isLoadingSales || isLoadingConsoles) {
     return (
       <div className="flex h-[50vh] items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -71,11 +159,11 @@ export default function Dashboard() {
         <p className="text-muted-foreground text-sm mt-1">Visão geral do seu negócio</p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Lucro Total" value={formatBRL(totalProfit)} icon={DollarSign} color="green" />
-        <StatCard title="Vendas Realizadas" value={soldCount} icon={ShoppingCart} color="primary" />
-        <StatCard title="Em Estoque" value={availableCount} icon={Smartphone} color="yellow" />
-        <StatCard title="Lucro Médio" value={formatBRL(sales.length ? totalProfit / sales.length : 0)} icon={TrendingUp} color="primary" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard title="Lucro Total" value={formatBRL(totalProfit)} icon={DollarSign} color="green" preview={profitPreview} />
+        <StatCard title="Vendas Realizadas" value={soldCount} icon={ShoppingCart} color="primary" preview={salesPreview} />
+        <StatCard title="Em Estoque" value={availableCount} icon={Smartphone} color="yellow" preview={stockPreview} />
+        <StatCard title="Lucro Médio" value={formatBRL(sales.length ? totalProfit / sales.length : 0)} icon={TrendingUp} color="primary" preview={avgProfitPreview} />
       </div>
 
       <Card>

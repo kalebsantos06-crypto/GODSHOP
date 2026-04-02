@@ -24,12 +24,17 @@ export default function GuaranteeNote() {
     queryFn: () => db.iphones.list(),
   });
 
+  const { data: consoles = [], isLoading: isLoadingConsoles } = useQuery({
+    queryKey: ['consoles'],
+    queryFn: () => db.consoles.list(),
+  });
+
   const { data: clients = [], isLoading: isLoadingClients } = useQuery({
     queryKey: ['clients'],
     queryFn: () => db.clients.list(),
   });
 
-  if (isLoadingSales || isLoadingIphones || isLoadingClients) {
+  if (isLoadingSales || isLoadingIphones || isLoadingConsoles || isLoadingClients) {
     return <div>Carregando...</div>;
   }
 
@@ -40,6 +45,7 @@ export default function GuaranteeNote() {
   const endDate = addMonths(saleDate, 6);
 
   const iphone = iphones.find(i => i.id === sale.iphone_id);
+  const consoleItem = consoles.find(c => c.id === sale.console_id);
   const client = clients.find(c => c.id === sale.client_id);
 
   const handlePrint = () => {
@@ -213,13 +219,24 @@ export default function GuaranteeNote() {
           </section>
 
           <section>
-            <h2 className="text-lg font-bold border-b border-[#d1d5db] mb-3 pb-1">Detalhes do Aparelho</h2>
+            <h2 className="text-lg font-bold border-b border-[#d1d5db] mb-3 pb-1">
+              Detalhes do {iphone ? 'Aparelho' : 'Console'}
+            </h2>
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <p><span className="font-semibold">Modelo:</span> {iphone?.model}</p>
-              <p><span className="font-semibold">IMEI / Serial:</span> <span className="font-mono">{iphone?.imei || 'N/A'}</span></p>
-              <p><span className="font-semibold">Armazenamento:</span> {iphone?.storage}</p>
-              <p><span className="font-semibold">Cor:</span> {iphone?.color}</p>
-              <p><span className="font-semibold">Status:</span> Seminovo/Usado</p>
+              {iphone ? (
+                <>
+                  <p><span className="font-semibold">Modelo:</span> {iphone.model}</p>
+                  <p><span className="font-semibold">IMEI / Serial:</span> <span className="font-mono">{iphone.imei || 'N/A'}</span></p>
+                  <p><span className="font-semibold">Armazenamento:</span> {iphone.storage}</p>
+                  <p><span className="font-semibold">Cor:</span> {iphone.color}</p>
+                  <p><span className="font-semibold">Status:</span> Seminovo/Usado</p>
+                </>
+              ) : (
+                <>
+                  <p><span className="font-semibold">Modelo:</span> {consoleItem?.model}</p>
+                  <p><span className="font-semibold">Versão:</span> {consoleItem?.version}</p>
+                </>
+              )}
             </div>
           </section>
 
@@ -248,7 +265,10 @@ export default function GuaranteeNote() {
             <p>2. <strong>Exclusões:</strong> Esta garantia não cobre danos decorrentes de mau uso, negligência, acidentes, contato com líquidos (oxidação), quedas, quebra de tela, ou qualquer dano físico. Estão excluídos também danos causados por software de terceiros, modificações não autorizadas (jailbreak/root) e uso de acessórios não compatíveis ou não originais.</p>
             <p>3. <strong>Violação de Selos:</strong> A remoção, dano ou violação de selos de garantia ou de segurança implica na perda imediata da cobertura.</p>
             <p>4. <strong>Procedimento:</strong> Para acionar a garantia, é obrigatória a apresentação deste termo. O prazo para análise técnica é de até 30 (trinta) dias, conforme legislação vigente.</p>
-            <p>5. <strong>Limitação de Responsabilidade:</strong> A GODSHOP não se responsabiliza por perda de dados ou informações pessoais contidas no aparelho. Recomendamos a realização de backup prévio.</p>
+            {iphone && (
+              <p>5. <strong>Brindes:</strong> O aparelho acompanha os seguintes brindes: fone de ouvido, capinha, película e carregador. É de exclusiva responsabilidade do cliente conferir a presença e integridade destes itens no ato da retirada do produto. Não serão fornecidos brindes posteriormente à saída do produto da loja caso não tenham sido verificados no momento da compra.</p>
+            )}
+            <p>{iphone ? '6' : '5'}. <strong>Limitação de Responsabilidade:</strong> A GODSHOP não se responsabiliza por perda de dados ou informações pessoais contidas no aparelho. Recomendamos a realização de backup prévio.</p>
           </section>
 
           <div className="pt-16 grid grid-cols-2 gap-8 text-center">

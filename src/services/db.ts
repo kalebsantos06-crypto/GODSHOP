@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { iPhone, Client, Supplier, Sale, PriceTableItem } from '../types';
+import { iPhone, Client, Supplier, Sale, PriceTableItem, Console } from '../types';
 
 export const db = {
   prices: {
@@ -82,6 +82,26 @@ export const db = {
       if (error) throw error;
     }
   },
+  consoles: {
+    list: async () => {
+      const { data, error } = await supabase.from('consoles').select('*').order('buy_date', { ascending: false });
+      if (error) throw error;
+      return data as Console[];
+    },
+    create: async (data: Omit<Console, 'id'>) => {
+      const { data: newItem, error } = await supabase.from('consoles').insert(data).select().single();
+      if (error) throw error;
+      return newItem as Console;
+    },
+    update: async (id: string, data: Partial<Console>) => {
+      const { error } = await supabase.from('consoles').update(data).eq('id', id);
+      if (error) throw error;
+    },
+    delete: async (id: string) => {
+      const { error } = await supabase.from('consoles').delete().eq('id', id);
+      if (error) throw error;
+    }
+  },
   sales: {
     list: async () => {
       const { data, error } = await supabase.from('sales').select('*').order('sale_date', { ascending: false });
@@ -94,38 +114,54 @@ export const db = {
       if (saleError) throw saleError;
       
       // 2. Update iPhone status to 'vendido'
-      const { error: iphoneError } = await supabase.from('iphones').update({ status: 'vendido' }).eq('id', data.iphone_id);
-      if (iphoneError) throw iphoneError;
+      if (data.iphone_id) {
+        const { error: iphoneError } = await supabase.from('iphones').update({ status: 'vendido' }).eq('id', data.iphone_id);
+        if (iphoneError) throw iphoneError;
+      }
+      
+      // 3. Update Console status to 'vendido'
+      if (data.console_id) {
+        const { error: consoleError } = await supabase.from('consoles').update({ status: 'vendido' }).eq('id', data.console_id);
+        if (consoleError) throw consoleError;
+      }
       
       return newItem as Sale;
     },
     update: async (id: string, data: Partial<Sale>) => {
-      // Get old sale to check if iphone_id changed
-      const { data: oldSale, error: getError } = await supabase.from('sales').select('iphone_id').eq('id', id).single();
+      // Get old sale to check if iphone_id or console_id changed
+      const { data: oldSale, error: getError } = await supabase.from('sales').select('iphone_id, console_id').eq('id', id).single();
       if (getError) throw getError;
 
       if (data.iphone_id && oldSale.iphone_id !== data.iphone_id) {
         // Revert old iPhone status
-        await supabase.from('iphones').update({ status: 'disponivel' }).eq('id', oldSale.iphone_id);
+        if (oldSale.iphone_id) await supabase.from('iphones').update({ status: 'disponivel' }).eq('id', oldSale.iphone_id);
         // Update new iPhone status
         await supabase.from('iphones').update({ status: 'vendido' }).eq('id', data.iphone_id);
+      }
+
+      if (data.console_id && oldSale.console_id !== data.console_id) {
+        // Revert old Console status
+        if (oldSale.console_id) await supabase.from('consoles').update({ status: 'disponivel' }).eq('id', oldSale.console_id);
+        // Update new Console status
+        await supabase.from('consoles').update({ status: 'vendido' }).eq('id', data.console_id);
       }
 
       const { error } = await supabase.from('sales').update(data).eq('id', id);
       if (error) throw error;
     },
     delete: async (id: string) => {
-      // Get sale to revert iPhone status
-      const { data: sale, error: getError } = await supabase.from('sales').select('iphone_id').eq('id', id).single();
+      // Get sale to revert iPhone/Console status
+      const { data: sale, error: getError } = await supabase.from('sales').select('iphone_id, console_id').eq('id', id).single();
       if (getError) throw getError;
       
       if (sale) {
-        await supabase.from('iphones').update({ status: 'disponivel' }).eq('id', sale.iphone_id);
+        if (sale.iphone_id) await supabase.from('iphones').update({ status: 'disponivel' }).eq('id', sale.iphone_id);
+        if (sale.console_id) await supabase.from('consoles').update({ status: 'disponivel' }).eq('id', sale.console_id);
       }
       
       const { error } = await supabase.from('sales').delete().eq('id', id);
       if (error) throw error;
     }
-  }
+  },
 };
 

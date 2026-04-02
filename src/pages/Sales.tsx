@@ -8,6 +8,7 @@ import { format, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Link } from 'react-router-dom';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
+import { Console } from '../types';
 
 export default function Sales() {
   const queryClient = useQueryClient();
@@ -28,6 +29,11 @@ export default function Sales() {
   const { data: iphones = [] } = useQuery({
     queryKey: ['iphones'],
     queryFn: () => db.iphones.list(),
+  });
+
+  const { data: consoles = [] } = useQuery({
+    queryKey: ['consoles'],
+    queryFn: () => db.consoles.list(),
   });
 
   const { data: clients = [] } = useQuery({
@@ -71,7 +77,8 @@ export default function Sales() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     addMutation.mutate({
-      iphone_id: formData.get('iphone_id'),
+      iphone_id: formData.get('iphone_id') || undefined,
+      console_id: formData.get('console_id') || undefined,
       client_id: formData.get('client_id'),
       sell_price: Number(formData.get('sell_price')),
       down_payment: Number(formData.get('down_payment')) || 0,
@@ -89,7 +96,8 @@ export default function Sales() {
     updateMutation.mutate({
       id: editingSale.id,
       data: {
-        iphone_id: formData.get('iphone_id'),
+        iphone_id: formData.get('iphone_id') || undefined,
+        console_id: formData.get('console_id') || undefined,
         client_id: formData.get('client_id'),
         sell_price: Number(formData.get('sell_price')),
         down_payment: Number(formData.get('down_payment')) || 0,
@@ -102,6 +110,7 @@ export default function Sales() {
   };
 
   const availableIphones = iphones.filter(i => i.status === 'disponivel');
+  const availableConsoles = consoles.filter(c => c.status === 'disponivel');
 
   const filteredSales = sales.filter(sale => {
     if (!startDate || !endDate) return true;
@@ -150,15 +159,29 @@ export default function Sales() {
           <form onSubmit={editingSale ? handleUpdate : handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Aparelho</label>
-              <select name="iphone_id" defaultValue={editingSale?.iphone_id} required className="w-full p-2 border rounded-md bg-background">
+              <select name="iphone_id" defaultValue={editingSale?.iphone_id} className="w-full p-2 border rounded-md bg-background">
                 <option value="">Selecione...</option>
-                {editingSale && iphones.find(i => i.id === editingSale.iphone_id) && (
+                {editingSale?.iphone_id && iphones.find(i => i.id === editingSale.iphone_id) && (
                   <option value={editingSale.iphone_id}>
                     {iphones.find(i => i.id === editingSale.iphone_id)?.model} - {iphones.find(i => i.id === editingSale.iphone_id)?.storage} (Atual)
                   </option>
                 )}
                 {availableIphones.map(i => (
                   <option key={i.id} value={i.id}>{i.model} - {i.storage} ({i.color})</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Console</label>
+              <select name="console_id" defaultValue={editingSale?.console_id} className="w-full p-2 border rounded-md bg-background">
+                <option value="">Selecione...</option>
+                {editingSale?.console_id && consoles.find(c => c.id === editingSale.console_id) && (
+                  <option value={editingSale.console_id}>
+                    {consoles.find(c => c.id === editingSale.console_id)?.model} - {consoles.find(c => c.id === editingSale.console_id)?.version} (Atual)
+                  </option>
+                )}
+                {availableConsoles.map(c => (
+                  <option key={c.id} value={c.id}>{c.model} - {c.version}</option>
                 ))}
               </select>
             </div>
@@ -294,14 +317,15 @@ export default function Sales() {
             <tbody className="divide-y">
               {filteredSales.map((sale) => {
                 const iphone = iphones.find(i => i.id === sale.iphone_id);
+                const console = consoles.find(c => c.id === sale.console_id);
                 const client = clients.find(c => c.id === sale.client_id);
-                const profit = iphone ? sale.sell_price - iphone.buy_price : 0;
+                const profit = iphone ? sale.sell_price - iphone.buy_price : (console ? sale.sell_price - console.buy_price : 0);
                 const remaining = sale.sell_price - (sale.down_payment || 0);
 
                 return (
                   <tr key={sale.id} className="hover:bg-muted/50">
                     <td className="px-4 py-3">{format(new Date(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</td>
-                    <td className="px-4 py-3 font-medium">{iphone ? `${iphone.model} ${iphone.storage}` : 'N/A'}</td>
+                    <td className="px-4 py-3 font-medium">{iphone ? `${iphone.model} ${iphone.storage}` : (console ? `${console.model} - ${console.version}` : 'N/A')}</td>
                     <td className="px-4 py-3">{client?.name || 'N/A'}</td>
                     <td className="px-4 py-3">
                       {formatBRL(sale.sell_price)}

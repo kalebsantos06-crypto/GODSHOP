@@ -27,9 +27,19 @@ export interface Supplier {
   contact: string;
 }
 
+export interface Console {
+  id: string;
+  model: string;
+  version: string;
+  buy_price: number;
+  buy_date: string;
+  status: 'disponivel' | 'vendido';
+}
+
 export interface Sale {
   id: string;
-  iphone_id: string;
+  iphone_id?: string;
+  console_id?: string;
   client_id: string;
   sell_price: number;
   payment_method: string;
@@ -41,7 +51,11 @@ export interface Sale {
 
 export interface PriceTableItem {
   id: string;
+  category: 'iphone' | 'console';
   model: string;
+  version?: string;
   storage: string;
+  color?: string;
+  condition?: string;
   price: number;
 }
