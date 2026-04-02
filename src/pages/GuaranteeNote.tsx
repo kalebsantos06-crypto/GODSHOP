@@ -106,6 +106,9 @@ export default function GuaranteeNote() {
     const toastId = toast.loading('Iniciando geração da nota...');
     setIsDownloading(true);
     
+    // Guardar título original para restaurar depois
+    const originalTitle = document.title;
+    
     try {
       const element = document.getElementById('guarantee-note-content');
       if (!element) {
@@ -121,19 +124,18 @@ export default function GuaranteeNote() {
         import('html-to-image')
       ]);
       
-      // 2. Capturar imagem (JPEG é mais leve e rápido para mobile)
+      // 2. Capturar imagem
       toast.loading('Capturando imagem...', { id: toastId });
       
-      // Pequeno delay para garantir renderização total
       await new Promise(resolve => setTimeout(resolve, 300));
       
       const imgData = await toJpeg(element, {
         quality: 0.8,
         backgroundColor: '#ffffff',
-        pixelRatio: 1.5, // Melhor qualidade sem pesar muito
+        pixelRatio: 1.5,
       });
       
-      // 3. Criar PDF (Usando formato A4 padrão para evitar erros de redimensionamento)
+      // 3. Criar PDF
       toast.loading('Gerando arquivo PDF...', { id: toastId });
       
       const pdf = new jsPDF({
@@ -150,59 +152,66 @@ export default function GuaranteeNote() {
       const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `Garantia_${safeName}.pdf`;
       
+      // Mudar o título da página temporariamente (alguns WebViews usam isso como nome do arquivo)
+      document.title = fileName;
+      
       // 4. Finalizar e Enviar
       toast.loading('Finalizando...', { id: toastId });
       
-      const pdfBlob = pdf.output('blob');
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-      // Função para download direto (Fallback definitivo)
-      const triggerDownload = () => {
-        try {
-          // Tenta o método padrão do jsPDF
-          pdf.save(fileName);
-          toast.success('Download solicitado!', { id: toastId });
-        } catch (e) {
-          console.warn('pdf.save failed, trying Data URI:', e);
-          // Fallback para Data URI (muito compatível com WebViews que bloqueiam Blobs)
-          const dataUri = pdf.output('datauristring');
-          const link = document.createElement('a');
-          link.href = dataUri;
-          link.download = fileName;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          toast.success('Download via link!', { id: toastId });
-        }
-      };
-
-      // No Android/WebView, o Share API é o método mais confiável para salvar com nome
-      if (navigator.share) {
+      if (isMobile && navigator.share) {
+        const pdfBlob = pdf.output('blob');
         const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
         
         try {
-          // Tenta compartilhar. Isso abrirá o menu do Android onde o usuário pode escolher "Salvar no dispositivo"
-          // ou enviar diretamente para WhatsApp/Drive, o que evita o erro de "Save As" vazio.
-          await navigator.share({
-            files: [file],
-            title: `Garantia - ${client.name}`,
-          });
-          toast.success('Nota salva com sucesso!', { id: toastId });
-        } catch (shareError) {
-          // Se o usuário cancelar ou o WebView não suportar compartilhamento de arquivos
-          if ((shareError as Error).name !== 'AbortError') {
-            console.warn('Share failed, trying direct download:', shareError);
-            triggerDownload();
-          } else {
-            toast.dismiss(toastId);
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: `Garantia - ${client.name}`,
+            });
+            toast.success('Nota compartilhada!', { id: toastId });
+            document.title = originalTitle;
+            setIsDownloading(false);
+            return;
           }
+        } catch (shareError) {
+          if ((shareError as Error).name === 'AbortError') {
+            toast.dismiss(toastId);
+            document.title = originalTitle;
+            setIsDownloading(false);
+            return;
+          }
+          console.warn('Share failed, falling back to download:', shareError);
         }
-      } else {
-        // Se não houver Share API (Desktop ou navegadores antigos)
-        triggerDownload();
+      }
+
+      // Fallback para download direto
+      try {
+        // O pdf.save do jsPDF é o que tem melhor suporte a nomes de arquivos
+        pdf.save(fileName);
+        toast.success('Download iniciado!', { id: toastId });
+        
+        // Restaurar título após um tempo
+        setTimeout(() => {
+          document.title = originalTitle;
+        }, 3000);
+      } catch (saveError) {
+        console.error('Standard save failed, trying Data URI:', saveError);
+        const dataUri = pdf.output('datauristring').replace('application/pdf', 'application/octet-stream');
+        const link = document.createElement('a');
+        link.href = dataUri;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        document.title = originalTitle;
+        toast.success('Download via link!', { id: toastId });
       }
 
     } catch (error) {
       console.error('PDF Error:', error);
+      document.title = originalTitle;
       toast.error('Erro ao gerar nota. Tente novamente.', { id: toastId });
     } finally {
       setIsDownloading(false);
