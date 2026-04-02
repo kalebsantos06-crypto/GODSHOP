@@ -58,11 +58,11 @@ export default function Settings() {
             Logo do Aplicativo
           </h2>
           <div className="flex flex-col items-center gap-4">
-            <div className="h-24 w-24 rounded-xl border-2 border-dashed border-muted-foreground/25 flex items-center justify-center bg-muted/50 overflow-hidden">
+            <div className="h-32 w-32 rounded-2xl border-2 border-dashed border-muted-foreground/25 flex items-center justify-center bg-muted/50 overflow-hidden shadow-inner">
               {logoPreview ? (
-                <img src={logoPreview} alt="Logo Preview" className="h-full w-full object-contain" />
+                <img src={logoPreview} alt="Logo Preview" className="h-full w-full object-cover" />
               ) : (
-                <Smartphone className="h-8 w-8 text-muted-foreground" />
+                <Smartphone className="h-10 w-10 text-muted-foreground opacity-50" />
               )}
             </div>
             <div className="flex gap-2 w-full">

@@ -46,10 +46,14 @@ export default function Sales() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['iphones'] });
+      queryClient.invalidateQueries({ queryKey: ['consoles'] });
       setIsAdding(false);
       toast.success('Venda registrada com sucesso!');
     },
-    onError: () => toast.error('Erro ao registrar venda.')
+    onError: (error: any) => {
+      console.error('Erro ao registrar venda:', error);
+      toast.error(`Erro ao registrar venda: ${error.message || 'Erro desconhecido'}`);
+    }
   });
 
   const updateMutation = useMutation({
@@ -57,10 +61,14 @@ export default function Sales() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['iphones'] });
+      queryClient.invalidateQueries({ queryKey: ['consoles'] });
       setEditingSale(null);
       toast.success('Venda atualizada com sucesso!');
     },
-    onError: () => toast.error('Erro ao atualizar venda.')
+    onError: (error: any) => {
+      console.error('Erro ao atualizar venda:', error);
+      toast.error(`Erro ao atualizar venda: ${error.message || 'Erro desconhecido'}`);
+    }
   });
 
   const deleteMutation = useMutation({
@@ -68,6 +76,7 @@ export default function Sales() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['iphones'] });
+      queryClient.invalidateQueries({ queryKey: ['consoles'] });
       toast.success('Venda excluída com sucesso!');
     },
     onError: () => toast.error('Erro ao excluir venda.')
@@ -76,9 +85,12 @@ export default function Sales() {
   const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const iphoneId = formData.get('iphone_id');
+    const consoleId = formData.get('console_id');
+
     addMutation.mutate({
-      iphone_id: formData.get('iphone_id') || undefined,
-      console_id: formData.get('console_id') || undefined,
+      iphone_id: iphoneId ? iphoneId.toString() : null,
+      console_id: consoleId ? consoleId.toString() : null,
       client_id: formData.get('client_id'),
       sell_price: Number(formData.get('sell_price')),
       down_payment: Number(formData.get('down_payment')) || 0,
@@ -93,11 +105,14 @@ export default function Sales() {
     e.preventDefault();
     if (!editingSale) return;
     const formData = new FormData(e.currentTarget);
+    const iphoneId = formData.get('iphone_id');
+    const consoleId = formData.get('console_id');
+
     updateMutation.mutate({
       id: editingSale.id,
       data: {
-        iphone_id: formData.get('iphone_id') || undefined,
-        console_id: formData.get('console_id') || undefined,
+        iphone_id: iphoneId ? iphoneId.toString() : null,
+        console_id: consoleId ? consoleId.toString() : null,
         client_id: formData.get('client_id'),
         sell_price: Number(formData.get('sell_price')),
         down_payment: Number(formData.get('down_payment')) || 0,

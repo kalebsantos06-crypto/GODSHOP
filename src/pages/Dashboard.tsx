@@ -153,24 +153,27 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground text-sm mt-1">Visão geral do seu negócio</p>
+    <div className="space-y-8 animate-slide-up">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">Dashboard</h1>
+        <p className="text-muted-foreground text-sm sm:text-base font-medium">Bem-vindo de volta! Aqui está o resumo do seu negócio.</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard title="Lucro Total" value={formatBRL(totalProfit)} icon={DollarSign} color="green" preview={profitPreview} />
         <StatCard title="Vendas Realizadas" value={soldCount} icon={ShoppingCart} color="primary" preview={salesPreview} />
         <StatCard title="Em Estoque" value={availableCount} icon={Smartphone} color="yellow" preview={stockPreview} />
         <StatCard title="Lucro Médio" value={formatBRL(sales.length ? totalProfit / sales.length : 0)} icon={TrendingUp} color="primary" preview={avgProfitPreview} />
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Lucro Mensal</CardTitle>
+      <Card className="border-none shadow-xl bg-background/60 backdrop-blur-md overflow-hidden">
+        <CardHeader className="pb-2 border-b border-border/50 bg-muted/20">
+          <CardTitle className="text-lg font-bold flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-primary" />
+            Desempenho de Lucro Mensal
+          </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <div className="w-full min-h-[300px]">
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
