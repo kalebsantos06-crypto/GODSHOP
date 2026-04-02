@@ -18,12 +18,17 @@ export default function Invoices() {
     queryFn: () => db.iphones.list(),
   });
 
+  const { data: consoles = [], isLoading: isLoadingConsoles } = useQuery({
+    queryKey: ['consoles'],
+    queryFn: () => db.consoles.list(),
+  });
+
   const { data: clients = [], isLoading: isLoadingClients } = useQuery({
     queryKey: ['clients'],
     queryFn: () => db.clients.list(),
   });
 
-  if (isLoadingSales || isLoadingIphones || isLoadingClients) {
+  if (isLoadingSales || isLoadingIphones || isLoadingConsoles || isLoadingClients) {
     return <div>Carregando...</div>;
   }
 
@@ -37,6 +42,7 @@ export default function Invoices() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {sales.map(sale => {
           const iphone = iphones.find(i => i.id === sale.iphone_id);
+          const consoleItem = consoles.find(c => c.id === sale.console_id);
           const client = clients.find(c => c.id === sale.client_id);
 
           return (
@@ -55,7 +61,9 @@ export default function Invoices() {
                 </div>
               </div>
               <div className="space-y-1 mb-6 text-sm">
-                <p><span className="font-medium">Aparelho:</span> {iphone?.model} {iphone?.storage}</p>
+                <p>
+                  <span className="font-medium">Item:</span> {iphone ? `${iphone.model} ${iphone.storage}` : (consoleItem ? `${consoleItem.model} ${consoleItem.version}` : 'N/A')}
+                </p>
                 <p><span className="font-medium">Valor:</span> {formatBRL(sale.sell_price)}</p>
                 <p>
                   <span className="font-medium">Pagamento:</span> {sale.payment_method}

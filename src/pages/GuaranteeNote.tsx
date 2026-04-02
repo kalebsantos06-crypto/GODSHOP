@@ -95,7 +95,7 @@ export default function GuaranteeNote() {
   };
 
   const handleDownloadPDF = async () => {
-    if (!printRef.current || !client || !iphone) return;
+    if (!printRef.current || !client || (!iphone && !consoleItem)) return;
     
     try {
       setIsDownloading(true);
@@ -104,53 +104,40 @@ export default function GuaranteeNote() {
       const element = printRef.current;
       
       const { jsPDF } = await import('jspdf');
-      const { toPng } = await import('html-to-image');
+      const html2canvas = (await import('html2canvas')).default;
       
-      const imgData = await toPng(element, {
+      // Captura o elemento como canvas (mais estável no mobile)
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
         backgroundColor: '#ffffff',
-        pixelRatio: 2,
-        skipFonts: true,
-        style: {
-          transform: 'scale(1)',
-          transformOrigin: 'top left'
+        logging: false,
+        onclone: (clonedDoc) => {
+          // Garante que o elemento clonado esteja visível e com fundo branco
+          const el = clonedDoc.getElementById('guarantee-note-content');
+          if (el instanceof HTMLElement) {
+            el.style.display = 'block';
+            el.style.backgroundColor = '#ffffff';
+            el.style.padding = '40px'; // Mantém o padding na captura
+          }
         }
       });
+      
+      const imgData = canvas.toDataURL('image/png');
       
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'px',
-        format: [element.offsetWidth, element.offsetHeight]
+        format: [canvas.width / 2, canvas.height / 2]
       });
       
-      pdf.addImage(imgData, 'PNG', 0, 0, element.offsetWidth, element.offsetHeight);
+      pdf.addImage(imgData, 'PNG', 0, 0, canvas.width / 2, canvas.height / 2);
       
-      // Gera o blob explicitamente como PDF
-      const pdfBlob = pdf.output('blob');
-      const blob = new Blob([pdfBlob], { type: 'application/pdf' });
-      
-      // Limpa o nome do arquivo para evitar caracteres especiais que quebram a extensão
       const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `Garantia_${safeName}.pdf`;
       
-      // Cria a URL do objeto
-      const url = window.URL.createObjectURL(blob);
-      
-      // Cria o link de download forçado
-      const link = document.createElement('a');
-      link.style.display = 'none';
-      link.href = url;
-      link.download = fileName;
-      link.type = 'application/pdf';
-      link.target = '_blank'; // Fallback: se o download for bloqueado, abre em nova aba
-      
-      document.body.appendChild(link);
-      link.click();
-      
-      // Limpeza
-      setTimeout(() => {
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      }, 500);
+      // Download direto
+      pdf.save(fileName);
       
       toast.success('Download concluído!');
     } catch (error) {
@@ -193,6 +180,7 @@ export default function GuaranteeNote() {
 
       <div className="bg-[#ffffff] border shadow-sm rounded-xl print:shadow-none print:border-none">
         <div 
+          id="guarantee-note-content"
           ref={printRef}
           className="text-[#000000] p-10 print:p-0 bg-[#ffffff]"
         >
