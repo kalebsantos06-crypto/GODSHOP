@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
-import { Plus, Trash2, Phone, Edit2 } from 'lucide-react';
+import { Plus, Trash2, Phone, Edit2, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
 
@@ -11,10 +11,18 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState<any>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   
+  const [searchTerm, setSearchTerm] = useState('');
+  
   const { data: clients = [], isLoading } = useQuery({
     queryKey: ['clients'],
     queryFn: () => db.clients.list(),
   });
+
+  const filteredClients = clients.filter(client => 
+    client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    client.phone.includes(searchTerm) ||
+    (client.cpf && client.cpf.includes(searchTerm))
+  );
 
   const { data: sales = [] } = useQuery({
     queryKey: ['sales'],
@@ -57,7 +65,10 @@ export default function Clients() {
       phone: formData.get('phone') as string,
       cpf: formData.get('cpf') as string || undefined,
       email: formData.get('email') as string || undefined,
-      address: formData.get('address') as string || undefined,
+      street: formData.get('street') as string || undefined,
+      number: formData.get('number') as string || undefined,
+      neighborhood: formData.get('neighborhood') as string || undefined,
+      complement: formData.get('complement') as string || undefined,
       city: formData.get('city') as string || undefined,
       state: formData.get('state') as string || undefined,
     };
@@ -73,7 +84,10 @@ export default function Clients() {
       phone: formData.get('phone') as string,
       cpf: formData.get('cpf') as string || undefined,
       email: formData.get('email') as string || undefined,
-      address: formData.get('address') as string || undefined,
+      street: formData.get('street') as string || undefined,
+      number: formData.get('number') as string || undefined,
+      neighborhood: formData.get('neighborhood') as string || undefined,
+      complement: formData.get('complement') as string || undefined,
       city: formData.get('city') as string || undefined,
       state: formData.get('state') as string || undefined,
     };
@@ -104,6 +118,19 @@ export default function Clients() {
         </button>
       </div>
 
+      <div className="relative">
+        <input
+          type="text"
+          placeholder="Buscar por nome, telefone ou CPF..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full p-3 pl-10 border rounded-xl bg-card shadow-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+        />
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+      </div>
+
       {(isAdding || editingClient) && (
         <div className="bg-card border rounded-xl p-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">{editingClient ? 'Editar Cliente' : 'Cadastrar Cliente'}</h2>
@@ -112,33 +139,55 @@ export default function Clients() {
             onSubmit={editingClient ? handleUpdate : handleAdd} 
             className="grid grid-cols-1 md:grid-cols-2 gap-4"
           >
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Nome Completo</label>
-              <input name="name" defaultValue={editingClient?.name} required className="w-full p-2 border rounded-md" placeholder="Ex: João da Silva" />
+            <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nome Completo</label>
+                <input name="name" defaultValue={editingClient?.name} required className="w-full p-2 border rounded-md" placeholder="Ex: João da Silva" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Telefone / WhatsApp</label>
+                <input name="phone" defaultValue={editingClient?.phone} required className="w-full p-2 border rounded-md" placeholder="(11) 99999-9999" />
+              </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Telefone / WhatsApp</label>
-              <input name="phone" defaultValue={editingClient?.phone} required className="w-full p-2 border rounded-md" placeholder="(11) 99999-9999" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">CPF</label>
+                <input name="cpf" defaultValue={editingClient?.cpf} className="w-full p-2 border rounded-md" placeholder="000.000.000-00" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Email</label>
+                <input name="email" type="email" defaultValue={editingClient?.email} className="w-full p-2 border rounded-md" placeholder="joao@email.com" />
+              </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">CPF</label>
-              <input name="cpf" defaultValue={editingClient?.cpf} className="w-full p-2 border rounded-md" placeholder="000.000.000-00" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:col-span-2">
+              <div className="md:col-span-2 space-y-2">
+                <label className="text-sm font-medium">Rua</label>
+                <input name="street" defaultValue={editingClient?.street} className="w-full p-2 border rounded-md" placeholder="Ex: Rua das Flores" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Número</label>
+                <input name="number" defaultValue={editingClient?.number} className="w-full p-2 border rounded-md" placeholder="Ex: 123" />
+              </div>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Email</label>
-              <input name="email" type="email" defaultValue={editingClient?.email} className="w-full p-2 border rounded-md" placeholder="joao@email.com" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Bairro</label>
+                <input name="neighborhood" defaultValue={editingClient?.neighborhood} className="w-full p-2 border rounded-md" placeholder="Ex: Centro" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Complemento</label>
+                <input name="complement" defaultValue={editingClient?.complement} className="w-full p-2 border rounded-md" placeholder="Ex: Apto 101" />
+              </div>
             </div>
-            <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium">Endereço</label>
-              <input name="address" defaultValue={editingClient?.address} className="w-full p-2 border rounded-md" placeholder="Rua, Número, Bairro" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Cidade</label>
-              <input name="city" defaultValue={editingClient?.city} className="w-full p-2 border rounded-md" placeholder="Ex: São Paulo" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Estado</label>
-              <input name="state" defaultValue={editingClient?.state} className="w-full p-2 border rounded-md" placeholder="Ex: SP" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Cidade</label>
+                <input name="city" defaultValue={editingClient?.city} className="w-full p-2 border rounded-md" placeholder="Ex: São Paulo" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Estado (UF)</label>
+                <input name="state" defaultValue={editingClient?.state} className="w-full p-2 border rounded-md" placeholder="Ex: SP" maxLength={2} />
+              </div>
             </div>
             <div className="md:col-span-2 flex justify-end gap-2 mt-2">
               <button type="button" onClick={() => { setIsAdding(false); setEditingClient(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
@@ -153,7 +202,7 @@ export default function Clients() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {clients.map(client => {
+        {filteredClients.map(client => {
           const clientSales = sales.filter(s => s.client_id === client.id);
           return (
             <div key={client.id} className="bg-card border rounded-xl p-6 shadow-sm flex flex-col">
@@ -178,14 +227,30 @@ export default function Clients() {
                   </button>
                 </div>
               </div>
-              <div className="flex flex-col gap-1 text-muted-foreground mb-4">
-                <div className="flex items-center gap-2">
-                  <Phone className="h-4 w-4" />
-                  <span className="text-sm">{client.phone}</span>
+              <div className="flex flex-col gap-2 text-muted-foreground mb-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Phone className="h-4 w-4" />
+                    <span className="text-sm">{client.phone}</span>
+                  </div>
+                  <a 
+                    href={`https://wa.me/55${client.phone.replace(/\D/g, '')}`} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="bg-emerald-500 text-white p-2 rounded-full hover:bg-emerald-600 transition-colors shadow-sm"
+                    title="Enviar WhatsApp"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                  </a>
                 </div>
                 {client.cpf && (
                   <div className="text-sm">
                     <span className="font-medium">CPF:</span> {client.cpf}
+                  </div>
+                )}
+                {(client.street || client.number || client.neighborhood) && (
+                  <div className="text-sm truncate">
+                    <span className="font-medium">End:</span> {client.street}{client.number ? `, ${client.number}` : ''}{client.neighborhood ? ` - ${client.neighborhood}` : ''}
                   </div>
                 )}
               </div>
@@ -197,9 +262,9 @@ export default function Clients() {
             </div>
           );
         })}
-        {clients.length === 0 && (
+        {filteredClients.length === 0 && (
           <div className="col-span-full text-center py-12 text-muted-foreground bg-card border rounded-xl">
-            Nenhum cliente cadastrado.
+            {searchTerm ? 'Nenhum cliente encontrado para esta busca.' : 'Nenhum cliente cadastrado.'}
           </div>
         )}
       </div>

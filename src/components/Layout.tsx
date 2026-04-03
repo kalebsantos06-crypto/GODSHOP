@@ -103,46 +103,46 @@ export default function Layout() {
           {/* Left side spacer */}
         </div>
         
-        <div className="flex-none flex items-center justify-center py-1 gap-1 sm:gap-3 max-w-[50%] sm:max-w-none">
-          <div className="flex items-center gap-1.5 sm:gap-3 group cursor-default">
+        <div className="flex-none flex items-center justify-center py-2 gap-2 sm:gap-4 max-w-[70%] sm:max-w-none">
+          <div className="flex items-center gap-2 sm:gap-5 group cursor-default">
             {logoImage ? (
               <div className="relative shrink-0">
                 <div className={cn(
-                  "absolute -inset-0.5 rounded-lg sm:rounded-xl blur-[2px] opacity-50",
+                  "absolute -inset-1 rounded-lg sm:rounded-2xl blur-[3px] opacity-60",
                   theme === 'dark' ? "bg-gradient-to-b from-white/40 to-transparent" : "bg-gradient-to-b from-black/20 to-transparent"
                 )}></div>
                 <img 
                   src={logoImage} 
                   alt="Logo" 
                   className={cn(
-                    "relative h-7 w-7 sm:h-14 sm:w-14 object-cover rounded-lg sm:rounded-xl shadow-2xl border transition-colors",
-                    theme === 'dark' ? "border-white/20" : "border-black/10"
+                    "relative h-10 w-10 sm:h-24 sm:w-24 object-cover rounded-lg sm:rounded-2xl shadow-2xl border-2 transition-all duration-500 group-hover:scale-105",
+                    theme === 'dark' ? "border-white/30" : "border-black/15"
                   )} 
                 />
               </div>
             ) : (
               <div className={cn(
-                "p-1 sm:p-3 rounded-lg sm:rounded-xl border shadow-inner shrink-0 transition-colors",
-                theme === 'dark' ? "bg-white/5 border-white/10" : "bg-black/5 border-black/10"
+                "p-2 sm:p-5 rounded-lg sm:rounded-2xl border-2 shadow-inner shrink-0 transition-all duration-500 group-hover:scale-105",
+                theme === 'dark' ? "bg-white/5 border-white/20" : "bg-black/5 border-black/15"
               )}>
-                <Smartphone className={cn("h-4 w-4 sm:h-8 sm:w-8", theme === 'dark' ? "text-white/80" : "text-black/80")} />
+                <Smartphone className={cn("h-6 w-6 sm:h-14 sm:w-14", theme === 'dark' ? "text-white/90" : "text-black/90")} />
               </div>
             )}
             <div className="flex flex-col items-center min-w-0">
-              <h1 className="text-lg sm:text-4xl tracking-widest leading-none flex items-baseline truncate">
+              <h1 className="text-xl sm:text-6xl tracking-[0.15em] sm:tracking-[0.2em] leading-none flex items-baseline truncate">
                 <span className={cn(
-                  "font-extrabold transition-colors",
-                  theme === 'dark' ? "text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]" : "text-black drop-shadow-[0_0_10px_rgba(0,0,0,0.1)]"
+                  "font-black transition-all duration-500 group-hover:tracking-[0.2em]",
+                  theme === 'dark' ? "text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]" : "text-black drop-shadow-[0_0_15px_rgba(0,0,0,0.15)]"
                 )}>
                   GOD
                 </span>
-                <span className={cn("font-light ml-0.5 transition-colors", theme === 'dark' ? "text-white/70" : "text-black/60")}>
+                <span className={cn("font-thin ml-1 transition-colors", theme === 'dark' ? "text-white/80" : "text-black/70")}>
                   SHOP
                 </span>
               </h1>
               <div className={cn(
-                "h-[1px] w-full mt-1 sm:mt-1.5 transition-colors",
-                theme === 'dark' ? "bg-gradient-to-r from-transparent via-white/40 to-transparent" : "bg-gradient-to-r from-transparent via-black/20 to-transparent"
+                "h-[2px] w-full mt-1.5 sm:mt-3 transition-all duration-700 group-hover:w-[120%]",
+                theme === 'dark' ? "bg-gradient-to-r from-transparent via-white/50 to-transparent" : "bg-gradient-to-r from-transparent via-black/30 to-transparent"
               )}></div>
             </div>
           </div>

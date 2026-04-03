@@ -18,6 +18,10 @@ export interface Client {
   cpf?: string;
   email?: string;
   address?: string;
+  street?: string;
+  number?: string;
+  neighborhood?: string;
+  complement?: string;
   city?: string;
   state?: string;
 }

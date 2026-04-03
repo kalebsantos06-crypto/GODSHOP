@@ -5,7 +5,7 @@ import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
 import { format, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Printer, ArrowLeft, Download, MessageCircle, FileDown } from 'lucide-react';
+import { Printer, ArrowLeft, Download, MessageCircle, FileDown, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function GuaranteeNote() {
@@ -14,10 +14,15 @@ export default function GuaranteeNote() {
   const printRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
 
+  const [logoImage, setLogoImage] = useState<string | null>(null);
+
   useEffect(() => {
     // Pre-load libraries for faster PDF generation and better user gesture preservation
     import('jspdf');
     import('html2canvas');
+    
+    // Load store logo
+    setLogoImage(localStorage.getItem('app_logo') || null);
   }, []);
 
   const { data: sales = [], isLoading: isLoadingSales } = useQuery({
@@ -212,6 +217,17 @@ export default function GuaranteeNote() {
           Voltar
         </button>
         <div className="flex flex-wrap gap-2">
+          {client?.phone && (
+            <a 
+              href={`https://wa.me/55${client.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá ${client.name}, segue o seu Termo de Garantia da GODSHOP: ${window.location.href}`)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="bg-emerald-500 text-white px-4 py-2 rounded-md flex items-center gap-2 font-medium hover:bg-emerald-600 shadow-lg transition-all active:scale-95"
+            >
+              <MessageCircle className="h-4 w-4" />
+              WhatsApp
+            </a>
+          )}
           <div className="flex items-center shadow-lg rounded-md overflow-hidden">
             <button 
               onClick={() => handleDownloadPDF(false)}
@@ -247,10 +263,23 @@ export default function GuaranteeNote() {
           ref={printRef}
           className="text-[#000000] p-10 print:p-0 bg-[#ffffff] overflow-x-auto custom-scrollbar"
         >
-          <div className="text-center border-b-2 border-[#000000] pb-6 mb-6">
-          <h1 className="text-3xl font-bold uppercase tracking-wider">Termo de Garantia</h1>
-          <p className="text-[#4b5563] mt-2">Comprovante de Compra e Garantia</p>
-        </div>
+          <div className="flex flex-col items-center border-b-2 border-[#000000] pb-6 mb-6">
+            {logoImage ? (
+              <img 
+                src={logoImage} 
+                alt="Logo GOD SHOP" 
+                className="h-32 w-32 object-contain mb-4"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="p-4 bg-slate-100 rounded-2xl mb-4">
+                <Smartphone className="h-16 w-16 text-slate-400" />
+              </div>
+            )}
+            <h1 className="text-4xl font-black uppercase tracking-[0.2em]">GOD SHOP</h1>
+            <h2 className="text-xl font-bold uppercase tracking-wider mt-2">Termo de Garantia</h2>
+            <p className="text-[#4b5563] mt-1">Comprovante de Compra e Garantia</p>
+          </div>
 
         <div className="space-y-8">
           <section>
@@ -260,7 +289,12 @@ export default function GuaranteeNote() {
               <p><span className="font-semibold">Telefone:</span> {client?.phone}</p>
               {client?.cpf && <p><span className="font-semibold">CPF:</span> {client.cpf}</p>}
               {client?.email && <p><span className="font-semibold">Email:</span> {client.email}</p>}
-              {client?.address && <p className="col-span-2"><span className="font-semibold">Endereço:</span> {client.address}</p>}
+              {(client?.street || client?.number || client?.neighborhood) && (
+                <p className="col-span-2">
+                  <span className="font-semibold">Endereço:</span> {client.street}{client.number ? `, ${client.number}` : ''}{client.neighborhood ? ` - ${client.neighborhood}` : ''}
+                  {client.complement && ` (${client.complement})`}
+                </p>
+              )}
               {(client?.city || client?.state) && (
                 <p className="col-span-2">
                   <span className="font-semibold">Localização:</span> {client.city}{client.city && client.state ? ' - ' : ''}{client.state}
@@ -280,12 +314,15 @@ export default function GuaranteeNote() {
                   <p><span className="font-semibold">IMEI / Serial:</span> <span className="font-mono">{iphone.imei || 'N/A'}</span></p>
                   <p><span className="font-semibold">Armazenamento:</span> {iphone.storage}</p>
                   <p><span className="font-semibold">Cor:</span> {iphone.color}</p>
-                  <p><span className="font-semibold">Status:</span> Seminovo/Usado</p>
+                  <p><span className="font-semibold">Condição:</span> <span className="capitalize">{iphone.condition || 'Seminovo'}</span></p>
+                  <p><span className="font-semibold">Status:</span> {iphone.condition === 'lacrado' ? 'Novo/Lacrado' : 'Seminovo/Usado'}</p>
                 </>
               ) : (
                 <>
                   <p><span className="font-semibold">Modelo:</span> {consoleItem?.model}</p>
                   <p><span className="font-semibold">Versão:</span> {consoleItem?.version}</p>
+                  <p><span className="font-semibold">Condição:</span> <span className="capitalize">{consoleItem?.condition || 'Seminovo'}</span></p>
+                  <p><span className="font-semibold">Status:</span> {consoleItem?.condition === 'lacrado' ? 'Novo/Lacrado' : 'Seminovo/Usado'}</p>
                 </>
               )}
             </div>
