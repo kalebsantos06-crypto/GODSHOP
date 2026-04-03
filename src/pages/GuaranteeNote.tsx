@@ -5,9 +5,8 @@ import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
 import { format, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Printer, ArrowLeft, Download, Share2, MessageCircle } from 'lucide-react';
+import { Printer, ArrowLeft, Download, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { saveAs } from 'file-saver';
 
 export default function GuaranteeNote() {
   const { id } = useParams<{ id: string }>();
@@ -42,18 +41,53 @@ export default function GuaranteeNote() {
   });
 
   if (isLoadingSales || isLoadingIphones || isLoadingConsoles || isLoadingClients) {
-    return <div>Carregando...</div>;
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
+        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-muted-foreground animate-pulse font-medium">Preparando seu Termo de Garantia...</p>
+      </div>
+    );
   }
 
   const sale = sales.find(s => s.id === id);
-  if (!sale) return <div>Venda não encontrada.</div>;
-
-  const saleDate = new Date(sale.sale_date);
-  const endDate = addMonths(saleDate, 6);
+  if (!sale) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4 text-center">
+        <div className="bg-destructive/10 p-4 rounded-full mb-4">
+          <ArrowLeft className="h-8 w-8 text-destructive" />
+        </div>
+        <h2 className="text-xl font-bold mb-2">Venda não encontrada</h2>
+        <p className="text-muted-foreground mb-6">Não conseguimos localizar os dados desta garantia.</p>
+        <button onClick={() => navigate('/sales')} className="bg-primary text-white px-6 py-2 rounded-lg font-medium">
+          Voltar para Vendas
+        </button>
+      </div>
+    );
+  }
 
   const iphone = iphones.find(i => i.id === sale.iphone_id);
   const consoleItem = consoles.find(c => c.id === sale.console_id);
   const client = clients.find(c => c.id === sale.client_id);
+
+  // Effect to prompt download as soon as page is ready
+  useEffect(() => {
+    if (sale && client) {
+      const timer = setTimeout(() => {
+        toast('Termo de Garantia Pronto!', {
+          description: 'Deseja baixar o arquivo PDF agora?',
+          action: {
+            label: 'Baixar Agora',
+            onClick: () => handleDownloadPDF(),
+          },
+          duration: 10000,
+        });
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [sale, client]);
+
+  const saleDate = new Date(sale.sale_date);
+  const endDate = addMonths(saleDate, 6);
 
   const handlePrint = () => {
     const printContent = printRef.current;
@@ -104,19 +138,18 @@ export default function GuaranteeNote() {
   const handleDownloadPDF = async () => {
     if (isDownloading || !printRef.current || !client || (!iphone && !consoleItem)) return;
     
-    const toastId = toast.loading('Gerando PDF para download...');
+    const toastId = toast.loading('Gerando PDF para o navegador...');
     setIsDownloading(true);
     
     try {
       const element = document.getElementById('guarantee-note-content');
       if (!element) throw new Error('Elemento não encontrado');
       
-      // Importações dinâmicas
       const html2canvas = (await import('html2canvas')).default;
       const { jsPDF } = await import('jspdf');
       
       const canvas = await html2canvas(element, {
-        scale: 1.5, // Escala otimizada para mobile
+        scale: 1.5,
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff'
@@ -131,41 +164,32 @@ export default function GuaranteeNote() {
       const pdfBlob = pdf.output('blob');
       const url = URL.createObjectURL(pdfBlob);
       
-      // Método de download direto do navegador (mais compatível com mobile)
-      const link = document.createElement('a');
-      link.href = url;
-      const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
-      link.download = `Garantia_${safeName}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // Abre em uma nova aba para pré-visualização e download nativo do navegador
+      const newWindow = window.open(url, '_blank');
       
-      // Limpeza
-      setTimeout(() => URL.revokeObjectURL(url), 100);
+      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+        // Fallback: Se o pop-up for bloqueado, tenta o download direto
+        const link = document.createElement('a');
+        link.href = url;
+        const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
+        link.download = `Garantia_${safeName}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success('Download iniciado (Pop-up bloqueado)', { id: toastId });
+      } else {
+        toast.success('Termo aberto para visualização!', { id: toastId });
+      }
       
-      toast.success('Download concluído!', { id: toastId });
+      // Aumentamos o tempo de limpeza para garantir que o navegador carregue o blob na nova aba
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
 
     } catch (error) {
       console.error('PDF Error:', error);
-      toast.error('Erro ao gerar PDF. Tente novamente.', { id: toastId });
+      toast.error('Erro ao gerar PDF.', { id: toastId });
     } finally {
       setIsDownloading(false);
     }
-  };
-
-  const handleWhatsApp = () => {
-    if (!client?.phone) {
-      toast.error('Cliente sem telefone cadastrado.');
-      return;
-    }
-
-    const cleanPhone = client.phone.replace(/\D/g, '');
-    const message = encodeURIComponent(`Olá ${client.name}, estou enviando seu termo de garantia em PDF.`);
-    const whatsappUrl = `https://wa.me/55${cleanPhone}?text=${message}`;
-
-    // Abre o WhatsApp de forma simples e direta
-    window.open(whatsappUrl, '_blank');
-    toast.info('WhatsApp aberto! Agora anexe o PDF que você baixou.');
   };
 
   return (
@@ -180,22 +204,13 @@ export default function GuaranteeNote() {
         </button>
         <div className="flex flex-wrap gap-2">
           <button 
-            onClick={handleWhatsApp}
-            disabled={isDownloading}
-            className="bg-emerald-500 text-white px-4 py-2 rounded-md flex items-center gap-2 font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-            title="Enviar Termo de Garantia via WhatsApp"
-          >
-            <MessageCircle className="h-4 w-4" />
-            WhatsApp
-          </button>
-          <button 
             onClick={handleDownloadPDF}
             disabled={isDownloading}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md flex items-center gap-2 font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            title="Baixar PDF no dispositivo"
+            className="bg-blue-600 text-white px-6 py-2 rounded-md flex items-center gap-2 font-bold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-lg active:scale-95"
+            title="Visualizar e Baixar pelo Navegador"
           >
-            <Download className="h-4 w-4" />
-            {isDownloading ? 'Gerando...' : 'Baixar PDF'}
+            <Download className="h-5 w-5" />
+            {isDownloading ? 'Gerando...' : 'Visualizar e Baixar'}
           </button>
           <button 
             onClick={handlePrint}
@@ -211,7 +226,7 @@ export default function GuaranteeNote() {
         <div 
           id="guarantee-note-content"
           ref={printRef}
-          className="text-[#000000] p-10 print:p-0 bg-[#ffffff]"
+          className="text-[#000000] p-10 print:p-0 bg-[#ffffff] overflow-x-auto custom-scrollbar"
         >
           <div className="text-center border-b-2 border-[#000000] pb-6 mb-6">
           <h1 className="text-3xl font-bold uppercase tracking-wider">Termo de Garantia</h1>
@@ -304,6 +319,22 @@ export default function GuaranteeNote() {
           </div>
         </div>
       </div>
+    </div>
+
+    {/* Floating Download Button for Mobile */}
+      <div className="fixed bottom-24 right-6 z-[60] sm:hidden">
+        <button
+          onClick={handleDownloadPDF}
+          disabled={isDownloading}
+          className="bg-blue-600 text-white p-4 rounded-full shadow-2xl flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95"
+          title="Baixar PDF Agora"
+        >
+          {isDownloading ? (
+            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+          ) : (
+            <Download className="h-6 w-6" />
+          )}
+        </button>
       </div>
     </div>
   );

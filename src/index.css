@@ -137,14 +137,14 @@
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 @media (max-width: 768px) {
   .custom-scrollbar::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 14px;
+    height: 14px;
   }
 }
 
