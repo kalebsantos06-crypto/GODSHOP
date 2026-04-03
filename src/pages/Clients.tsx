@@ -36,7 +36,10 @@ export default function Clients() {
       setIsAdding(false);
       toast.success('Cliente adicionado!');
     },
-    onError: () => toast.error('Erro ao adicionar cliente.')
+    onError: (error) => {
+      console.error('Erro ao adicionar cliente:', error);
+      toast.error('Erro ao adicionar cliente.');
+    }
   });
 
   const updateMutation = useMutation({
@@ -46,7 +49,10 @@ export default function Clients() {
       setEditingClient(null);
       toast.success('Cliente atualizado!');
     },
-    onError: () => toast.error('Erro ao atualizar cliente.')
+    onError: (error) => {
+      console.error('Erro ao atualizar cliente:', error);
+      toast.error('Erro ao atualizar cliente.');
+    }
   });
 
   const deleteMutation = useMutation({
@@ -60,17 +66,29 @@ export default function Clients() {
   const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const street = formData.get('street') as string || '';
+    const number = formData.get('number') as string || '';
+    const neighborhood = formData.get('neighborhood') as string || '';
+    const complement = formData.get('complement') as string || '';
+    
+    const addressParts = [];
+    if (street) addressParts.push(street);
+    if (number) addressParts.push(number);
+    if (neighborhood) addressParts.push(neighborhood);
+    if (complement) addressParts.push(complement);
+    
     const data = {
       name: formData.get('name') as string,
       phone: formData.get('phone') as string,
       cpf: formData.get('cpf') as string || undefined,
       email: formData.get('email') as string || undefined,
-      street: formData.get('street') as string || undefined,
-      number: formData.get('number') as string || undefined,
-      neighborhood: formData.get('neighborhood') as string || undefined,
-      complement: formData.get('complement') as string || undefined,
+      street: street || undefined,
+      number: number || undefined,
+      neighborhood: neighborhood || undefined,
+      complement: complement || undefined,
       city: formData.get('city') as string || undefined,
       state: formData.get('state') as string || undefined,
+      address: addressParts.join(', ') || undefined,
     };
     addMutation.mutate(data);
   };
@@ -79,17 +97,29 @@ export default function Clients() {
     e.preventDefault();
     if (!editingClient) return;
     const formData = new FormData(e.currentTarget);
+    const street = formData.get('street') as string || '';
+    const number = formData.get('number') as string || '';
+    const neighborhood = formData.get('neighborhood') as string || '';
+    const complement = formData.get('complement') as string || '';
+    
+    const addressParts = [];
+    if (street) addressParts.push(street);
+    if (number) addressParts.push(number);
+    if (neighborhood) addressParts.push(neighborhood);
+    if (complement) addressParts.push(complement);
+    
     const data = {
       name: formData.get('name') as string,
       phone: formData.get('phone') as string,
       cpf: formData.get('cpf') as string || undefined,
       email: formData.get('email') as string || undefined,
-      street: formData.get('street') as string || undefined,
-      number: formData.get('number') as string || undefined,
-      neighborhood: formData.get('neighborhood') as string || undefined,
-      complement: formData.get('complement') as string || undefined,
+      street: street || undefined,
+      number: number || undefined,
+      neighborhood: neighborhood || undefined,
+      complement: complement || undefined,
       city: formData.get('city') as string || undefined,
       state: formData.get('state') as string || undefined,
+      address: addressParts.join(', ') || undefined,
     };
     updateMutation.mutate({
       id: editingClient.id,
@@ -159,7 +189,7 @@ export default function Clients() {
                 <input name="email" type="email" defaultValue={editingClient?.email} className="w-full p-2 border rounded-md" placeholder="joao@email.com" />
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:col-span-2">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:col-span-2">
               <div className="md:col-span-2 space-y-2">
                 <label className="text-sm font-medium">Rua</label>
                 <input name="street" defaultValue={editingClient?.street} className="w-full p-2 border rounded-md" placeholder="Ex: Rua das Flores" />
@@ -168,18 +198,16 @@ export default function Clients() {
                 <label className="text-sm font-medium">Número</label>
                 <input name="number" defaultValue={editingClient?.number} className="w-full p-2 border rounded-md" placeholder="Ex: 123" />
               </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Bairro</label>
-                <input name="neighborhood" defaultValue={editingClient?.neighborhood} className="w-full p-2 border rounded-md" placeholder="Ex: Centro" />
-              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Complemento</label>
                 <input name="complement" defaultValue={editingClient?.complement} className="w-full p-2 border rounded-md" placeholder="Ex: Apto 101" />
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:col-span-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Bairro</label>
+                <input name="neighborhood" defaultValue={editingClient?.neighborhood} className="w-full p-2 border rounded-md" placeholder="Ex: Centro" />
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Cidade</label>
                 <input name="city" defaultValue={editingClient?.city} className="w-full p-2 border rounded-md" placeholder="Ex: São Paulo" />
@@ -248,9 +276,9 @@ export default function Clients() {
                     <span className="font-medium">CPF:</span> {client.cpf}
                   </div>
                 )}
-                {(client.street || client.number || client.neighborhood) && (
+                {(client.street || client.number || client.neighborhood || client.city) && (
                   <div className="text-sm truncate">
-                    <span className="font-medium">End:</span> {client.street}{client.number ? `, ${client.number}` : ''}{client.neighborhood ? ` - ${client.neighborhood}` : ''}
+                    <span className="font-medium">End:</span> {client.street}{client.number ? `, ${client.number}` : ''}{client.neighborhood ? ` - ${client.neighborhood}` : ''}{client.city ? ` - ${client.city}` : ''}
                   </div>
                 )}
               </div>

@@ -219,7 +219,17 @@ export default function GuaranteeNote() {
         <div className="flex flex-wrap gap-2">
           {client?.phone && (
             <a 
-              href={`https://wa.me/55${client.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá ${client.name}, segue o seu Termo de Garantia da GODSHOP: ${window.location.href}`)}`}
+              href={`https://wa.me/55${client.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá, ${client.name}!
+
+É um prazer atendê-lo(a) na GOD SHOP.
+
+Informamos que o seu Termo de Garantia referente à sua compra foi gerado com sucesso.
+Protocolo: ${sale.id}
+
+Agradecemos imensamente pela sua preferência e confiança em nossa loja. Estamos à disposição para qualquer dúvida.
+
+Atenciosamente,
+Equipe GOD SHOP`)}`}
               target="_blank"
               rel="noreferrer"
               className="bg-emerald-500 text-white px-4 py-2 rounded-md flex items-center gap-2 font-medium hover:bg-emerald-600 shadow-lg transition-all active:scale-95"
