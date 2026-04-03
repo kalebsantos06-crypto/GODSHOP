@@ -49,6 +49,43 @@ export default function PriceTable() {
     }
   });
 
+  const importMutation = useMutation({
+    mutationFn: async () => {
+      const items = [
+        { category: 'iphone', model: 'iPhone 11', storage: '128GB', price: 1000.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 11', storage: '256GB', price: 1000.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 11', storage: '64GB', price: 900.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 11 Pro', storage: '256GB', price: 1200.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 11 Pro', storage: '512GB', price: 1250.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 11 Pro Max', storage: '256GB', price: 1300.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 11 Pro Max', storage: '512GB', price: 1350.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 11 Pro Max', storage: '64GB', price: 1200.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 12', storage: '128GB', price: 1200.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 12', storage: '64GB', price: 1200.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 12 Pro Max', storage: '128GB', price: 2000.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 13', storage: '128GB', price: 1650.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 14', storage: '256GB', price: 2150.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 14 Pro', storage: '256GB', price: 2500.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 14 Pro Max', storage: '128GB', price: 2500.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 14 Pro Max', storage: '256GB', price: 2800.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 15 Plus', storage: '128GB', price: 2500.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 15 Pro Max', storage: '256GB', price: 3500.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone 8 Plus', storage: '256GB', price: 500.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone XR', storage: '128GB', price: 850.00, condition: 'Seminovo Grade A' },
+        { category: 'iphone', model: 'iPhone XR', storage: '64GB', price: 850.00, condition: 'Seminovo Grade A' }
+      ];
+      
+      for (const item of items) {
+        await db.prices.create(item as any);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prices'] });
+      toast.success('Tabela importada com sucesso!');
+    },
+    onError: () => toast.error('Erro ao importar tabela.')
+  });
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
@@ -93,17 +130,26 @@ export default function PriceTable() {
           <h1 className="text-2xl font-bold tracking-tight">Tabela de Preços (Venda)</h1>
           <p className="text-muted-foreground text-sm mt-1">Gerencie os preços de venda para iPhones e Consoles</p>
         </div>
-        <button 
-          onClick={() => {
-            setIsAdding(!isAdding);
-            setEditingPrice(null);
-            if (!isAdding) setSelectedCategory('iphone');
-          }}
-          className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-primary/90 transition-colors w-full sm:w-auto justify-center shadow-sm"
-        >
-          {isAdding || editingPrice ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-          {isAdding || editingPrice ? 'Fechar' : 'Novo Preço'}
-        </button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button 
+            onClick={() => importMutation.mutate()}
+            disabled={importMutation.isPending}
+            className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-secondary/80 transition-colors w-full sm:w-auto justify-center shadow-sm disabled:opacity-50"
+          >
+            {importMutation.isPending ? 'Importando...' : 'Importar Lista'}
+          </button>
+          <button 
+            onClick={() => {
+              setIsAdding(!isAdding);
+              setEditingPrice(null);
+              if (!isAdding) setSelectedCategory('iphone');
+            }}
+            className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-primary/90 transition-colors w-full sm:w-auto justify-center shadow-sm"
+          >
+            {isAdding || editingPrice ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {isAdding || editingPrice ? 'Fechar' : 'Novo Preço'}
+          </button>
+        </div>
       </div>
 
       {(isAdding || editingPrice) && (
