@@ -150,86 +150,24 @@ export default function GuaranteeNote() {
     }
   };
 
-  const handleWhatsApp = async () => {
+  const handleWhatsApp = () => {
     if (!client?.phone) {
       toast.error('Cliente sem telefone cadastrado.');
       return;
     }
 
-    const toastId = toast.loading('Preparando Termo de Garantia...');
-    setIsDownloading(true);
+    const cleanPhone = client.phone.replace(/\D/g, '');
+    const message = encodeURIComponent(`Olá ${client.name}, estou enviando seu termo de garantia em PDF.`);
+    const whatsappUrl = `https://wa.me/55${cleanPhone}?text=${message}`;
 
-    try {
-      const element = document.getElementById('guarantee-note-content');
-      if (!element) throw new Error('Elemento não encontrado');
-      
-      const [{ jsPDF }, html2canvas] = await Promise.all([
-        import('jspdf'),
-        import('html2canvas').then(m => m.default)
-      ]);
-      
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-      
-      const imgData = canvas.toDataURL('image/jpeg', 0.8);
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-      
-      const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
-      const fileName = `Termo_Garantia_${safeName}.pdf`;
-      const pdfBlob = pdf.output('blob');
-      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-
-      // 1. Tenta compartilhar o arquivo DIRETAMENTE (Melhor para Celular/WhatsApp)
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({
-            files: [file],
-            title: `Garantia - ${client.name}`,
-            text: `Olá ${client.name}, segue seu termo de garantia em PDF.`
-          });
-          toast.success('Compartilhamento aberto!', { id: toastId });
-          setIsDownloading(false);
-          return;
-        } catch (shareError) {
-          if ((shareError as Error).name === 'AbortError') {
-            toast.dismiss(toastId);
-            setIsDownloading(false);
-            return;
-          }
-          console.warn('Share failed, falling back:', shareError);
-        }
-      }
-
-      // 2. Fallback: Baixa o PDF e abre o WhatsApp (Para Computador ou navegadores limitados)
-      saveAs(pdfBlob, fileName);
-      
-      const cleanPhone = client.phone.replace(/\D/g, '');
-      const message = encodeURIComponent(`Olá ${client.name}, acabei de baixar sua nota de garantia em PDF e vou te enviar agora.`);
-      
-      // Pequeno delay para o download iniciar antes de abrir a nova aba
-      setTimeout(() => {
-        window.open(`https://wa.me/55${cleanPhone}?text=${message}`, '_blank');
-        toast.success('PDF baixado! Agora basta anexar no WhatsApp.', { id: toastId, duration: 8000 });
-      }, 500);
-      
-    } catch (error) {
-      console.error('WhatsApp Error:', error);
-      toast.error('Erro ao processar o PDF. Tente baixar manualmente.', { id: toastId });
-    } finally {
-      setIsDownloading(false);
-    }
+    // 1. Abre o WhatsApp IMEDIATAMENTE (Evita bloqueio de pop-up e garante reação instantânea)
+    window.open(whatsappUrl, '_blank');
+    
+    // 2. Inicia a geração do PDF em segundo plano
+    toast.info('Abrindo WhatsApp... O PDF será baixado em seguida para você anexar.');
+    
+    // Reutiliza a função de download que já está testada e funcionando
+    handleDownloadPDF();
   };
 
   return (
