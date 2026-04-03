@@ -49,35 +49,37 @@ export default function Clients() {
     }
   });
 
-  const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    addMutation.mutate({
-      name: formData.get('name'),
-      phone: formData.get('phone'),
-      cpf: formData.get('cpf'),
-      email: formData.get('email'),
-      address: formData.get('address'),
-      city: formData.get('city'),
-      state: formData.get('state'),
-    });
+    const data = {
+      name: formData.get('name') as string,
+      phone: formData.get('phone') as string,
+      cpf: formData.get('cpf') as string || undefined,
+      email: formData.get('email') as string || undefined,
+      address: formData.get('address') as string || undefined,
+      city: formData.get('city') as string || undefined,
+      state: formData.get('state') as string || undefined,
+    };
+    addMutation.mutate(data);
   };
 
-  const handleUpdate = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!editingClient) return;
     const formData = new FormData(e.currentTarget);
+    const data = {
+      name: formData.get('name') as string,
+      phone: formData.get('phone') as string,
+      cpf: formData.get('cpf') as string || undefined,
+      email: formData.get('email') as string || undefined,
+      address: formData.get('address') as string || undefined,
+      city: formData.get('city') as string || undefined,
+      state: formData.get('state') as string || undefined,
+    };
     updateMutation.mutate({
       id: editingClient.id,
-      data: {
-        name: formData.get('name'),
-        phone: formData.get('phone'),
-        cpf: formData.get('cpf'),
-        email: formData.get('email'),
-        address: formData.get('address'),
-        city: formData.get('city'),
-        state: formData.get('state'),
-      }
+      data
     });
   };
 
@@ -105,7 +107,11 @@ export default function Clients() {
       {(isAdding || editingClient) && (
         <div className="bg-card border rounded-xl p-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">{editingClient ? 'Editar Cliente' : 'Cadastrar Cliente'}</h2>
-          <form onSubmit={editingClient ? handleUpdate : handleAdd} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form 
+            key={editingClient?.id || 'new'}
+            onSubmit={editingClient ? handleUpdate : handleAdd} 
+            className="grid grid-cols-1 md:grid-cols-2 gap-4"
+          >
             <div className="space-y-2">
               <label className="text-sm font-medium">Nome Completo</label>
               <input name="name" defaultValue={editingClient?.name} required className="w-full p-2 border rounded-md" placeholder="Ex: João da Silva" />

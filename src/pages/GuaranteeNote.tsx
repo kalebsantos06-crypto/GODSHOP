@@ -5,8 +5,9 @@ import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
 import { format, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Printer, ArrowLeft, Download } from 'lucide-react';
+import { Printer, ArrowLeft, Download, Share2, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { saveAs } from 'file-saver';
 
 export default function GuaranteeNote() {
   const { id } = useParams<{ id: string }>();
@@ -103,41 +104,26 @@ export default function GuaranteeNote() {
   const handleDownloadPDF = async () => {
     if (isDownloading || !printRef.current || !client || (!iphone && !consoleItem)) return;
     
-    const toastId = toast.loading('Iniciando geração da nota...');
+    const toastId = toast.loading('Gerando PDF...');
     setIsDownloading(true);
-    
-    // Guardar título original para restaurar depois
-    const originalTitle = document.title;
     
     try {
       const element = document.getElementById('guarantee-note-content');
-      if (!element) {
-        toast.error('Elemento não encontrado', { id: toastId });
-        setIsDownloading(false);
-        return;
-      }
+      if (!element) throw new Error('Elemento não encontrado');
       
-      // 1. Carregar bibliotecas
-      toast.loading('Carregando ferramentas...', { id: toastId });
-      const [{ jsPDF }, { toJpeg }] = await Promise.all([
+      const [{ jsPDF }, html2canvas] = await Promise.all([
         import('jspdf'),
-        import('html-to-image')
+        import('html2canvas').then(m => m.default)
       ]);
       
-      // 2. Capturar imagem
-      toast.loading('Capturando imagem...', { id: toastId });
-      
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      const imgData = await toJpeg(element, {
-        quality: 0.8,
-        backgroundColor: '#ffffff',
-        pixelRatio: 1.5,
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
       });
       
-      // 3. Criar PDF
-      toast.loading('Gerando arquivo PDF...', { id: toastId });
-      
+      const imgData = canvas.toDataURL('image/jpeg', 0.8);
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
@@ -145,74 +131,102 @@ export default function GuaranteeNote() {
       });
       
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
       
       const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `Garantia_${safeName}.pdf`;
       
-      // Mudar o título da página temporariamente (alguns WebViews usam isso como nome do arquivo)
-      document.title = fileName;
-      
-      // 4. Finalizar e Enviar
-      toast.loading('Finalizando...', { id: toastId });
-      
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-      if (isMobile && navigator.share) {
-        const pdfBlob = pdf.output('blob');
-        const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-        
-        try {
-          if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              files: [file],
-              title: `Garantia - ${client.name}`,
-            });
-            toast.success('Nota compartilhada!', { id: toastId });
-            document.title = originalTitle;
-            setIsDownloading(false);
-            return;
-          }
-        } catch (shareError) {
-          if ((shareError as Error).name === 'AbortError') {
-            toast.dismiss(toastId);
-            document.title = originalTitle;
-            setIsDownloading(false);
-            return;
-          }
-          console.warn('Share failed, falling back to download:', shareError);
-        }
-      }
-
-      // Fallback para download direto
-      try {
-        // O pdf.save do jsPDF é o que tem melhor suporte a nomes de arquivos
-        pdf.save(fileName);
-        toast.success('Download iniciado!', { id: toastId });
-        
-        // Restaurar título após um tempo
-        setTimeout(() => {
-          document.title = originalTitle;
-        }, 3000);
-      } catch (saveError) {
-        console.error('Standard save failed, trying Data URI:', saveError);
-        const dataUri = pdf.output('datauristring').replace('application/pdf', 'application/octet-stream');
-        const link = document.createElement('a');
-        link.href = dataUri;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        document.title = originalTitle;
-        toast.success('Download via link!', { id: toastId });
-      }
+      const pdfBlob = pdf.output('blob');
+      saveAs(pdfBlob, fileName);
+      toast.success('Download iniciado!', { id: toastId });
 
     } catch (error) {
       console.error('PDF Error:', error);
-      document.title = originalTitle;
-      toast.error('Erro ao gerar nota. Tente novamente.', { id: toastId });
+      toast.error('Erro ao gerar PDF. Tente novamente.', { id: toastId });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleWhatsApp = async () => {
+    if (!client?.phone) {
+      toast.error('Cliente sem telefone cadastrado.');
+      return;
+    }
+
+    const toastId = toast.loading('Preparando Termo de Garantia...');
+    setIsDownloading(true);
+
+    try {
+      const element = document.getElementById('guarantee-note-content');
+      if (!element) throw new Error('Elemento não encontrado');
+      
+      const [{ jsPDF }, html2canvas] = await Promise.all([
+        import('jspdf'),
+        import('html2canvas').then(m => m.default)
+      ]);
+      
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      });
+      
+      const imgData = canvas.toDataURL('image/jpeg', 0.8);
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      
+      const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
+      const fileName = `Termo_Garantia_${safeName}.pdf`;
+      const pdfBlob = pdf.output('blob');
+      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      // 1. Tenta compartilhar o arquivo DIRETAMENTE (Melhor para Celular/WhatsApp)
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Garantia - ${client.name}`,
+            text: `Olá ${client.name}, segue seu termo de garantia em PDF.`
+          });
+          toast.success('Compartilhamento aberto!', { id: toastId });
+          setIsDownloading(false);
+          return;
+        } catch (shareError) {
+          if ((shareError as Error).name === 'AbortError') {
+            toast.dismiss(toastId);
+            setIsDownloading(false);
+            return;
+          }
+          console.warn('Share failed, falling back:', shareError);
+        }
+      }
+
+      // 2. Fallback: Baixa o PDF e abre o WhatsApp (Para Computador ou navegadores limitados)
+      saveAs(pdfBlob, fileName);
+      
+      const cleanPhone = client.phone.replace(/\D/g, '');
+      const message = encodeURIComponent(`Olá ${client.name}, acabei de baixar sua nota de garantia em PDF e vou te enviar agora.`);
+      
+      // Pequeno delay para o download iniciar antes de abrir a nova aba
+      setTimeout(() => {
+        window.open(`https://wa.me/55${cleanPhone}?text=${message}`, '_blank');
+        toast.success('PDF baixado! Agora basta anexar no WhatsApp.', { id: toastId, duration: 8000 });
+      }, 500);
+      
+    } catch (error) {
+      console.error('WhatsApp Error:', error);
+      toast.error('Erro ao processar o PDF. Tente baixar manualmente.', { id: toastId });
     } finally {
       setIsDownloading(false);
     }
@@ -230,13 +244,22 @@ export default function GuaranteeNote() {
         </button>
         <div className="flex flex-wrap gap-2">
           <button 
+            onClick={handleWhatsApp}
+            disabled={isDownloading}
+            className="bg-emerald-500 text-white px-4 py-2 rounded-md flex items-center gap-2 font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+            title="Enviar Termo de Garantia via WhatsApp"
+          >
+            <MessageCircle className="h-4 w-4" />
+            WhatsApp
+          </button>
+          <button 
             onClick={handleDownloadPDF}
             disabled={isDownloading}
             className="bg-blue-600 text-white px-4 py-2 rounded-md flex items-center gap-2 font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
             title="Baixar PDF no dispositivo"
           >
             <Download className="h-4 w-4" />
-            {isDownloading ? 'Baixando...' : 'Baixar PDF'}
+            {isDownloading ? 'Gerando...' : 'Baixar PDF'}
           </button>
           <button 
             onClick={handlePrint}
