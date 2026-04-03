@@ -86,8 +86,11 @@ export default function GuaranteeNote() {
     }
   }, [sale, client]);
 
+  const isLacrado = (iphone?.condition === 'lacrado') || (consoleItem?.condition === 'lacrado');
+  const warrantyMonths = isLacrado ? 12 : 6;
+  
   const saleDate = new Date(sale.sale_date);
-  const endDate = addMonths(saleDate, 6);
+  const endDate = addMonths(saleDate, warrantyMonths);
 
   const handlePrint = () => {
     const printContent = printRef.current;
@@ -138,7 +141,7 @@ export default function GuaranteeNote() {
   const handleDownloadPDF = async () => {
     if (isDownloading || !printRef.current || !client || (!iphone && !consoleItem)) return;
     
-    const toastId = toast.loading('Gerando PDF para o navegador...');
+    const toastId = toast.loading('Gerando pré-visualização...');
     setIsDownloading(true);
     
     try {
@@ -161,32 +164,55 @@ export default function GuaranteeNote() {
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
       
-      const pdfBlob = pdf.output('blob');
-      const url = URL.createObjectURL(pdfBlob);
+      // Geramos o PDF como Data URI (Base64)
+      const pdfDataUri = pdf.output('datauristring');
+      const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
+      const fileName = `Garantia_${safeName}.pdf`;
       
-      // Abre em uma nova aba para pré-visualização e download nativo do navegador
-      const newWindow = window.open(url, '_blank');
+      // Tentativa de abrir em nova aba com HTML customizado (mais compatível com WebViews)
+      const previewWindow = window.open('', '_blank');
       
-      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-        // Fallback: Se o pop-up for bloqueado, tenta o download direto
+      if (previewWindow) {
+        previewWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Garantia - ${client.name}</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <style>
+                body, html { margin: 0; padding: 0; height: 100%; width: 100%; background: #525659; display: flex; flex-direction: column; }
+                .toolbar { background: #323639; color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; font-family: sans-serif; box-shadow: 0 2px 5px rgba(0,0,0,0.3); z-index: 10; }
+                .btn { background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; text-decoration: none; font-size: 14px; }
+                .btn:hover { background: #0056b3; }
+                .content { flex: 1; width: 100%; border: none; }
+                @media (max-width: 600px) { .toolbar { padding: 10px; } .btn { padding: 6px 12px; font-size: 12px; } }
+              </style>
+            </head>
+            <body>
+              <div class="toolbar">
+                <span>Garantia - ${client.name}</span>
+                <a href="${pdfDataUri}" download="${fileName}" class="btn">BAIXAR PDF</a>
+              </div>
+              <iframe class="content" src="${pdfDataUri}"></iframe>
+            </body>
+          </html>
+        `);
+        previewWindow.document.close();
+        toast.success('Pré-visualização aberta!', { id: toastId });
+      } else {
+        // Fallback: Download direto se o pop-up for bloqueado ou estiver em WebView restrita
         const link = document.createElement('a');
-        link.href = url;
-        const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
-        link.download = `Garantia_${safeName}.pdf`;
+        link.href = pdfDataUri;
+        link.download = fileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        toast.success('Download iniciado (Pop-up bloqueado)', { id: toastId });
-      } else {
-        toast.success('Termo aberto para visualização!', { id: toastId });
+        toast.success('Download iniciado diretamente!', { id: toastId });
       }
-      
-      // Aumentamos o tempo de limpeza para garantir que o navegador carregue o blob na nova aba
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
 
     } catch (error) {
       console.error('PDF Error:', error);
-      toast.error('Erro ao gerar PDF.', { id: toastId });
+      toast.error('Erro ao gerar PDF no aplicativo.', { id: toastId });
     } finally {
       setIsDownloading(false);
     }
@@ -207,10 +233,10 @@ export default function GuaranteeNote() {
             onClick={handleDownloadPDF}
             disabled={isDownloading}
             className="bg-blue-600 text-white px-6 py-2 rounded-md flex items-center gap-2 font-bold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-lg active:scale-95"
-            title="Visualizar e Baixar pelo Navegador"
+            title="Baixar Termo de Garantia em PDF"
           >
             <Download className="h-5 w-5" />
-            {isDownloading ? 'Gerando...' : 'Visualizar e Baixar'}
+            {isDownloading ? 'Gerando...' : 'Baixar como PDF'}
           </button>
           <button 
             onClick={handlePrint}
@@ -293,7 +319,7 @@ export default function GuaranteeNote() {
 
           <section className="bg-[#f9fafb] p-4 rounded-lg border border-[#e5e7eb] text-sm space-y-3">
             <h3 className="font-bold text-base mb-2">Termos e Condições de Garantia</h3>
-            <p>1. <strong>Prazo e Cobertura:</strong> Este aparelho possui garantia de 6 (seis) meses, cobrindo exclusivamente defeitos de funcionamento de hardware decorrentes de vícios de fabricação. A garantia é válida de {format(saleDate, "dd/MM/yyyy")} até {format(endDate, "dd/MM/yyyy")}.</p>
+            <p>1. <strong>Prazo e Cobertura:</strong> Este aparelho possui garantia de {warrantyMonths === 12 ? '1 (um) ano' : '6 (seis) meses'}, cobrindo exclusivamente defeitos de funcionamento de hardware decorrentes de vícios de fabricação. A garantia é válida de {format(saleDate, "dd/MM/yyyy")} até {format(endDate, "dd/MM/yyyy")}.</p>
             <p>2. <strong>Exclusões:</strong> Esta garantia não cobre danos decorrentes de mau uso, negligência, acidentes, contato com líquidos (oxidação), quedas, quebra de tela, ou qualquer dano físico. Estão excluídos também danos causados por software de terceiros, modificações não autorizadas (jailbreak/root) e uso de acessórios não compatíveis ou não originais.</p>
             <p>3. <strong>Violação de Selos:</strong> A remoção, dano ou violação de selos de garantia ou de segurança implica na perda imediata da cobertura.</p>
             <p>4. <strong>Procedimento:</strong> Para acionar a garantia, é obrigatória a apresentação deste termo. O prazo para análise técnica é de até 30 (trinta) dias, conforme legislação vigente.</p>

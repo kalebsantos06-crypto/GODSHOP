@@ -55,6 +55,7 @@ export default function ConsolesStock() {
     const data = {
       model: formData.get('model') as string,
       version: formData.get('version') as string,
+      condition: formData.get('condition') as string,
       buy_price: Number(formData.get('buy_price')),
     };
 
@@ -101,6 +102,13 @@ export default function ConsolesStock() {
             <div className="space-y-2">
               <label className="text-sm font-medium">Versão</label>
               <input name="version" defaultValue={editingConsole?.version} required className="w-full p-2 border rounded-md" placeholder="Ex: PS4" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Condição</label>
+              <select name="condition" defaultValue={editingConsole?.condition || 'seminovo'} required className="w-full p-2 border rounded-md bg-background">
+                <option value="lacrado">Lacrado (1 Ano)</option>
+                <option value="seminovo">Seminovo (6 Meses)</option>
+              </select>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Preço de Compra</label>

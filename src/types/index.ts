@@ -8,6 +8,7 @@ export interface iPhone {
   supplier_id: string;
   buy_date: string;
   status: 'disponivel' | 'vendido';
+  condition: 'lacrado' | 'seminovo';
 }
 
 export interface Client {
@@ -34,6 +35,7 @@ export interface Console {
   buy_price: number;
   buy_date: string;
   status: 'disponivel' | 'vendido';
+  condition: 'lacrado' | 'seminovo';
 }
 
 export interface Sale {

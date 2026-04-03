@@ -59,6 +59,7 @@ export default function Inventory() {
       model: formData.get('model'),
       storage: formData.get('storage'),
       color: formData.get('color'),
+      condition: formData.get('condition'),
       buy_price: Number(formData.get('buy_price')),
       imei: formData.get('imei'),
       supplier_id: formData.get('supplier_id'),
@@ -119,6 +120,13 @@ export default function Inventory() {
               <input name="color" defaultValue={editingIphone?.color} required className="w-full p-2 border rounded-md" placeholder="Ex: Midnight" />
             </div>
             <div className="space-y-2">
+              <label className="text-sm font-medium">Condição</label>
+              <select name="condition" defaultValue={editingIphone?.condition || 'seminovo'} required className="w-full p-2 border rounded-md bg-background">
+                <option value="lacrado">Lacrado (1 Ano)</option>
+                <option value="seminovo">Seminovo (6 Meses)</option>
+              </select>
+            </div>
+            <div className="space-y-2">
               <label className="text-sm font-medium">IMEI / Serial</label>
               <input name="imei" defaultValue={editingIphone?.imei} className="w-full p-2 border rounded-md" placeholder="Ex: 35..." />
             </div>
@@ -155,6 +163,7 @@ export default function Inventory() {
                 <th className="px-4 py-3 font-medium">Modelo</th>
                 <th className="px-4 py-3 font-medium">Armazenamento</th>
                 <th className="px-4 py-3 font-medium">IMEI</th>
+                <th className="px-4 py-3 font-medium">Condição</th>
                 <th className="px-4 py-3 font-medium">Cor</th>
                 <th className="px-4 py-3 font-medium">Preço (Compra)</th>
                 <th className="px-4 py-3 font-medium">Data</th>
@@ -168,6 +177,13 @@ export default function Inventory() {
                   <td className="px-4 py-3 font-medium">{iphone.model}</td>
                   <td className="px-4 py-3">{iphone.storage}</td>
                   <td className="px-4 py-3 font-mono text-xs">{iphone.imei || 'N/A'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                      iphone.condition === 'lacrado' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-700 border border-slate-200'
+                    }`}>
+                      {iphone.condition === 'lacrado' ? 'Lacrado' : 'Seminovo'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">{iphone.color}</td>
                   <td className="px-4 py-3">{formatBRL(iphone.buy_price)}</td>
                   <td className="px-4 py-3">{format(new Date(iphone.buy_date), 'dd/MM/yyyy', { locale: ptBR })}</td>

@@ -19,6 +19,7 @@ export default function ConsoleTable({ consoles, onEdit, onDelete }: ConsoleTabl
           <tr>
             <th className="px-6 py-3">Modelo</th>
             <th className="px-6 py-3">Versão</th>
+            <th className="px-6 py-3">Condição</th>
             <th className="px-6 py-3">Preço Compra</th>
             <th className="px-6 py-3">Data Compra</th>
             <th className="px-6 py-3">Status</th>
@@ -30,6 +31,13 @@ export default function ConsoleTable({ consoles, onEdit, onDelete }: ConsoleTabl
             <tr key={console.id} className="hover:bg-gray-50">
               <td className="px-6 py-4 font-medium text-gray-900">{console.model}</td>
               <td className="px-6 py-4">{console.version}</td>
+              <td className="px-6 py-4">
+                <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
+                  console.condition === 'lacrado' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-700 border border-slate-200'
+                }`}>
+                  {console.condition === 'lacrado' ? 'Lacrado' : 'Seminovo'}
+                </span>
+              </td>
               <td className="px-6 py-4">{formatBRL(console.buy_price)}</td>
               <td className="px-6 py-4">{format(new Date(console.buy_date), 'dd/MM/yyyy', { locale: ptBR })}</td>
               <td className="px-6 py-4">
