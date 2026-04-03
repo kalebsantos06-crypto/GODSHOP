@@ -28,7 +28,10 @@ export default function ConsolesStock() {
       setIsAdding(false);
       toast.success('Console adicionado ao estoque!');
     },
-    onError: () => toast.error('Erro ao adicionar console.')
+    onError: (error: any) => {
+      console.error('Erro ao adicionar console:', error);
+      toast.error(`Erro ao adicionar console: ${error?.message || 'Erro desconhecido'}`);
+    }
   });
 
   const updateMutation = useMutation({
@@ -38,13 +41,17 @@ export default function ConsolesStock() {
       setEditingConsole(null);
       toast.success('Console atualizado!');
     },
-    onError: () => toast.error('Erro ao atualizar console.')
+    onError: (error: any) => {
+      console.error('Erro ao atualizar console:', error);
+      toast.error(`Erro ao atualizar console: ${error?.message || 'Erro desconhecido'}`);
+    }
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => db.consoles.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['consoles'] });
+      setDeleteId(null);
       toast.success('Console removido!');
     }
   });
@@ -94,7 +101,7 @@ export default function ConsolesStock() {
       {(isAdding || editingConsole) && (
         <div className="bg-card border rounded-xl p-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">{editingConsole ? 'Editar Console' : 'Novo Console'}</h2>
-          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <form key={editingConsole?.id || 'new'} onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Modelo</label>
               <input name="model" defaultValue={editingConsole?.model} required className="w-full p-2 border rounded-md" placeholder="Ex: PlayStation" />

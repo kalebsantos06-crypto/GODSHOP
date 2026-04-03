@@ -140,17 +140,24 @@ export default function GuaranteeNote() {
       const { jsPDF } = await import('jspdf');
       
       const canvas = await html2canvas(element, {
-        scale: 1.5,
+        scale: 2, // Aumentado para melhor qualidade
         useCORS: true,
         logging: false,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        windowWidth: element.scrollWidth,
+        windowHeight: element.scrollHeight
       });
       
-      const imgData = canvas.toDataURL('image/jpeg', 0.7);
-      const pdf = new jsPDF();
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      const imgData = canvas.toDataURL('image/jpeg', 0.8);
+      
+      // Criar PDF com as dimensões exatas do canvas para evitar cortes
+      const pdf = new jsPDF({
+        orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+        unit: 'px',
+        format: [canvas.width, canvas.height]
+      });
+      
+      pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
       
       // Geramos o PDF como Data URI (Base64)
       const pdfDataUri = pdf.output('datauristring');
@@ -267,11 +274,11 @@ Equipe GOD SHOP`)}`}
         </div>
       </div>
 
-      <div className="bg-[#ffffff] border shadow-sm rounded-xl print:shadow-none print:border-none">
+      <div className="bg-[#ffffff] border shadow-sm rounded-xl print:shadow-none print:border-none overflow-x-auto custom-scrollbar">
         <div 
           id="guarantee-note-content"
           ref={printRef}
-          className="text-[#000000] p-10 print:p-0 bg-[#ffffff] overflow-x-auto custom-scrollbar"
+          className="text-[#000000] p-10 print:p-0 bg-[#ffffff] min-w-[700px] break-words"
         >
           <div className="flex flex-col items-center border-b-2 border-[#000000] pb-6 mb-6">
             {logoImage ? (
