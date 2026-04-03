@@ -5,7 +5,7 @@ import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
 import { format, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Printer, ArrowLeft, Download, MessageCircle } from 'lucide-react';
+import { Printer, ArrowLeft, Download, MessageCircle, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function GuaranteeNote() {
@@ -69,23 +69,6 @@ export default function GuaranteeNote() {
   const consoleItem = consoles.find(c => c.id === sale.console_id);
   const client = clients.find(c => c.id === sale.client_id);
 
-  // Effect to prompt download as soon as page is ready
-  useEffect(() => {
-    if (sale && client) {
-      const timer = setTimeout(() => {
-        toast('Termo de Garantia Pronto!', {
-          description: 'Deseja baixar o arquivo PDF agora?',
-          action: {
-            label: 'Baixar Agora',
-            onClick: () => handleDownloadPDF(),
-          },
-          duration: 10000,
-        });
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [sale, client]);
-
   const isLacrado = (iphone?.condition === 'lacrado') || (consoleItem?.condition === 'lacrado');
   const warrantyMonths = isLacrado ? 12 : 6;
   
@@ -138,10 +121,10 @@ export default function GuaranteeNote() {
     printWindow.document.close();
   };
 
-  const handleDownloadPDF = async () => {
+  const handleDownloadPDF = async (direct = false) => {
     if (isDownloading || !printRef.current || !client || (!iphone && !consoleItem)) return;
     
-    const toastId = toast.loading('Gerando pré-visualização...');
+    const toastId = toast.loading(direct ? 'Iniciando download...' : 'Gerando pré-visualização...');
     setIsDownloading(true);
     
     try {
@@ -170,9 +153,9 @@ export default function GuaranteeNote() {
       const fileName = `Garantia_${safeName}.pdf`;
       
       // Tentativa de abrir em nova aba com HTML customizado (mais compatível com WebViews)
-      const previewWindow = window.open('', '_blank');
+      const previewWindow = !direct ? window.open('', '_blank') : null;
       
-      if (previewWindow) {
+      if (previewWindow && !direct) {
         previewWindow.document.write(`
           <!DOCTYPE html>
           <html>
@@ -200,14 +183,14 @@ export default function GuaranteeNote() {
         previewWindow.document.close();
         toast.success('Pré-visualização aberta!', { id: toastId });
       } else {
-        // Fallback: Download direto se o pop-up for bloqueado ou estiver em WebView restrita
+        // Fallback: Download direto se o pop-up for bloqueado ou se for solicitado download direto
         const link = document.createElement('a');
         link.href = pdfDataUri;
         link.download = fileName;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        toast.success('Download iniciado diretamente!', { id: toastId });
+        toast.success(direct ? 'Download iniciado!' : 'Download iniciado diretamente!', { id: toastId });
       }
 
     } catch (error) {
@@ -229,18 +212,28 @@ export default function GuaranteeNote() {
           Voltar
         </button>
         <div className="flex flex-wrap gap-2">
-          <button 
-            onClick={handleDownloadPDF}
-            disabled={isDownloading}
-            className="bg-blue-600 text-white px-6 py-2 rounded-md flex items-center gap-2 font-bold hover:bg-blue-700 disabled:opacity-50 transition-all shadow-lg active:scale-95"
-            title="Baixar Termo de Garantia em PDF"
-          >
-            <Download className="h-5 w-5" />
-            {isDownloading ? 'Gerando...' : 'Baixar como PDF'}
-          </button>
+          <div className="flex items-center shadow-lg rounded-md overflow-hidden">
+            <button 
+              onClick={() => handleDownloadPDF(false)}
+              disabled={isDownloading}
+              className="bg-blue-600 text-white px-6 py-2 flex items-center gap-2 font-bold hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95 border-r border-blue-500/30"
+              title="Visualizar e Baixar PDF"
+            >
+              <Download className="h-5 w-5" />
+              {isDownloading ? 'Gerando...' : 'Baixar como PDF'}
+            </button>
+            <button 
+              onClick={() => handleDownloadPDF(true)}
+              disabled={isDownloading}
+              className="bg-blue-600 text-white p-2.5 flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95"
+              title="Download Direto"
+            >
+              <FileDown className="h-5 w-5" />
+            </button>
+          </div>
           <button 
             onClick={handlePrint}
-            className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 font-medium hover:bg-primary/90"
+            className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 font-medium hover:bg-primary/90 shadow-lg"
           >
             <Printer className="h-4 w-4" />
             Imprimir
