@@ -104,43 +104,46 @@ export default function GuaranteeNote() {
   const handleDownloadPDF = async () => {
     if (isDownloading || !printRef.current || !client || (!iphone && !consoleItem)) return;
     
-    const toastId = toast.loading('Gerando PDF...');
+    const toastId = toast.loading('Gerando PDF para download...');
     setIsDownloading(true);
     
     try {
       const element = document.getElementById('guarantee-note-content');
       if (!element) throw new Error('Elemento não encontrado');
       
-      const [{ jsPDF }, html2canvas] = await Promise.all([
-        import('jspdf'),
-        import('html2canvas').then(m => m.default)
-      ]);
+      // Importações dinâmicas
+      const html2canvas = (await import('html2canvas')).default;
+      const { jsPDF } = await import('jspdf');
       
       const canvas = await html2canvas(element, {
-        scale: 2,
+        scale: 1.5, // Escala otimizada para mobile
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff'
       });
       
-      const imgData = canvas.toDataURL('image/jpeg', 0.8);
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-      
+      const imgData = canvas.toDataURL('image/jpeg', 0.7);
+      const pdf = new jsPDF();
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
       
-      const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
-      const fileName = `Garantia_${safeName}.pdf`;
-      
       const pdfBlob = pdf.output('blob');
-      saveAs(pdfBlob, fileName);
-      toast.success('Download iniciado!', { id: toastId });
+      const url = URL.createObjectURL(pdfBlob);
+      
+      // Método de download direto do navegador (mais compatível com mobile)
+      const link = document.createElement('a');
+      link.href = url;
+      const safeName = client.name.replace(/[^a-zA-Z0-9]/g, '_');
+      link.download = `Garantia_${safeName}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Limpeza
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      
+      toast.success('Download concluído!', { id: toastId });
 
     } catch (error) {
       console.error('PDF Error:', error);
@@ -160,14 +163,9 @@ export default function GuaranteeNote() {
     const message = encodeURIComponent(`Olá ${client.name}, estou enviando seu termo de garantia em PDF.`);
     const whatsappUrl = `https://wa.me/55${cleanPhone}?text=${message}`;
 
-    // 1. Abre o WhatsApp IMEDIATAMENTE (Evita bloqueio de pop-up e garante reação instantânea)
+    // Abre o WhatsApp de forma simples e direta
     window.open(whatsappUrl, '_blank');
-    
-    // 2. Inicia a geração do PDF em segundo plano
-    toast.info('Abrindo WhatsApp... O PDF será baixado em seguida para você anexar.');
-    
-    // Reutiliza a função de download que já está testada e funcionando
-    handleDownloadPDF();
+    toast.info('WhatsApp aberto! Agora anexe o PDF que você baixou.');
   };
 
   return (
