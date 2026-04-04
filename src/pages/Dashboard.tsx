@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { useQuery } from '@tanstack/react-query';
-import { DollarSign, Smartphone, ShoppingCart, TrendingUp, Lightbulb, RefreshCw, Sparkles } from 'lucide-react';
+import { DollarSign, Smartphone, ShoppingCart, TrendingUp, RefreshCw, Sparkles, Quote } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/shared/StatCard';
@@ -185,31 +185,44 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 animate-slide-up">
-      {/* Banner de Dica Compacto */}
-      <div className="bg-gradient-to-r from-primary/5 via-primary/10 to-transparent border border-primary/10 rounded-xl p-3 sm:p-4 flex items-center gap-4 relative overflow-hidden group">
-        <div className="bg-primary/20 p-2 rounded-lg shrink-0">
-          <Lightbulb className="h-5 w-5 text-primary animate-pulse" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-[10px] font-bold tracking-wider text-primary uppercase">Dica do Dia</span>
-            <button 
-              onClick={fetchTip} 
-              disabled={loadingTip}
-              className="p-1 hover:bg-primary/10 rounded-full transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={cn("h-3 w-3 text-muted-foreground", loadingTip && "animate-spin")} />
-            </button>
+      {/* Banner de Dica Premium */}
+      <div className="relative group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-4 sm:p-6 shadow-2xl transition-all duration-500 hover:bg-white/10">
+        {/* Efeito de brilho de fundo */}
+        <div className="absolute -right-10 -top-10 h-32 w-32 bg-primary/20 blur-[60px] transition-all duration-700 group-hover:bg-primary/30"></div>
+        <div className="absolute -left-10 -bottom-10 h-32 w-32 bg-primary/10 blur-[60px] transition-all duration-700 group-hover:bg-primary/20"></div>
+        
+        <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="h-[1px] w-4 bg-primary/50"></span>
+                <span className="text-[10px] font-black tracking-[0.2em] text-primary uppercase opacity-80">Insight Empreendedor</span>
+              </div>
+              <button 
+                onClick={fetchTip} 
+                disabled={loadingTip}
+                className="p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 disabled:opacity-50 active:scale-90"
+                title="Nova dica"
+              >
+                <RefreshCw className={cn("h-4 w-4 text-muted-foreground/60 hover:text-primary", loadingTip && "animate-spin")} />
+              </button>
+            </div>
+
+            <div className="relative">
+              <Quote className="absolute -left-2 -top-2 h-8 w-8 text-primary/10 -z-10 rotate-12" />
+              {loadingTip ? (
+                <div className="space-y-2 py-1">
+                  <div className="h-3 bg-white/10 animate-pulse rounded-full w-full"></div>
+                  <div className="h-3 bg-white/10 animate-pulse rounded-full w-2/3"></div>
+                </div>
+              ) : (
+                <p className="text-sm sm:text-base font-medium text-foreground/90 italic leading-relaxed pl-1">
+                  {tip}
+                </p>
+              )}
+            </div>
           </div>
-          {loadingTip ? (
-            <div className="h-4 bg-muted animate-pulse rounded w-1/2"></div>
-          ) : (
-            <p className="text-xs sm:text-sm font-medium text-foreground/90 truncate sm:whitespace-normal italic">
-              "{tip}"
-            </p>
-          )}
         </div>
-        <Sparkles className="absolute -right-2 -bottom-2 h-12 w-12 text-primary/5 group-hover:text-primary/10 transition-colors" />
       </div>
       
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
