@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
-import { Plus, Trash2, Edit2, Search, Smartphone, X, Gamepad2, Tag } from 'lucide-react';
+import { Plus, Trash2, Edit2, Search, Smartphone, X, Gamepad2, Tag, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
 
@@ -19,6 +19,21 @@ export default function PriceTable() {
   const { data: prices = [], isLoading } = useQuery({
     queryKey: ['prices'],
     queryFn: () => db.prices.list(),
+  });
+
+  const { data: dollarRate = 5.0 } = useQuery({
+    queryKey: ['dollarRate'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL');
+        const data = await res.json();
+        return parseFloat(data.USDBRL.bid);
+      } catch (e) {
+        console.error('Erro ao buscar cotação do dólar', e);
+        return 5.0; // Fallback
+      }
+    },
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
   const addMutation = useMutation({
@@ -86,16 +101,35 @@ export default function PriceTable() {
     onError: () => toast.error('Erro ao importar tabela.')
   });
 
+  // Auto-convert existing prices that don't have price_usd
+  React.useEffect(() => {
+    if (prices.length > 0 && dollarRate > 0) {
+      const unpeggedPrices = prices.filter(p => !p.price_usd && p.price > 0);
+      if (unpeggedPrices.length > 0) {
+        unpeggedPrices.forEach(async (item) => {
+          const priceUsd = Number((item.price / dollarRate).toFixed(2));
+          await db.prices.update(item.id, { price_usd: priceUsd });
+        });
+        queryClient.invalidateQueries({ queryKey: ['prices'] });
+      }
+    }
+  }, [prices, dollarRate, queryClient]);
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    
+    const inputPriceBrl = Number(formData.get('price'));
+    const calculatedUsd = Number((inputPriceBrl / dollarRate).toFixed(2));
+
     const data = {
       model: formData.get('model'),
       version: formData.get('version'),
       storage: formData.get('storage'),
       color: formData.get('color'),
       condition: formData.get('condition'),
-      price: Number(formData.get('price')),
+      price: inputPriceBrl,
+      price_usd: calculatedUsd,
       category: selectedCategory,
     };
 
@@ -128,7 +162,12 @@ export default function PriceTable() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Tabela de Preços (Venda)</h1>
-          <p className="text-muted-foreground text-sm mt-1">Gerencie os preços de venda para iPhones e Consoles</p>
+          <p className="text-muted-foreground text-sm mt-1">
+            Gerencie os preços de venda para iPhones e Consoles. 
+            <span className="ml-2 inline-flex items-center gap-1 text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-md">
+              <DollarSign className="h-3 w-3" /> Dólar Hoje: {formatBRL(dollarRate)}
+            </span>
+          </p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
           <button 
@@ -265,19 +304,20 @@ export default function PriceTable() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium text-emerald-600">Preço de Venda Sugerido</label>
+              <label className="text-sm font-medium text-emerald-600">Preço de Venda Sugerido (R$)</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 font-medium">R$</span>
                 <input 
                   name="price" 
-                  defaultValue={editingPrice?.price} 
+                  defaultValue={editingPrice ? (editingPrice.price_usd ? (editingPrice.price_usd * dollarRate).toFixed(2) : editingPrice.price) : ''} 
                   type="number" 
                   step="0.01" 
-                  required 
+                  required
                   className="w-full p-2.5 pl-10 border border-emerald-200 rounded-lg bg-emerald-50/30 text-emerald-700 font-semibold focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all" 
                   placeholder="0,00" 
                 />
               </div>
+              <p className="text-[10px] text-muted-foreground">O valor será ajustado automaticamente com a variação do dólar.</p>
             </div>
 
             <div className="lg:col-span-3 flex justify-end gap-3 pt-2 border-t mt-2">
@@ -371,7 +411,7 @@ export default function PriceTable() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-emerald-600 font-bold text-base">
-                      {formatBRL(item.price)}
+                      {formatBRL(item.price_usd ? item.price_usd * dollarRate : item.price)}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">

@@ -64,4 +64,5 @@ export interface PriceTableItem {
   color?: string;
   condition?: string;
   price: number;
+  price_usd?: number;
 }
