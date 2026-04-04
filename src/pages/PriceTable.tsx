@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
-import { Plus, Trash2, Edit2, Search, Smartphone, X, Gamepad2, Tag, DollarSign } from 'lucide-react';
+import { Plus, Trash2, Edit2, Search, Smartphone, X, Gamepad2, Tag, DollarSign, Calculator } from 'lucide-react';
 import { toast } from 'sonner';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
 
@@ -15,17 +15,20 @@ export default function PriceTable() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<Category>('iphone');
+  const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
+  const [calcDisplay, setCalcDisplay] = useState('0');
+  const [calcHistory, setCalcHistory] = useState('');
 
   const { data: prices = [], isLoading } = useQuery({
     queryKey: ['prices'],
     queryFn: () => db.prices.list(),
   });
 
-  const { data: dollarRate = 5.0 } = useQuery({
+  const { data: dollarRate = 5.0, refetch: refetchDollar, isRefetching: isRefetchingDollar } = useQuery({
     queryKey: ['dollarRate'],
     queryFn: async () => {
       try {
-        const res = await fetch('https://economia.awesomeapi.com.br/last/USD-BRL');
+        const res = await fetch(`https://economia.awesomeapi.com.br/last/USD-BRL?t=${Date.now()}`);
         const data = await res.json();
         return parseFloat(data.USDBRL.bid);
       } catch (e) {
@@ -33,8 +36,16 @@ export default function PriceTable() {
         return 5.0; // Fallback
       }
     },
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    refetchInterval: 1000 * 60, // Auto-refresh every 1 minute
+    staleTime: 0, // Always consider stale to allow manual refresh
   });
+
+  const handleManualRefresh = async () => {
+    const { data } = await refetchDollar();
+    if (data) {
+      toast.success(`Cotação atualizada: ${formatBRL(data)}`);
+    }
+  };
 
   const addMutation = useMutation({
     mutationFn: (newPrice: any) => db.prices.create(newPrice),
@@ -155,21 +166,118 @@ export default function PriceTable() {
     return Array.from(new Set(prices.filter(p => p.category === selectedCategory).map(p => p.model))).sort();
   }, [prices, selectedCategory]);
 
+  const handleCalcClick = (val: string) => {
+    if (val === 'C') {
+      setCalcDisplay('0');
+      setCalcHistory('');
+    } else if (val === '=') {
+      try {
+        // eslint-disable-next-line no-eval
+        const result = eval(calcDisplay.replace('x', '*').replace('÷', '/'));
+        setCalcHistory(calcDisplay + ' =');
+        setCalcDisplay(String(Number(result.toFixed(2))));
+      } catch (e) {
+        setCalcDisplay('Erro');
+      }
+    } else if (val === '%') {
+      try {
+        const parts = calcDisplay.trim().split(' ');
+        if (parts.length === 3) {
+          const num1 = parseFloat(parts[0]);
+          const operator = parts[1];
+          const num2 = parseFloat(parts[2]);
+          
+          if (!isNaN(num1) && !isNaN(num2)) {
+            let result;
+            const percentageValue = (num1 * num2) / 100;
+            
+            if (operator === '+') result = num1 + percentageValue;
+            else if (operator === '-') result = num1 - percentageValue;
+            else if (operator === 'x') result = percentageValue;
+            else if (operator === '÷') result = num1 / (num2 / 100);
+            
+            if (result !== undefined) {
+              setCalcHistory(`${calcDisplay}% =`);
+              setCalcDisplay(String(Number(result.toFixed(2))));
+              return;
+            }
+          }
+        }
+        
+        // Fallback para divisão simples por 100 se não houver operação composta
+        // eslint-disable-next-line no-eval
+        const currentVal = eval(calcDisplay.replace('x', '*').replace('÷', '/'));
+        setCalcDisplay(String(Number((currentVal / 100).toFixed(4))));
+      } catch (e) {
+        setCalcDisplay('Erro');
+      }
+    } else if (['+', '-', 'x', '÷'].includes(val)) {
+      setCalcDisplay(prev => prev + ' ' + val + ' ');
+    } else {
+      setCalcDisplay(prev => prev === '0' ? val : prev + val);
+    }
+  };
+
+  const quickConvert = (type: 'toUsd' | 'toBrl') => {
+    const currentVal = parseFloat(calcDisplay);
+    if (isNaN(currentVal)) return;
+    
+    if (type === 'toUsd') {
+      const result = currentVal / dollarRate;
+      setCalcHistory(`${formatBRL(currentVal)} / ${formatBRL(dollarRate)} =`);
+      setCalcDisplay(result.toFixed(2));
+    } else {
+      const result = currentVal * dollarRate;
+      setCalcHistory(`${currentVal} * ${formatBRL(dollarRate)} =`);
+      setCalcDisplay(result.toFixed(2));
+    }
+  };
+
   if (isLoading) return <div className="flex items-center justify-center h-64">Carregando...</div>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold tracking-tight">Tabela de Preços (Venda)</h1>
           <p className="text-muted-foreground text-sm mt-1">
             Gerencie os preços de venda para iPhones e Consoles. 
-            <span className="ml-2 inline-flex items-center gap-1 text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-md">
-              <DollarSign className="h-3 w-3" /> Dólar Hoje: {formatBRL(dollarRate)}
-            </span>
           </p>
         </div>
+        
+        <div className="bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-4 animate-in zoom-in-95 duration-500">
+          <div className="bg-white/20 p-2 rounded-lg">
+            <DollarSign className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-80">Dólar Comercial Hoje</p>
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-2xl font-black tracking-tighter">{formatBRL(dollarRate)}</h2>
+              <button 
+                onClick={handleManualRefresh}
+                disabled={isRefetchingDollar}
+                className={`text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded transition-all flex items-center gap-1 ${isRefetchingDollar ? 'animate-pulse opacity-50' : ''}`}
+              >
+                {isRefetchingDollar ? 'Atualizando...' : 'Atualizar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-muted/30 p-4 rounded-xl border border-dashed">
+        <p className="text-xs text-muted-foreground max-w-md">
+          <span className="font-bold text-emerald-600">Dica:</span> Os valores em Reais são recalculados instantaneamente sempre que a cotação do dólar muda. Isso garante que sua margem de lucro seja preservada.
+        </p>
         <div className="flex gap-2 w-full sm:w-auto">
+          <button 
+            onClick={() => setIsCalculatorOpen(true)}
+            className="bg-blue-600 text-white px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-blue-700 transition-colors w-full sm:w-auto justify-center shadow-sm"
+            title="Abrir Calculadora"
+          >
+            <Calculator className="h-4 w-4" />
+            Calculadora
+          </button>
           <button 
             onClick={() => importMutation.mutate()}
             disabled={importMutation.isPending}
@@ -348,7 +456,7 @@ export default function PriceTable() {
               placeholder="Pesquisar por modelo, armazenamento ou categoria..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-background border rounded-lg text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+              className="w-full pl-9 pr-4 py-2 bg-background border rounded-lg text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all" 
             />
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -461,6 +569,79 @@ export default function PriceTable() {
           </table>
         </div>
       </div>
+
+      {/* Calculator Modal */}
+      {isCalculatorOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border rounded-2xl shadow-2xl w-full max-w-[280px] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-primary p-3 flex items-center justify-between text-primary-foreground">
+              <div className="flex items-center gap-2 font-semibold text-sm">
+                <Calculator className="h-4 w-4" />
+                Calculadora
+              </div>
+              <button 
+                onClick={() => setIsCalculatorOpen(false)}
+                className="hover:bg-white/20 p-1 rounded-full transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            
+            <div className="p-3 bg-muted/30 text-right space-y-0.5">
+              <div className="text-[10px] text-muted-foreground h-3 overflow-hidden">{calcHistory}</div>
+              <div className="text-2xl font-bold tracking-tighter truncate">{calcDisplay}</div>
+            </div>
+
+            <div className="p-2 grid grid-cols-4 gap-1.5">
+              <button onClick={() => handleCalcClick('C')} className="bg-destructive/10 text-destructive hover:bg-destructive/20 p-2 rounded-lg font-bold transition-all text-xs">C</button>
+              <button onClick={() => handleCalcClick('%')} className="bg-muted hover:bg-muted/80 p-2 rounded-lg font-bold transition-all text-primary text-sm">%</button>
+              <button onClick={() => handleCalcClick('÷')} className="bg-muted hover:bg-muted/80 p-2 rounded-lg font-bold transition-all text-primary text-sm">÷</button>
+              <button onClick={() => handleCalcClick('x')} className="bg-muted hover:bg-muted/80 p-2 rounded-lg font-bold transition-all text-primary text-sm">x</button>
+              
+              {[7, 8, 9].map(n => (
+                <button key={n} onClick={() => handleCalcClick(String(n))} className="bg-background border hover:bg-muted p-2 rounded-lg font-semibold transition-all text-sm">{n}</button>
+              ))}
+              <button onClick={() => handleCalcClick('-')} className="bg-muted hover:bg-muted/80 p-2 rounded-lg font-bold transition-all text-primary text-sm">-</button>
+              
+              {[4, 5, 6].map(n => (
+                <button key={n} onClick={() => handleCalcClick(String(n))} className="bg-background border hover:bg-muted p-2 rounded-lg font-semibold transition-all text-sm">{n}</button>
+              ))}
+              <button onClick={() => handleCalcClick('+')} className="bg-muted hover:bg-muted/80 p-2 rounded-lg font-bold transition-all text-primary text-sm">+</button>
+              
+              {[1, 2, 3].map(n => (
+                <button key={n} onClick={() => handleCalcClick(String(n))} className="bg-background border hover:bg-muted p-2 rounded-lg font-semibold transition-all text-sm">{n}</button>
+              ))}
+              <button onClick={() => handleCalcClick('=')} className="row-span-2 bg-primary text-primary-foreground hover:bg-primary/90 p-2 rounded-lg font-bold transition-all shadow-md text-sm">=</button>
+              
+              <button onClick={() => handleCalcClick('0')} className="col-span-2 bg-background border hover:bg-muted p-2 rounded-lg font-semibold transition-all text-sm">0</button>
+              <button onClick={() => handleCalcClick('.')} className="bg-background border hover:bg-muted p-2 rounded-lg font-semibold transition-all text-sm">.</button>
+            </div>
+
+            <div className="px-2 pb-2 grid grid-cols-2 gap-1.5">
+              <button 
+                onClick={() => quickConvert('toUsd')}
+                className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 p-1.5 rounded-lg text-[9px] font-bold border border-emerald-200 flex flex-col items-center leading-tight"
+              >
+                CONVERTER PARA
+                <span className="text-[10px]">DÓLAR ($)</span>
+              </button>
+              <button 
+                onClick={() => quickConvert('toBrl')}
+                className="bg-blue-50 text-blue-700 hover:bg-blue-100 p-1.5 rounded-lg text-[9px] font-bold border border-blue-200 flex flex-col items-center leading-tight"
+              >
+                CONVERTER PARA
+                <span className="text-[10px]">REAL (R$)</span>
+              </button>
+            </div>
+            
+            <div className="bg-muted/50 p-1.5 text-center">
+              <p className="text-[9px] text-muted-foreground">
+                Cotação Atual: <span className="font-bold text-primary">{formatBRL(dollarRate)}</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmationModal
         isOpen={!!deleteId}

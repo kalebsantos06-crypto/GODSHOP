@@ -1,15 +1,46 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { useQuery } from '@tanstack/react-query';
-import { DollarSign, Smartphone, ShoppingCart, TrendingUp } from 'lucide-react';
+import { DollarSign, Smartphone, ShoppingCart, TrendingUp, Lightbulb, RefreshCw, Sparkles } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/shared/StatCard';
 import { formatBRL } from '../lib/formatCurrency';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { GoogleGenAI } from "@google/genai";
+import { cn } from '../lib/utils';
 
 export default function Dashboard() {
+  const [tip, setTip] = useState<string>('');
+  const [loadingTip, setLoadingTip] = useState(false);
+
+  const fetchTip = React.useCallback(async () => {
+    setLoadingTip(true);
+    try {
+      const apiKey = process.env.GEMINI_API_KEY || '';
+      if (!apiKey) {
+        setTip('Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!');
+        return;
+      }
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: "Dê uma dica curta, prática e motivadora para um dono de loja de iPhones, celulares e games. Varie muito os temas: vendas, estoque, marketing, atendimento ou mentalidade. Ocasionalmente, cite ou se inspire em grandes empreendedores de sucesso (ex: Steve Jobs, Jeff Bezos, Flávio Augusto, etc). Responda em português, seja direto e impactante. Máximo 180 caracteres.",
+      });
+      setTip(response.text || 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!');
+    } catch (error) {
+      console.error('Erro ao buscar dica:', error);
+      setTip('A inovação é o segredo do sucesso. Esteja sempre atento às novidades do mundo mobile e games!');
+    } finally {
+      setLoadingTip(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTip();
+  }, [fetchTip]);
+
   const { data: iphones = [], isLoading: isLoadingIphones } = useQuery({
     queryKey: ['iphones'],
     queryFn: () => db.iphones.list(),
@@ -153,12 +184,34 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-8 animate-slide-up">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground">Dashboard</h1>
-        <p className="text-muted-foreground text-sm sm:text-base font-medium">Bem-vindo de volta! Aqui está o resumo do seu negócio.</p>
+    <div className="space-y-6 animate-slide-up">
+      {/* Banner de Dica Compacto */}
+      <div className="bg-gradient-to-r from-primary/5 via-primary/10 to-transparent border border-primary/10 rounded-xl p-3 sm:p-4 flex items-center gap-4 relative overflow-hidden group">
+        <div className="bg-primary/20 p-2 rounded-lg shrink-0">
+          <Lightbulb className="h-5 w-5 text-primary animate-pulse" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[10px] font-bold tracking-wider text-primary uppercase">Dica do Dia</span>
+            <button 
+              onClick={fetchTip} 
+              disabled={loadingTip}
+              className="p-1 hover:bg-primary/10 rounded-full transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={cn("h-3 w-3 text-muted-foreground", loadingTip && "animate-spin")} />
+            </button>
+          </div>
+          {loadingTip ? (
+            <div className="h-4 bg-muted animate-pulse rounded w-1/2"></div>
+          ) : (
+            <p className="text-xs sm:text-sm font-medium text-foreground/90 truncate sm:whitespace-normal italic">
+              "{tip}"
+            </p>
+          )}
+        </div>
+        <Sparkles className="absolute -right-2 -bottom-2 h-12 w-12 text-primary/5 group-hover:text-primary/10 transition-colors" />
       </div>
-
+      
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard title="Lucro Total" value={formatBRL(totalProfit)} icon={DollarSign} color="green" preview={profitPreview} />
         <StatCard title="Vendas Realizadas" value={soldCount} icon={ShoppingCart} color="primary" preview={salesPreview} />
