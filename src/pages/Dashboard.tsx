@@ -12,34 +12,28 @@ import { GoogleGenAI } from "@google/genai";
 import { cn } from '../lib/utils';
 
 export default function Dashboard() {
-  const [tip, setTip] = useState<string>('');
-  const [loadingTip, setLoadingTip] = useState(false);
-
-  const fetchTip = React.useCallback(async () => {
-    setLoadingTip(true);
-    try {
-      const apiKey = process.env.GEMINI_API_KEY || '';
-      if (!apiKey) {
-        setTip('Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!');
-        return;
+  const { data: tip, isLoading: loadingTip, refetch: refetchTip } = useQuery({
+    queryKey: ['dailyTip'],
+    queryFn: async () => {
+      try {
+        const apiKey = process.env.GEMINI_API_KEY || '';
+        if (!apiKey) {
+          return 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!';
+        }
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: "Dê uma dica curta, prática e motivadora para um dono de loja de iPhones, celulares e games. Varie muito os temas: vendas, estoque, marketing, atendimento ou mentalidade. Ocasionalmente, cite ou se inspire em grandes empreendedores de sucesso (ex: Steve Jobs, Jeff Bezos, Flávio Augusto, etc). Responda em português, seja direto e impactante. Máximo 180 caracteres.",
+        });
+        return response.text || 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!';
+      } catch (error) {
+        console.error('Erro ao buscar dica:', error);
+        return 'A inovação é o segredo do sucesso. Esteja sempre atento às novidades do mundo mobile e games!';
       }
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: "Dê uma dica curta, prática e motivadora para um dono de loja de iPhones, celulares e games. Varie muito os temas: vendas, estoque, marketing, atendimento ou mentalidade. Ocasionalmente, cite ou se inspire em grandes empreendedores de sucesso (ex: Steve Jobs, Jeff Bezos, Flávio Augusto, etc). Responda em português, seja direto e impactante. Máximo 180 caracteres.",
-      });
-      setTip(response.text || 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!');
-    } catch (error) {
-      console.error('Erro ao buscar dica:', error);
-      setTip('A inovação é o segredo do sucesso. Esteja sempre atento às novidades do mundo mobile e games!');
-    } finally {
-      setLoadingTip(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchTip();
-  }, [fetchTip]);
+    },
+    refetchOnWindowFocus: true,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
 
   const { data: iphones = [], isLoading: isLoadingIphones } = useQuery({
     queryKey: ['iphones'],
@@ -199,7 +193,7 @@ export default function Dashboard() {
                 <span className="text-[10px] font-black tracking-[0.2em] text-primary uppercase opacity-80">Insight Empreendedor</span>
               </div>
               <button 
-                onClick={fetchTip} 
+                onClick={() => refetchTip()} 
                 disabled={loadingTip}
                 className="p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 disabled:opacity-50 active:scale-90"
                 title="Nova dica"
