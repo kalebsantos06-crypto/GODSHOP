@@ -376,17 +376,82 @@ Equipe GOD SHOP`)}`}
             <p>{iphone ? '6' : '5'}. <strong>Limitação de Responsabilidade:</strong> A GODSHOP não se responsabiliza por perda de dados ou informações pessoais contidas no aparelho. Recomendamos a realização de backup prévio.</p>
           </section>
 
-          <div className="pt-16 grid grid-cols-2 gap-8 text-center">
-            <div>
-              <div className="border-t border-[#000000] pt-2">
-                <p className="font-bold">Assinatura do Cliente</p>
-                <p className="text-xs text-[#6b7280] mt-1">{client?.name}</p>
+          {((sale.installments && sale.installments > 1) || sale.payment_method?.toLowerCase().includes('promissória') || sale.payment_method?.toLowerCase().includes('carnê')) && (
+            <section className="bg-[#f9fafb] p-4 rounded-lg border border-[#e5e7eb] text-sm space-y-3">
+              <h3 className="font-bold text-base mb-2">Cláusula de Reserva de Domínio, Inadimplência e Encargos</h3>
+              <p>O {iphone ? 'aparelho celular tipo iPhone' : 'console de videogame'}, descrito neste documento, é vendido de forma parcelada, com pagamento em parcelas semanais e/ou mensais, permanecendo sua propriedade com o vendedor até a quitação integral do valor acordado, nos termos do art. 521 e seguintes do Código Civil.</p>
+              <p>Até a quitação total, o comprador detém apenas a posse direta do bem, comprometendo-se a mantê-lo em perfeito estado de conservação, ficando expressamente proibido vendê-lo, cedê-lo, transferi-lo ou onerá-lo a terceiros sem autorização formal do vendedor, sob pena de vencimento antecipado da dívida.</p>
+              <p>O não pagamento de qualquer parcela por período superior a 10 (dez) dias caracterizará inadimplência, constituindo o comprador automaticamente em mora.</p>
+              <p>Em caso de atraso, incidirão os seguintes encargos:</p>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>Multa moratória de 2% sobre o valor da parcela em atraso;</li>
+                <li>Juros de mora de 1% ao mês, calculados proporcionalmente aos dias de atraso;</li>
+              </ul>
+              <p>Persistindo a inadimplência, poderá o vendedor, a seu exclusivo critério:</p>
+              <ul className="list-[lower-alpha] pl-5 space-y-1">
+                <li>exigir o pagamento imediato da totalidade da dívida vencida e vincenda (vencimento antecipado);</li>
+                <li>rescindir o contrato, com a devolução imediata do {iphone ? 'aparelho' : 'console'};</li>
+                <li>adotar as medidas judiciais cabíveis para recuperação do bem e/ou cobrança do débito, inclusive ação de busca e apreensão, quando aplicável.</li>
+              </ul>
+              <p>Em caso de devolução, o {iphone ? 'aparelho' : 'console'} deverá ser restituído nas mesmas condições em que foi entregue, ressalvado o desgaste natural, ficando o comprador responsável por eventuais danos, perdas ou avarias constatadas.</p>
+              <p>Os valores pagos poderão ser retidos, total ou parcialmente, para compensação do uso do bem, depreciação, despesas administrativas e prejuízos decorrentes da inadimplência, nos termos da legislação vigente.</p>
+              <p>Para fins de maior segurança jurídica, o presente instrumento poderá ser utilizado como título comprobatório da obrigação assumida, apto a embasar cobrança judicial mais célere.</p>
+              <p>Fica eleito o foro da comarca do domicílio do vendedor para dirimir quaisquer controvérsias oriundas deste contrato.</p>
+            </section>
+          )}
+
+          <div className="pt-12 space-y-8">
+            <div className="text-center">
+              <h3 className="font-bold text-base mb-2 uppercase">Declaração</h3>
+              <p className="text-sm">O comprador declara estar ciente e de acordo com todos os termos deste contrato.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-12 text-center pt-16">
+              <div>
+                <div className="border-t border-[#000000] pt-2">
+                  <p className="font-bold">Comprador</p>
+                  <p className="text-xs text-[#6b7280] mt-1">{client?.name}</p>
+                  {client?.cpf && <p className="text-xs text-[#6b7280]">CPF: {client.cpf}</p>}
+                </div>
+              </div>
+              <div>
+                <div className="border-t border-[#000000] pt-2 relative">
+                  <div className="absolute bottom-full mb-1 left-0 right-0 flex justify-center">
+                    <span style={{ fontFamily: "'Dancing Script', cursive" }} className="text-4xl text-blue-900 -rotate-3">Kaleb Santos</span>
+                  </div>
+                  <p className="font-bold">Vendedor</p>
+                  <p className="text-xs text-[#6b7280] mt-1">Kaleb Santos</p>
+                </div>
               </div>
             </div>
-            <div>
-              <div className="border-t border-[#000000] pt-2">
-                <p className="font-bold">Assinatura do Vendedor</p>
-                <p className="text-xs text-[#6b7280] mt-1">Kaleb Santos</p>
+
+            <div className="pt-8">
+              <h3 className="font-bold text-base mb-6 text-center uppercase">Testemunhas</h3>
+              <div className="grid grid-cols-2 gap-12">
+                <div className="space-y-6">
+                  <p className="font-bold text-sm">Testemunha 1:</p>
+                  <div className="border-b border-[#000000] pb-1 flex items-end h-6">
+                    <span className="text-sm font-semibold mr-2">Nome:</span>
+                  </div>
+                  <div className="border-b border-[#000000] pb-1 flex items-end h-6">
+                    <span className="text-sm font-semibold mr-2">CPF:</span>
+                  </div>
+                  <div className="border-b border-[#000000] pb-1 flex items-end h-10">
+                    <span className="text-sm font-semibold mr-2">Assinatura:</span>
+                  </div>
+                </div>
+                <div className="space-y-6">
+                  <p className="font-bold text-sm">Testemunha 2:</p>
+                  <div className="border-b border-[#000000] pb-1 flex items-end h-6">
+                    <span className="text-sm font-semibold mr-2">Nome:</span>
+                  </div>
+                  <div className="border-b border-[#000000] pb-1 flex items-end h-6">
+                    <span className="text-sm font-semibold mr-2">CPF:</span>
+                  </div>
+                  <div className="border-b border-[#000000] pb-1 flex items-end h-10">
+                    <span className="text-sm font-semibold mr-2">Assinatura:</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
