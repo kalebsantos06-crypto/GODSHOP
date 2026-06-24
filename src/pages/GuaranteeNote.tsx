@@ -3,8 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
-import { format, addMonths } from 'date-fns';
+import { format, addMonths, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { parseLocalDate } from '../lib/dateUtils';
 import { Printer, ArrowLeft, Download, MessageCircle, FileDown, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -45,7 +46,12 @@ export default function GuaranteeNote() {
     queryFn: () => db.clients.list(),
   });
 
-  if (isLoadingSales || isLoadingIphones || isLoadingConsoles || isLoadingClients) {
+  const { data: prices = [], isLoading: isLoadingPrices } = useQuery({
+    queryKey: ['prices'],
+    queryFn: () => db.prices.list(),
+  });
+
+  if (isLoadingSales || isLoadingIphones || isLoadingConsoles || isLoadingClients || isLoadingPrices) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
         <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
@@ -74,10 +80,35 @@ export default function GuaranteeNote() {
   const consoleItem = consoles.find(c => c.id === sale.console_id);
   const client = clients.find(c => c.id === sale.client_id);
 
+  // Calculate table price and discount
+  let originalPrice = sale.sell_price;
+  let discount = 0;
+
+  if (iphone) {
+    const matchedPrice = prices.find(p => 
+      p.category === 'iphone' && 
+      p.model.toLowerCase().trim() === iphone.model.toLowerCase().trim() && 
+      p.storage.toLowerCase().trim() === iphone.storage.toLowerCase().trim()
+    );
+    if (matchedPrice && matchedPrice.price > sale.sell_price) {
+      originalPrice = matchedPrice.price;
+      discount = originalPrice - sale.sell_price;
+    }
+  } else if (consoleItem) {
+    const matchedPrice = prices.find(p => 
+      p.category === 'console' && 
+      p.model.toLowerCase().trim() === consoleItem.model.toLowerCase().trim()
+    );
+    if (matchedPrice && matchedPrice.price > sale.sell_price) {
+      originalPrice = matchedPrice.price;
+      discount = originalPrice - sale.sell_price;
+    }
+  }
+
   const isLacrado = (iphone?.condition === 'lacrado') || (consoleItem?.condition === 'lacrado');
   const warrantyMonths = isLacrado ? 12 : 6;
   
-  const saleDate = new Date(sale.sale_date);
+  const saleDate = parseLocalDate(sale.sale_date);
   const endDate = addMonths(saleDate, warrantyMonths);
 
   const handlePrint = () => {
@@ -145,7 +176,80 @@ export default function GuaranteeNote() {
         logging: false,
         backgroundColor: '#ffffff',
         windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight
+        windowHeight: element.scrollHeight,
+        onclone: (clonedDocument) => {
+          // 1. Process all inline style attributes
+          const allElements = clonedDocument.querySelectorAll('*');
+          allElements.forEach(el => {
+            if (el instanceof HTMLElement && el.style) {
+              const style = el.style;
+              for (let i = 0; i < style.length; i++) {
+                const prop = style[i];
+                const value = style.getPropertyValue(prop);
+                if (value && value.includes('oklch')) {
+                  try {
+                    style.setProperty(prop, value.replace(/oklch\([^)]+\)/g, 'rgb(120, 120, 120)'));
+                  } catch (e) {
+                    console.warn('Error setting property in onclone inline style:', e);
+                  }
+                }
+              }
+            }
+          });
+
+          // 2. Process stylesheet rules
+          try {
+            const sheets = Array.from(clonedDocument.styleSheets);
+            sheets.forEach(sheet => {
+              try {
+                const rules = sheet.cssRules || sheet.rules;
+                if (!rules) return;
+                
+                const processRules = (ruleList: CSSRuleList) => {
+                  for (let i = 0; i < ruleList.length; i++) {
+                    const rule = ruleList[i];
+                    if (rule instanceof CSSStyleRule) {
+                      const style = rule.style;
+                      for (let j = 0; j < style.length; j++) {
+                        const prop = style[j];
+                        const val = style.getPropertyValue(prop);
+                        if (val && val.includes('oklch')) {
+                          try {
+                            style.setProperty(prop, val.replace(/oklch\([^)]+\)/g, 'rgb(120, 120, 120)'));
+                          } catch (e) {
+                            // ignore silent errors
+                          }
+                        }
+                      }
+                    } else if (rule instanceof CSSGroupingRule) {
+                      processRules(rule.cssRules);
+                    } else if (rule instanceof CSSMediaRule) {
+                      processRules(rule.cssRules);
+                    }
+                  }
+                };
+                
+                processRules(rules);
+              } catch (sheetErr) {
+                // ignore sheet cross-origin warnings
+              }
+            });
+          } catch (e) {
+            console.warn('Error processing styleSheets in onclone:', e);
+          }
+
+          // 3. Process direct style tag content fallback
+          const styleTags = clonedDocument.querySelectorAll('style');
+          styleTags.forEach(style => {
+            if (style.textContent) {
+              try {
+                style.textContent = style.textContent.replace(/oklch\([^)]+\)/g, 'rgb(120, 120, 120)');
+              } catch (e) {
+                console.warn('Error updating style tag textContent in onclone:', e);
+              }
+            }
+          });
+        }
       });
       
       const imgData = canvas.toDataURL('image/jpeg', 0.8);
@@ -349,25 +453,86 @@ Equipe GOD SHOP`)}`}
             <h2 className="text-lg font-bold border-b border-[#d1d5db] mb-3 pb-1">Detalhes da Venda</h2>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <p><span className="font-semibold">ID da Venda:</span> <span className="font-mono text-xs">{sale.id.split('-')[0].toUpperCase()}</span></p>
-              <p><span className="font-semibold">Data da Compra:</span> {format(new Date(sale.sale_date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
-              <p><span className="font-semibold">Valor Total:</span> {formatBRL(sale.sell_price)}</p>
+              <p><span className="font-semibold">Data da Compra:</span> {format(parseLocalDate(sale.sale_date), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
+              
+              {discount > 0 ? (
+                <>
+                  <p><span className="font-semibold">Preço de Tabela:</span> {formatBRL(originalPrice)}</p>
+                  <p className="text-emerald-600 font-medium"><span className="font-semibold">Desconto Aplicado:</span> -{formatBRL(discount)}</p>
+                </>
+              ) : null}
+
+              <p><span className="font-semibold">Valor Final do Produto:</span> {formatBRL(sale.sell_price)}</p>
+              
+              {sale.down_payment && sale.down_payment > 0 ? (
+                <>
+                  <p><span className="font-semibold">Valor de Entrada (Pago):</span> {formatBRL(sale.down_payment)}</p>
+                  <p><span className="font-semibold">Valor Restante:</span> {formatBRL(sale.sell_price - sale.down_payment)}</p>
+                </>
+              ) : null}
+              
               <p>
                 <span className="font-semibold">Forma de Pagamento:</span> {sale.payment_method}
                 {sale.installments && sale.installments > 1 && (
-                  ` (${sale.installments}x ${sale.installment_frequency === 'Semanal' ? 'Semanal' : 'Mensal'})`
+                  ` (${sale.installments}x ${sale.installment_frequency === 'Semanal' ? 'Semanal' : (sale.installment_frequency === 'Quinzenal' ? 'Quinzenal' : 'Mensal')})`
                 )}
               </p>
-              {sale.installments && sale.installments > 1 && (
-                <p><span className="font-semibold">Valor da Parcela:</span> {formatBRL(sale.sell_price / sale.installments)}</p>
-              )}
-              <p><span className="font-semibold">Vendedor:</span> Kaleb Santos</p>
+              
+              {sale.installments && sale.installments > 1 ? (
+                <div className="col-span-2 bg-emerald-50/50 p-4 rounded-lg border border-emerald-100 mt-2 space-y-3">
+                  <div>
+                    <span className="font-bold text-emerald-800 block text-xs uppercase tracking-wider">Plano de Parcelamento:</span>
+                    <span className="block mt-1 font-bold text-emerald-700 text-sm">
+                      {sale.installments} parcelas de {formatBRL((sale.sell_price - (sale.down_payment || 0)) / sale.installments)} ({sale.installment_frequency === 'Semanal' ? 'Semanais' : (sale.installment_frequency === 'Quinzenal' ? 'Quinzenais' : 'Mensais')})
+                    </span>
+                    <span className="text-[11px] text-emerald-600 block mt-1 leading-normal font-medium">
+                      * O valor de entrada de {formatBRL(sale.down_payment || 0)} {discount > 0 ? `e o desconto de ${formatBRL(discount)} já foram devidamente aplicados e deduzidos` : 'já foi devidamente aplicado e deduzido'} do saldo parcelado.
+                    </span>
+                  </div>
+
+                  <div className="border-t border-emerald-100 pt-3">
+                    <span className="font-bold text-emerald-800 text-[11px] block mb-2 uppercase tracking-wider">Cronograma de Vencimentos:</span>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {(() => {
+                        const baseDate = sale.first_installment_date ? parseLocalDate(sale.first_installment_date) : parseLocalDate(sale.sale_date);
+                        const installmentAmount = (sale.sell_price - (sale.down_payment || 0)) / sale.installments;
+                        const elements = [];
+                        for (let i = 1; i <= sale.installments; i++) {
+                          const intervalMultiplier = sale.first_installment_date ? (i - 1) : i;
+                          let dueDate;
+
+                          if (sale.installment_frequency === 'Semanal') {
+                            dueDate = addDays(baseDate, intervalMultiplier * 7);
+                          } else if (sale.installment_frequency === 'Quinzenal') {
+                            dueDate = addDays(baseDate, intervalMultiplier * 15);
+                          } else {
+                            dueDate = addMonths(baseDate, intervalMultiplier);
+                          }
+                          elements.push(
+                            <div key={i} className="flex justify-between items-center bg-white border border-emerald-100/50 p-2 rounded shadow-sm">
+                              <span className="font-semibold text-emerald-800">{i}ª Parcela</span>
+                              <div className="text-right">
+                                <span className="font-bold text-emerald-700 block">{format(dueDate, 'dd/MM/yyyy')}</span>
+                                <span className="text-[10px] text-emerald-600 font-medium">{formatBRL(installmentAmount)}</span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return elements;
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              
+              <p className="col-span-2 mt-2"><span className="font-semibold">Vendedor:</span> Kaleb Santos</p>
             </div>
           </section>
 
           <section className="bg-[#f9fafb] p-4 rounded-lg border border-[#e5e7eb] text-sm space-y-3">
             <h3 className="font-bold text-base mb-2">Termos e Condições de Garantia</h3>
             <p>1. <strong>Prazo e Cobertura:</strong> Este aparelho possui garantia de {warrantyMonths === 12 ? '1 (um) ano' : '6 (seis) meses'}, cobrindo exclusivamente defeitos de funcionamento de hardware decorrentes de vícios de fabricação. A garantia é válida de {format(saleDate, "dd/MM/yyyy")} até {format(endDate, "dd/MM/yyyy")}.</p>
-            <p>2. <strong>Exclusões:</strong> Esta garantia não cobre danos decorrentes de mau uso, negligência, acidentes, contato com líquidos (oxidação), quedas, quebra de tela, ou qualquer dano físico. Estão excluídos também danos causados por software de terceiros, modificações não autorizadas (jailbreak/root) e uso de acessórios não compatíveis ou não originais.</p>
+            <p>2. <strong>Exclusões:</strong> Esta garantia não cobre danos decorrentes de mau uso, negligência, acidentes, contato com líquidos (oxidação), quedas, quebra de tela, ou qualquer dano físico. Estão excluídos também danos causados por software de terceiros, modificações não autorizadas (jailbreak/root) e uso de acessórios não compatíveis ou não originais. <strong className="text-red-650 bg-red-50 px-1 border border-red-200 rounded">ATENÇÃO: Caso o aparelho apresente qualquer tipo de sinal de dano físico ou marcas, por menor que seja, e o aparelho venha a apresentar defeito, a garantia NÃO cobrirá o mesmo. A cobertura é válida APENAS se o aparelho for apresentado exatamente no mesmo estado de conservação física em que foi adquirido na loja.</strong></p>
             <p>3. <strong>Violação de Selos:</strong> A remoção, dano ou violação de selos de garantia ou de segurança implica na perda imediata da cobertura.</p>
             <p>4. <strong>Procedimento:</strong> Para acionar a garantia, é obrigatória a apresentação deste termo. O prazo para análise técnica é de até 30 (trinta) dias, conforme legislação vigente.</p>
             {iphone && (
@@ -379,7 +544,7 @@ Equipe GOD SHOP`)}`}
           {((sale.installments && sale.installments > 1) || sale.payment_method?.toLowerCase().includes('promissória') || sale.payment_method?.toLowerCase().includes('carnê')) && (
             <section className="bg-[#f9fafb] p-4 rounded-lg border border-[#e5e7eb] text-sm space-y-3">
               <h3 className="font-bold text-base mb-2">Cláusula de Reserva de Domínio, Inadimplência e Encargos</h3>
-              <p>O {iphone ? 'aparelho celular tipo iPhone' : 'console de videogame'}, descrito neste documento, é vendido de forma parcelada, com pagamento em parcelas semanais e/ou mensais, permanecendo sua propriedade com o vendedor até a quitação integral do valor acordado, nos termos do art. 521 e seguintes do Código Civil.</p>
+              <p>O {iphone ? 'aparelho celular tipo iPhone' : 'console de videogame'}, descrito neste documento, é vendido de forma parcelada, com pagamento em parcelas semanais, quinzenais e/ou mensais, permanecendo sua propriedade com o vendedor até a quitação integral do valor acordado, nos termos do art. 521 e seguintes do Código Civil.</p>
               <p>Até a quitação total, o comprador detém apenas a posse direta do bem, comprometendo-se a mantê-lo em perfeito estado de conservação, ficando expressamente proibido vendê-lo, cedê-lo, transferi-lo ou onerá-lo a terceiros sem autorização formal do vendedor, sob pena de vencimento antecipado da dívida.</p>
               <p>O não pagamento de qualquer parcela por período superior a 10 (dez) dias caracterizará inadimplência, constituindo o comprador automaticamente em mora.</p>
               <p>Em caso de atraso, incidirão os seguintes encargos:</p>

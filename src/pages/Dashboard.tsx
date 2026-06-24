@@ -8,6 +8,7 @@ import StatCard from '../components/shared/StatCard';
 import { formatBRL } from '../lib/formatCurrency';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { parseLocalDate } from '../lib/dateUtils';
 import { GoogleGenAI } from "@google/genai";
 import { cn } from '../lib/utils';
 
@@ -22,7 +23,7 @@ export default function Dashboard() {
         }
         const ai = new GoogleGenAI({ apiKey });
         const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-3.5-flash",
           contents: "Dê uma dica curta, prática e motivadora para um dono de loja de iPhones, celulares e games. Varie muito os temas: vendas, estoque, marketing, atendimento ou mentalidade. Ocasionalmente, cite ou se inspire em grandes empreendedores de sucesso (ex: Steve Jobs, Jeff Bezos, Flávio Augusto, etc). Responda em português, seja direto e impactante. Máximo 180 caracteres.",
         });
         return response.text || 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!';
@@ -50,13 +51,16 @@ export default function Dashboard() {
     queryFn: () => db.sales.list(),
   });
 
+  const { data: clients = [], isLoading: isLoadingClients } = useQuery({
+    queryKey: ['clients'],
+    queryFn: () => db.clients.list(),
+  });
+
   const availableIphones = iphones.filter(p => p.status === 'disponivel');
   const availableConsoles = consoles.filter(p => p.status === 'disponivel');
   const availableCount = availableIphones.length + availableConsoles.length;
   
-  const soldIphones = iphones.filter(p => p.status === 'vendido');
-  const soldConsoles = consoles.filter(p => p.status === 'vendido');
-  const soldCount = soldIphones.length + soldConsoles.length;
+  const soldCount = sales.length;
   
   // Calculate profit
   const totalProfit = sales.reduce((sum, sale) => {
@@ -84,10 +88,12 @@ export default function Dashboard() {
       label = item ? `${item.model} ${item.version}` : 'Console';
       buyPrice = item?.buy_price || 0;
     }
+    const client = clients.find(c => c.id === sale.client_id);
+    const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
     return {
-      label,
+      label: clientDisplay,
       value: formatBRL(sale.sell_price - buyPrice),
-      sublabel: format(new Date(sale.sale_date), 'dd/MM')
+      sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
     };
   });
 
@@ -100,8 +106,10 @@ export default function Dashboard() {
       const item = consoles.find(c => c.id === sale.console_id);
       label = item ? `${item.model}` : 'Console';
     }
+    const client = clients.find(c => c.id === sale.client_id);
+    const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
     return {
-      label,
+      label: clientDisplay,
       value: formatBRL(sale.sell_price),
       sublabel: sale.payment_method
     };
@@ -169,7 +177,7 @@ export default function Dashboard() {
     };
   });
 
-  if (isLoadingIphones || isLoadingSales || isLoadingConsoles) {
+  if (isLoadingIphones || isLoadingSales || isLoadingConsoles || isLoadingClients) {
     return (
       <div className="flex h-[50vh] items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>

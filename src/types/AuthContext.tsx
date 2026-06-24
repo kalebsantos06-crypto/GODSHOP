@@ -6,6 +6,7 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string) => Promise<{ error: any }>;
   logout: () => Promise<void>;
 }
 
@@ -40,6 +41,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error };
   };
 
+  const signUp = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (data.user) {
+      setUser(data.user);
+      setIsAuthenticated(true);
+    }
+    return { error };
+  };
+
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -49,7 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   if (loading) return null;
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, login, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, login, signUp, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -51,8 +51,9 @@ export interface Sale {
   payment_method: string;
   sale_date: string;
   installments?: number;
-  installment_frequency?: 'Semanal' | 'Mensal';
+  installment_frequency?: 'Semanal' | 'Quinzenal' | 'Mensal';
   down_payment?: number;
+  first_installment_date?: string;
 }
 
 export interface PriceTableItem {

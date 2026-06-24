@@ -132,7 +132,7 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="bg-card border rounded-xl p-6 shadow-sm mt-6">
+      <div className="bg-card border border-white/10 rounded-xl p-6 shadow-sm mt-6">
         <h2 className="text-lg font-semibold text-destructive flex items-center gap-2 mb-4">
           <LogOut className="h-5 w-5" />
           Sessão
@@ -142,7 +142,7 @@ export default function Settings() {
         </p>
         <button
           onClick={logout}
-          className="bg-destructive text-destructive-foreground hover:bg-destructive/90 px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
+          className="bg-destructive text-destructive-foreground hover:bg-destructive/90 px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer"
         >
           <LogOut className="h-4 w-4" />
           Sair do Aplicativo

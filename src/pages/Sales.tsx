@@ -6,6 +6,7 @@ import { Plus, FileText, Filter, Edit2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { parseLocalDate } from '../lib/dateUtils';
 import { Link } from 'react-router-dom';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
 import { Console } from '../types';
@@ -88,6 +89,8 @@ export default function Sales() {
     const iphoneId = formData.get('iphone_id');
     const consoleId = formData.get('console_id');
 
+    const firstInstallmentDate = formData.get('first_installment_date');
+
     addMutation.mutate({
       iphone_id: iphoneId ? iphoneId.toString() : null,
       console_id: consoleId ? consoleId.toString() : null,
@@ -96,8 +99,9 @@ export default function Sales() {
       down_payment: Number(formData.get('down_payment')) || 0,
       payment_method: formData.get('payment_method'),
       installments: Number(formData.get('installments')) || 1,
-      installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Mensal',
+      installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Quinzenal' | 'Mensal',
       sale_date: formData.get('sale_date') ? new Date(formData.get('sale_date') as string).toISOString() : new Date().toISOString(),
+      first_installment_date: firstInstallmentDate ? new Date(firstInstallmentDate as string).toISOString() : undefined,
     });
   };
 
@@ -107,6 +111,7 @@ export default function Sales() {
     const formData = new FormData(e.currentTarget);
     const iphoneId = formData.get('iphone_id');
     const consoleId = formData.get('console_id');
+    const firstInstallmentDate = formData.get('first_installment_date');
 
     updateMutation.mutate({
       id: editingSale.id,
@@ -118,8 +123,9 @@ export default function Sales() {
         down_payment: Number(formData.get('down_payment')) || 0,
         payment_method: formData.get('payment_method'),
         installments: Number(formData.get('installments')) || 1,
-        installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Mensal',
+        installment_frequency: formData.get('installment_frequency') as 'Semanal' | 'Quinzenal' | 'Mensal',
         sale_date: formData.get('sale_date') ? new Date(formData.get('sale_date') as string).toISOString() : editingSale.sale_date,
+        first_installment_date: firstInstallmentDate ? new Date(firstInstallmentDate as string).toISOString() : null,
       }
     });
   };
@@ -129,10 +135,10 @@ export default function Sales() {
 
   const filteredSales = sales.filter(sale => {
     if (!startDate || !endDate) return true;
-    const date = new Date(sale.sale_date);
+    const date = parseLocalDate(sale.sale_date);
     return isWithinInterval(date, {
-      start: startOfDay(new Date(startDate)),
-      end: endOfDay(new Date(endDate))
+      start: startOfDay(parseLocalDate(startDate)),
+      end: endOfDay(parseLocalDate(endDate))
     });
   });
 
@@ -158,6 +164,7 @@ export default function Sales() {
               setIsAdding(!isAdding);
               setEditingSale(null);
               setTempPrice(0);
+              setTempDownPayment(0);
               setTempInstallments(1);
             }}
             className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-primary/90"
@@ -169,7 +176,7 @@ export default function Sales() {
       </div>
 
       {(isAdding || editingSale) && (
-        <div className="bg-card border rounded-xl p-6 shadow-sm">
+        <div key={editingSale ? `edit-${editingSale.id}` : 'add'} className="bg-card border rounded-xl p-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">{editingSale ? 'Editar Venda' : 'Registrar Venda'}</h2>
           <form onSubmit={editingSale ? handleUpdate : handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-2">
@@ -257,6 +264,7 @@ export default function Sales() {
                 />
                 <select name="installment_frequency" defaultValue={editingSale?.installment_frequency || 'Mensal'} className="w-1/2 p-2 border rounded-md bg-background">
                   <option value="Mensal">Mensal</option>
+                  <option value="Quinzenal">Quinzenal</option>
                   <option value="Semanal">Semanal</option>
                 </select>
               </div>
@@ -271,11 +279,23 @@ export default function Sales() {
               <input 
                 name="sale_date" 
                 type="date" 
-                defaultValue={editingSale ? format(new Date(editingSale.sale_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
+                defaultValue={editingSale ? format(parseLocalDate(editingSale.sale_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
                 required 
                 className="w-full p-2 border rounded-md bg-background" 
               />
             </div>
+            {tempInstallments > 1 && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Data da 1ª Parcela</label>
+                <input 
+                  name="first_installment_date" 
+                  type="date" 
+                  defaultValue={editingSale?.first_installment_date ? format(parseLocalDate(editingSale.first_installment_date), 'yyyy-MM-dd') : ''} 
+                  required 
+                  className="w-full p-2 border rounded-md bg-background" 
+                />
+              </div>
+            )}
             <div className="lg:col-span-4 flex justify-end gap-2 mt-2">
               <button type="button" onClick={() => { setIsAdding(false); setEditingSale(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
                 Cancelar
@@ -339,7 +359,7 @@ export default function Sales() {
 
                 return (
                   <tr key={sale.id} className="hover:bg-muted/50">
-                    <td className="px-4 py-3">{format(new Date(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</td>
+                    <td className="px-4 py-3">{format(parseLocalDate(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</td>
                     <td className="px-4 py-3 font-medium">{iphone ? `${iphone.model} ${iphone.storage}` : (console ? `${console.model} - ${console.version}` : 'N/A')}</td>
                     <td className="px-4 py-3">{client?.name || 'N/A'}</td>
                     <td className="px-4 py-3">
@@ -355,8 +375,9 @@ export default function Sales() {
                       {sale.payment_method}
                       {sale.installments && sale.installments > 1 && (
                         <span className="text-xs text-muted-foreground block">
-                          {sale.installments}x {sale.installment_frequency === 'Semanal' ? 'Semanal' : 'Mensal'}
+                          {sale.installments}x {sale.installment_frequency === 'Semanal' ? 'Semanal' : (sale.installment_frequency === 'Quinzenal' ? 'Quinzenal' : 'Mensal')}
                           {sale.down_payment && sale.down_payment > 0 && ` (Restante: ${formatBRL(remaining)})`}
+                          {sale.first_installment_date && ` • 1ª parc: ${format(parseLocalDate(sale.first_installment_date), 'dd/MM/yyyy')}`}
                         </span>
                       )}
                     </td>

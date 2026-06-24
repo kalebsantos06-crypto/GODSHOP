@@ -28,7 +28,10 @@ export default function Suppliers() {
       setIsAdding(false);
       toast.success('Fornecedor adicionado!');
     },
-    onError: () => toast.error('Erro ao adicionar fornecedor.')
+    onError: (error: any) => {
+      console.error('Erro ao adicionar fornecedor:', error);
+      toast.error(`Erro ao adicionar fornecedor: ${error?.message || error}`);
+    }
   });
 
   const updateMutation = useMutation({
@@ -38,7 +41,10 @@ export default function Suppliers() {
       setEditingSupplier(null);
       toast.success('Fornecedor atualizado!');
     },
-    onError: () => toast.error('Erro ao atualizar fornecedor.')
+    onError: (error: any) => {
+      console.error('Erro ao atualizar fornecedor:', error);
+      toast.error(`Erro ao atualizar fornecedor: ${error?.message || error}`);
+    }
   });
 
   const deleteMutation = useMutation({
@@ -46,6 +52,10 @@ export default function Suppliers() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       toast.success('Fornecedor removido!');
+    },
+    onError: (error: any) => {
+      console.error('Erro ao remover fornecedor:', error);
+      toast.error(`Erro ao remover fornecedor: ${error?.message || error}`);
     }
   });
 
@@ -53,8 +63,8 @@ export default function Suppliers() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     addMutation.mutate({
-      name: formData.get('name'),
-      contact: formData.get('contact'),
+      name: formData.get('name') as string,
+      contact: formData.get('contact') as string,
     });
   };
 
@@ -65,8 +75,8 @@ export default function Suppliers() {
     updateMutation.mutate({
       id: editingSupplier.id,
       data: {
-        name: formData.get('name'),
-        contact: formData.get('contact'),
+        name: formData.get('name') as string,
+        contact: formData.get('contact') as string,
       }
     });
   };

@@ -1,14 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp } from 'lucide-react';
-import { useAuth } from '../types/AuthContext';
+import { LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp, User, LogIn, LogOut, X } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAuth } from '../types/AuthContext';
+import { toast } from 'sonner';
 
 export default function Layout() {
   const location = useLocation();
-  const { logout } = useAuth();
   const mainRef = useRef<HTMLDivElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  
+  const { user, login, signUp, logout, isAuthenticated } = useAuth();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isSignUpMode, setIsSignUpMode] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
   
   const [bgImage, setBgImage] = useState<string>('/background.jpg');
   const [logoImage, setLogoImage] = useState<string | null>(null);
@@ -164,6 +171,26 @@ export default function Layout() {
             )}
           </button>
           
+          <button
+            onClick={() => setIsAuthModalOpen(true)}
+            className={cn(
+              "flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all shadow-xl group",
+              theme === 'dark'
+                ? (isAuthenticated ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" : "bg-white/5 hover:bg-white/10 border-white/10 text-white/80")
+                : (isAuthenticated ? "bg-emerald-500/5 border-emerald-500/15 text-emerald-600 hover:bg-emerald-500/10" : "bg-black/5 hover:bg-black/10 border-black/10 text-black/80")
+            )}
+            title={isAuthenticated ? `Conectado: ${user?.email}` : "Entrar ou Sincronizar Nuvem"}
+          >
+            {isAuthenticated ? (
+              <User className="h-4 w-4 text-emerald-400" />
+            ) : (
+              <LogIn className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">
+              {isAuthenticated ? "Minha Conta" : "Sincronizar"}
+            </span>
+          </button>
+
           <Link
             to="/settings"
             className={cn(
@@ -250,6 +277,149 @@ export default function Layout() {
           </div>
         </div>
       </nav>
+
+      {/* Account / Sync Modal */}
+      {isAuthModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            onClick={() => {
+              if (!authLoading) setIsAuthModalOpen(false);
+            }}
+          />
+          
+          <div className={cn(
+            "relative w-full max-w-md rounded-2xl border shadow-2xl p-6 overflow-hidden transition-all duration-300 animate-in zoom-in-95",
+            theme === 'dark' 
+              ? "bg-zinc-900 border-white/10 text-white" 
+              : "bg-white border-black/10 text-zinc-900"
+          )}>
+            <button
+              onClick={() => setIsAuthModalOpen(false)}
+              disabled={authLoading}
+              className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition"
+            >
+              <X className="h-5 w-5 opacity-70" />
+            </button>
+
+            {isAuthenticated ? (
+              <div className="flex flex-col items-center text-center py-4">
+                <div className="p-4 bg-emerald-500/10 rounded-full mb-4 border border-emerald-500/20">
+                  <User className="h-10 w-10 text-emerald-400" />
+                </div>
+                <h3 className="text-xl font-bold mb-1">Backup na Nuvem Ativo</h3>
+                <p className="text-sm opacity-70 mb-5">Seus dados e relatórios estão salvos de forma segura.</p>
+                
+                <div className="w-full text-left p-3 rounded-xl mb-6 text-xs font-mono break-all dark:bg-white/5 bg-black/5 border dark:border-white/10 border-black/10">
+                  <span className="opacity-50 block mb-0.5 text-[10px]">EMAIL VINCULADO</span>
+                  {user?.email}
+                </div>
+
+                <button
+                  onClick={async () => {
+                    setAuthLoading(true);
+                    try {
+                      await logout();
+                      toast.success('Desconectado com sucesso!');
+                      setIsAuthModalOpen(false);
+                    } catch (e) {
+                      toast.error('Erro ao desconectar.');
+                    } finally {
+                      setAuthLoading(false);
+                    }
+                  }}
+                  disabled={authLoading}
+                  className="w-full py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition duration-200"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sair da Conta
+                </button>
+              </div>
+            ) : (
+              <div>
+                <h3 className="text-xl font-bold mb-1 text-center">
+                  {isSignUpMode ? 'Criar Nova Conta' : 'Sincronizar Cloud'}
+                </h3>
+                <p className="text-xs opacity-60 text-center mb-6">
+                  {isSignUpMode 
+                    ? 'Registre-se para salvar seus preços, clientes e notas com segurança na nuvem.' 
+                    : 'Acesse de qualquer lugar e recupere seus clientes, vendas e tabela de preços.'}
+                </p>
+
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!authEmail || !authPassword) {
+                    toast.error('Por favor, preencha todos os campos!');
+                    return;
+                  }
+                  setAuthLoading(true);
+                  try {
+                    let result;
+                    if (isSignUpMode) {
+                      result = await signUp(authEmail, authPassword);
+                      if (result.error) throw result.error;
+                      toast.success('Conta criada e sincronizada com sucesso!');
+                    } else {
+                      result = await login(authEmail, authPassword);
+                      if (result.error) throw result.error;
+                      toast.success('Login efetuado e banco de dados sincronizado!');
+                    }
+                    setIsAuthModalOpen(false);
+                    // Force refresh queries
+                    window.location.reload();
+                  } catch (err: any) {
+                    console.error(err);
+                    toast.error(err.message || 'Erro ao processar requisição.');
+                  } finally {
+                    setAuthLoading(false);
+                  }
+                }} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1 opacity-70 uppercase tracking-wider">E-mail</label>
+                    <input
+                      type="email"
+                      value={authEmail}
+                      onChange={e => setAuthEmail(e.target.value)}
+                      placeholder="seuemail@exemplo.com"
+                      required
+                      className="w-full p-3 rounded-xl border dark:bg-white/5 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold mb-1 opacity-70 uppercase tracking-wider">Senha</label>
+                    <input
+                      type="password"
+                      value={authPassword}
+                      onChange={e => setAuthPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      className="w-full p-3 rounded-xl border dark:bg-white/5 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-medium"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full py-3 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-semibold rounded-xl shadow-lg transition duration-200 mt-2"
+                  >
+                    {authLoading ? 'Processando...' : (isSignUpMode ? 'Cadastrar e Conectar' : 'Entrar e Sincronizar')}
+                  </button>
+                </form>
+
+                <div className="mt-5 text-center text-xs">
+                  <button
+                    onClick={() => setIsSignUpMode(!isSignUpMode)}
+                    className="text-emerald-500 hover:underline font-bold"
+                  >
+                    {isSignUpMode ? 'Já tem uma conta? Fazer Login' : 'Não tem uma conta? Cadastre-se'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

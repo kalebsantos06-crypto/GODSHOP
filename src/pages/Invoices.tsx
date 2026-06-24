@@ -4,6 +4,7 @@ import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { parseLocalDate } from '../lib/dateUtils';
 import { Link } from 'react-router-dom';
 import { Receipt } from 'lucide-react';
 
@@ -51,7 +52,7 @@ export default function Invoices() {
                 <div>
                   <h3 className="font-semibold text-lg">{client?.name || 'Cliente Desconhecido'}</h3>
                   <div className="flex gap-2 text-xs text-muted-foreground">
-                    <p>{format(new Date(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</p>
+                    <p>{format(parseLocalDate(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</p>
                     <span>•</span>
                     <p className="font-mono">#{sale.id.split('-')[0].toUpperCase()}</p>
                   </div>
@@ -68,7 +69,7 @@ export default function Invoices() {
                 <p>
                   <span className="font-medium">Pagamento:</span> {sale.payment_method}
                   {sale.installments && sale.installments > 1 && (
-                    ` (${sale.installments}x ${sale.installment_frequency === 'Semanal' ? 'Semanal' : 'Mensal'})`
+                    ` (${sale.installments}x ${sale.installment_frequency === 'Semanal' ? 'Semanal' : (sale.installment_frequency === 'Quinzenal' ? 'Quinzenal' : 'Mensal')})`
                   )}
                 </p>
               </div>
