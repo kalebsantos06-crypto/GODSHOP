@@ -1,5 +1,6 @@
 {
   "name": "GODSHOP",
-  "description": "Dashboard para gerenciamento de estoque e vendas de iPhones com gráficos de lucro mensal.",
-  "requestFramePermissions": []
+  "description": "Dashboard para gerenciamento de estoque e vendas de iPhones e Consoles com restauração de dados inteligente via IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

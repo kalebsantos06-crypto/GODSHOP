@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp, User, LogIn, LogOut, X } from 'lucide-react';
+import { LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp, User, LogIn, LogOut, X, Download, Eye, EyeOff } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
+import { db } from '../services/db';
 
 export default function Layout() {
   const location = useLocation();
   const mainRef = useRef<HTMLDivElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   
-  const { user, login, signUp, logout, isAuthenticated } = useAuth();
+  const { user, login, signUp, logout, isAuthenticated, isOfflineMode } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [isSignUpMode, setIsSignUpMode] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   
@@ -24,16 +26,53 @@ export default function Layout() {
     return (saved as 'light' | 'dark') || 'dark';
   });
 
+  const [isNavBarVisible, setIsNavBarVisible] = useState<boolean>(() => {
+    const saved = localStorage.getItem('app_nav_bar_visible');
+    return saved !== 'false';
+  });
+
+  const toggleNavBar = () => {
+    setIsNavBarVisible(prev => {
+      const next = !prev;
+      localStorage.setItem('app_nav_bar_visible', String(next));
+      return next;
+    });
+  };
+
   useEffect(() => {
-    const loadSettings = () => {
+    const loadSettings = async () => {
+      // Set local first as immediate state
       setBgImage(localStorage.getItem('app_background') || 'https://images.unsplash.com/photo-1614850523296-d8c1af93d400?q=80&w=2070&auto=format&fit=crop');
       setLogoImage(localStorage.getItem('app_logo') || null);
+
+      try {
+        const queryParams = user?.id ? `?userId=${user.id}` : '';
+        const res = await fetch(`/api/settings${queryParams}`);
+        if (res.ok) {
+          const serverSettings = await res.json();
+          if (serverSettings.app_background) {
+            localStorage.setItem('app_background', serverSettings.app_background);
+            setBgImage(serverSettings.app_background);
+          }
+          if (serverSettings.app_logo !== undefined) {
+            if (serverSettings.app_logo) {
+              localStorage.setItem('app_logo', serverSettings.app_logo);
+              setLogoImage(serverSettings.app_logo);
+            } else {
+              localStorage.removeItem('app_logo');
+              setLogoImage(null);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error loading settings from server:", err);
+      }
     };
 
     loadSettings();
     window.addEventListener('settings_updated', loadSettings);
     return () => window.removeEventListener('settings_updated', loadSettings);
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     localStorage.setItem('app_theme', theme);
@@ -79,6 +118,7 @@ export default function Layout() {
     { name: 'Fornecedores', href: '/suppliers', icon: Truck },
     { name: 'Notas Fiscais', href: '/invoices', icon: Receipt },
     { name: 'Tabela de Preços', href: '/prices', icon: FileText },
+    { name: 'Usuários', href: '/users', icon: User },
   ];
 
   return (
@@ -157,6 +197,21 @@ export default function Layout() {
 
         <div className="flex-1 flex justify-end items-center gap-1.5 sm:gap-2">
           <button
+            onClick={toggleNavBar}
+            className={cn(
+              "p-2 rounded-lg border transition-all shadow-xl group",
+              theme === 'dark' ? "bg-white/5 hover:bg-white/10 border-white/10" : "bg-black/5 hover:bg-black/10 border-black/10"
+            )}
+            title={isNavBarVisible ? 'Ocultar Barra de Funções' : 'Mostrar Barra de Funções'}
+          >
+            {isNavBarVisible ? (
+              <EyeOff className={cn("h-4 w-4 sm:h-5 sm:w-5 transition-transform", theme === 'dark' ? "text-white/80" : "text-black/80")} />
+            ) : (
+              <Eye className={cn("h-4 w-4 sm:h-5 sm:w-5 transition-transform", theme === 'dark' ? "text-white/80" : "text-black/80")} />
+            )}
+          </button>
+
+          <button
             onClick={toggleTheme}
             className={cn(
               "p-2 rounded-lg border transition-all shadow-xl group",
@@ -179,7 +234,7 @@ export default function Layout() {
                 ? (isAuthenticated ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" : "bg-white/5 hover:bg-white/10 border-white/10 text-white/80")
                 : (isAuthenticated ? "bg-emerald-500/5 border-emerald-500/15 text-emerald-600 hover:bg-emerald-500/10" : "bg-black/5 hover:bg-black/10 border-black/10 text-black/80")
             )}
-            title={isAuthenticated ? `Conectado: ${user?.email}` : "Entrar ou Sincronizar Nuvem"}
+            title={isAuthenticated ? `Conectado: ${user?.email}` : "Minha Conta"}
           >
             {isAuthenticated ? (
               <User className="h-4 w-4 text-emerald-400" />
@@ -187,7 +242,7 @@ export default function Layout() {
               <LogIn className="h-4 w-4" />
             )}
             <span className="hidden sm:inline">
-              {isAuthenticated ? "Minha Conta" : "Sincronizar"}
+              {isAuthenticated ? "Conta" : "Entrar"}
             </span>
           </button>
 
@@ -210,7 +265,21 @@ export default function Layout() {
         ref={mainRef}
         className="flex-1 overflow-y-auto p-4 sm:p-8 relative z-10 touch-pan-y scroll-smooth custom-scrollbar"
       >
-        <div className="max-w-6xl mx-auto pb-24 sm:pb-6 animate-fade-in">
+        <div className={cn(
+          "max-w-6xl mx-auto animate-fade-in sm:pb-6",
+          isNavBarVisible ? "pb-24" : "pb-12"
+        )}>
+          {isOfflineMode && (
+            <div className="mb-6 p-4 rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-500 text-sm flex items-center justify-between gap-4 animate-pulse">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                </span>
+                <span><strong>Modo Offline Ativo:</strong> Você está trabalhando com dados locais salvos no seu navegador. Os dados serão sincronizados quando a conexão for reestabelecida.</span>
+              </div>
+            </div>
+          )}
           <Outlet />
         </div>
       </main>
@@ -220,7 +289,8 @@ export default function Layout() {
         <button
           onClick={scrollToTop}
           className={cn(
-            "fixed bottom-24 right-6 z-[60] p-3 rounded-full shadow-2xl transition-all duration-300 animate-in fade-in slide-in-from-bottom-4",
+            "fixed right-6 z-[60] p-3 rounded-full shadow-2xl transition-all duration-300 animate-in fade-in slide-in-from-bottom-4",
+            isNavBarVisible ? "bottom-24" : "bottom-6",
             theme === 'dark'
               ? "bg-white/20 text-white hover:bg-white/30 backdrop-blur-md border border-white/10"
               : "bg-black/10 text-slate-900 hover:bg-black/20 backdrop-blur-md border border-black/5"
@@ -232,51 +302,53 @@ export default function Layout() {
       )}
 
       {/* Bottom Navigation */}
-      <nav className={cn(
-        "backdrop-blur-3xl border-t shrink-0 z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] transition-colors duration-500",
-        theme === 'dark' ? "bg-background/10 border-white/5 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]" : "bg-white/60 border-black/5"
-      )}>
-        <div className="flex items-center justify-start md:justify-center overflow-x-auto px-2 py-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          <div className="flex items-center gap-1 sm:gap-3 min-w-max mx-auto">
-            {navigation.map((item) => {
-              const isActive = location.pathname === item.href || 
-                               (item.href !== '/' && location.pathname.startsWith(item.href));
-              return (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  className={cn(
-                    "flex flex-col items-center justify-center gap-1.5 min-w-[76px] sm:min-w-[96px] p-2.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 relative group",
-                    isActive 
-                      ? (theme === 'dark' ? "text-white scale-105" : "text-black scale-105")
-                      : (theme === 'dark' ? "text-white/40 hover:text-white/70" : "text-black/40 hover:text-black/70")
-                  )}
-                >
-                  {isActive && (
-                    <div className={cn(
-                      "absolute inset-0 rounded-xl blur-[2px] border shadow-inner transition-colors",
-                      theme === 'dark' ? "bg-white/10 border-white/20" : "bg-black/5 border-black/10"
-                    )}></div>
-                  )}
-                  <item.icon className={cn(
-                    "h-5 w-5 sm:h-6 sm:w-6 relative z-10 transition-all",
-                    isActive 
-                      ? (theme === 'dark' ? "drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" : "drop-shadow-[0_0_8px_rgba(0,0,0,0.2)]") 
-                      : "opacity-70"
-                  )} />
-                  <span className="text-center leading-tight tracking-wide relative z-10">{item.name}</span>
-                  {isActive && (
-                    <div className={cn(
-                      "absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full transition-colors",
-                      theme === 'dark' ? "bg-white shadow-[0_0_8px_white]" : "bg-black shadow-[0_0_8px_black]"
-                    )}></div>
-                  )}
-                </Link>
-              );
-            })}
+      {isNavBarVisible ? (
+        <nav className={cn(
+          "backdrop-blur-3xl border-t shrink-0 z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] transition-colors duration-500",
+          theme === 'dark' ? "bg-background/10 border-white/5 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]" : "bg-white/60 border-black/5"
+        )}>
+          <div className="flex items-center justify-start md:justify-center overflow-x-auto px-2 py-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div className="flex items-center gap-1 sm:gap-3 min-w-max mx-auto">
+              {navigation.map((item) => {
+                const isActive = location.pathname === item.href || 
+                                 (item.href !== '/' && location.pathname.startsWith(item.href));
+                return (
+                  <Link
+                    key={item.name}
+                    to={item.href}
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-1.5 min-w-[76px] sm:min-w-[96px] p-2.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 relative group",
+                      isActive 
+                        ? (theme === 'dark' ? "text-white scale-105" : "text-black scale-105")
+                        : (theme === 'dark' ? "text-white/40 hover:text-white/70" : "text-black/40 hover:text-black/70")
+                    )}
+                  >
+                    {isActive && (
+                      <div className={cn(
+                        "absolute inset-0 rounded-xl blur-[2px] border shadow-inner transition-colors",
+                        theme === 'dark' ? "bg-white/10 border-white/20" : "bg-black/5 border-black/10"
+                      )}></div>
+                    )}
+                    <item.icon className={cn(
+                      "h-5 w-5 sm:h-6 sm:w-6 relative z-10 transition-all",
+                      isActive 
+                        ? (theme === 'dark' ? "drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" : "drop-shadow-[0_0_8px_rgba(0,0,0,0.2)]") 
+                        : "opacity-70"
+                    )} />
+                    <span className="text-center leading-tight tracking-wide relative z-10">{item.name}</span>
+                    {isActive && (
+                      <div className={cn(
+                        "absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full transition-colors",
+                        theme === 'dark' ? "bg-white shadow-[0_0_8px_white]" : "bg-black shadow-[0_0_8px_black]"
+                      )}></div>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      ) : null}
 
       {/* Account / Sync Modal */}
       {isAuthModalOpen && (
@@ -386,16 +458,30 @@ export default function Layout() {
                     />
                   </div>
 
-                  <div>
+                   <div>
                     <label className="block text-xs font-semibold mb-1 opacity-70 uppercase tracking-wider">Senha</label>
-                    <input
-                      type="password"
-                      value={authPassword}
-                      onChange={e => setAuthPassword(e.target.value)}
-                      placeholder="••••••••"
-                      required
-                      className="w-full p-3 rounded-xl border dark:bg-white/5 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-medium"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showAuthPassword ? 'text' : 'password'}
+                        value={authPassword}
+                        onChange={e => setAuthPassword(e.target.value)}
+                        placeholder="••••••••"
+                        required
+                        className="w-full p-3 pr-10 rounded-xl border dark:bg-white/5 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition font-medium"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAuthPassword(!showAuthPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        tabIndex={-1}
+                      >
+                        {showAuthPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   <button

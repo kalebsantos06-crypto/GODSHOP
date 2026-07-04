@@ -2,21 +2,46 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../types/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Smartphone } from 'lucide-react';
+import { Smartphone, Eye, EyeOff } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { toast } from 'sonner';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
-  const { login } = useAuth();
+  const [showOfflineOption, setShowOfflineOption] = useState(false);
+  const { login, enterOfflineMode } = useAuth();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+
+  React.useEffect(() => {
+    document.body.classList.remove('overflow-hidden');
+    document.body.classList.add('overflow-y-auto');
+    return () => {
+      document.body.classList.remove('overflow-y-auto');
+      document.body.classList.add('overflow-hidden');
+    };
+  }, []);
   
+  const handleOfflineLogin = async () => {
+    setIsLoading(true);
+    try {
+      await enterOfflineMode(email);
+      toast.success('Entrando em Modo Offline (Resiliência Local)');
+      navigate('/');
+    } catch (err) {
+      toast.error('Erro ao acessar o modo offline.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setShowOfflineOption(false);
     
     if (isRegistering) {
       const { data, error } = await supabase.auth.signUp({
@@ -24,7 +49,15 @@ export default function Login() {
         password,
       });
       if (error) {
-        toast.error('Erro ao cadastrar: ' + error.message);
+        const errorMsg = String(error.message || error).toLowerCase();
+        const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror');
+        
+        if (isNetwork) {
+          toast.error('Erro de conexão: Não foi possível cadastrar no servidor.');
+          setShowOfflineOption(true);
+        } else {
+          toast.error('Erro ao cadastrar: ' + error.message);
+        }
         setIsLoading(false);
       } else {
         toast.success('Cadastro realizado com sucesso!');
@@ -43,7 +76,15 @@ export default function Login() {
       const { error } = await login(email, password);
       setIsLoading(false);
       if (error) {
-        toast.error('Erro ao fazer login: ' + error.message);
+        const errorMsg = String(error.message || error).toLowerCase();
+        const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror');
+        
+        if (isNetwork) {
+          toast.error('Erro de conexão: Não foi possível contatar o servidor.');
+          setShowOfflineOption(true);
+        } else {
+          toast.error('Erro ao fazer login: ' + error.message);
+        }
       } else {
         navigate('/');
       }
@@ -84,14 +125,28 @@ export default function Login() {
             </div>
             <div className="space-y-2">
               <label className="text-xs font-semibold tracking-wider uppercase text-muted-foreground">Senha</label>
-              <input 
-                type="password" 
-                required
-                className="w-full p-2 border border-white/10 rounded-md bg-background/50 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent" 
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
+              <div className="relative">
+                <input 
+                  type={showPassword ? 'text' : 'password'} 
+                  required
+                  className="w-full p-2 pr-10 border border-white/10 rounded-md bg-background/50 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent" 
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
             
             <button 
@@ -105,6 +160,19 @@ export default function Login() {
                 isRegistering ? 'Cadastrar e Entrar' : 'Entrar'
               )}
             </button>
+
+            {showOfflineOption && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-500 text-center space-y-2">
+                <p>O servidor está inacessível no momento (rede instável ou offline).</p>
+                <button
+                  type="button"
+                  onClick={handleOfflineLogin}
+                  className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-1.5 px-3 rounded transition-colors cursor-pointer"
+                >
+                  Entrar em Modo Offline
+                </button>
+              </div>
+            )}
             
             <div className="text-center pt-2">
               <button
@@ -113,6 +181,16 @@ export default function Login() {
                 className="text-sm text-primary hover:underline font-medium cursor-pointer"
               >
                 {isRegistering ? 'Já tem uma conta? Faça login' : 'Ainda não tem conta? Cadastre-se'}
+              </button>
+            </div>
+
+            <div className="text-center pt-2 border-t border-white/5 mt-2">
+              <button
+                type="button"
+                onClick={handleOfflineLogin}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                Trabalhar Offline (Sem Internet)
               </button>
             </div>
           </form>

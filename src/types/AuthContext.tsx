@@ -8,6 +8,8 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string) => Promise<{ error: any }>;
   logout: () => Promise<void>;
+  enterOfflineMode: (email: string) => Promise<{ user: User }>;
+  isOfflineMode: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -15,51 +17,146 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isOfflineMode, setIsOfflineMode] = useState<boolean>(() => {
+    return localStorage.getItem('auth_offline_mode') === 'true';
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setIsAuthenticated(!!session?.user);
+      if (session?.user) {
+        setUser(session.user);
+        setIsAuthenticated(true);
+        setIsOfflineMode(false);
+        localStorage.setItem('auth_cached_user', JSON.stringify(session.user));
+        localStorage.setItem('auth_offline_mode', 'false');
+      } else {
+        // If there was no session, check if we are in offline mode with a cached user
+        const offlineMode = localStorage.getItem('auth_offline_mode') === 'true';
+        const cachedUserStr = localStorage.getItem('auth_cached_user');
+        if (offlineMode && cachedUserStr) {
+          setUser(JSON.parse(cachedUserStr));
+          setIsAuthenticated(true);
+          setIsOfflineMode(true);
+        } else {
+          setUser(null);
+          setIsAuthenticated(false);
+          setIsOfflineMode(false);
+        }
+      }
+      setLoading(false);
+    }).catch((err) => {
+      console.warn("Supabase auth session fetch failed, checking offline fallback", err);
+      const cachedUserStr = localStorage.getItem('auth_cached_user');
+      if (cachedUserStr) {
+        setUser(JSON.parse(cachedUserStr));
+        setIsAuthenticated(true);
+        setIsOfflineMode(true);
+        localStorage.setItem('auth_offline_mode', 'true');
+      } else {
+        setUser(null);
+        setIsAuthenticated(false);
+        setIsOfflineMode(false);
+      }
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setIsAuthenticated(!!session?.user);
+      if (session?.user) {
+        setUser(session.user);
+        setIsAuthenticated(true);
+        setIsOfflineMode(false);
+        localStorage.setItem('auth_cached_user', JSON.stringify(session.user));
+        localStorage.setItem('auth_offline_mode', 'false');
+      } else if (_event === 'SIGNED_OUT') {
+        setUser(null);
+        setIsAuthenticated(false);
+        setIsOfflineMode(false);
+        localStorage.removeItem('auth_offline_mode');
+        localStorage.removeItem('auth_cached_user');
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
   const login = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (data.user) {
-      setUser(data.user);
-      setIsAuthenticated(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (data.user) {
+        setUser(data.user);
+        setIsAuthenticated(true);
+        setIsOfflineMode(false);
+        localStorage.setItem('auth_cached_user', JSON.stringify(data.user));
+        localStorage.setItem('auth_offline_mode', 'false');
+      }
+      return { error };
+    } catch (err: any) {
+      console.error("Login exception:", err);
+      return { error: err };
     }
-    return { error };
   };
 
   const signUp = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (data.user) {
-      setUser(data.user);
-      setIsAuthenticated(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (data.user) {
+        setUser(data.user);
+        setIsAuthenticated(true);
+        setIsOfflineMode(false);
+        localStorage.setItem('auth_cached_user', JSON.stringify(data.user));
+        localStorage.setItem('auth_offline_mode', 'false');
+      }
+      return { error };
+    } catch (err: any) {
+      console.error("Sign up exception:", err);
+      return { error: err };
     }
-    return { error };
+  };
+
+  const enterOfflineMode = async (email: string) => {
+    const formattedEmail = email.trim() || 'offline@godshop.com';
+    const fallbackUser = {
+      id: 'offline-user-id-' + btoa(formattedEmail).replace(/[^a-zA-Z0-9]/g, ''),
+      email: formattedEmail,
+      aud: 'authenticated',
+      role: 'authenticated',
+      app_metadata: {},
+      user_metadata: {},
+      created_at: new Date().toISOString()
+    } as User;
+    
+    setUser(fallbackUser);
+    setIsAuthenticated(true);
+    setIsOfflineMode(true);
+    localStorage.setItem('auth_cached_user', JSON.stringify(fallbackUser));
+    localStorage.setItem('auth_offline_mode', 'true');
+    
+    // Set a custom event to notify db services we switched to offline
+    window.dispatchEvent(new CustomEvent('supabase_offline_status', { detail: { offline: true } }));
+    
+    return { user: fallbackUser };
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn("Sign out from server failed/offline:", e);
+    }
+    const { db } = await import('../services/db');
+    db.clearUser();
     setUser(null);
     setIsAuthenticated(false);
+    setIsOfflineMode(false);
+    localStorage.removeItem('auth_offline_mode');
+    localStorage.removeItem('auth_cached_user');
   };
 
   if (loading) return null;
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, login, signUp, logout }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, login, signUp, logout, enterOfflineMode, isOfflineMode }}>
       {children}
     </AuthContext.Provider>
   );

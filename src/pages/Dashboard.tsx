@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
-import { useQuery } from '@tanstack/react-query';
-import { DollarSign, Smartphone, ShoppingCart, TrendingUp, RefreshCw, Sparkles, Quote } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { DollarSign, Smartphone, ShoppingCart, TrendingUp, RefreshCw, Sparkles, Quote, Database, AlertTriangle, CheckCircle2, Coins, Package, ShieldCheck } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/shared/StatCard';
@@ -9,26 +9,25 @@ import { formatBRL } from '../lib/formatCurrency';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { parseLocalDate } from '../lib/dateUtils';
-import { GoogleGenAI } from "@google/genai";
 import { cn } from '../lib/utils';
+import { toast } from 'sonner';
 
 export default function Dashboard() {
+  const queryClient = useQueryClient();
+
   const { data: tip, isLoading: loadingTip, refetch: refetchTip } = useQuery({
     queryKey: ['dailyTip'],
     queryFn: async () => {
       try {
-        const apiKey = process.env.GEMINI_API_KEY || '';
-        if (!apiKey) {
+        const response = await fetch('/api/dailytip');
+        const contentType = response.headers.get('content-type');
+        if (!response.ok || !contentType || !contentType.includes('application/json')) {
           return 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!';
         }
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: "Dê uma dica curta, prática e motivadora para um dono de loja de iPhones, celulares e games. Varie muito os temas: vendas, estoque, marketing, atendimento ou mentalidade. Ocasionalmente, cite ou se inspire em grandes empreendedores de sucesso (ex: Steve Jobs, Jeff Bezos, Flávio Augusto, etc). Responda em português, seja direto e impactante. Máximo 180 caracteres.",
-        });
-        return response.text || 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!';
+        const data = await response.json();
+        return data.tip || 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!';
       } catch (error) {
-        console.error('Erro ao buscar dica:', error);
+        console.log('Dica do dia (local): carregando dica padrão integrada.');
         return 'A inovação é o segredo do sucesso. Esteja sempre atento às novidades do mundo mobile e games!';
       }
     },
@@ -36,25 +35,50 @@ export default function Dashboard() {
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 
-  const { data: iphones = [], isLoading: isLoadingIphones } = useQuery({
+  const { data: iphones = [], isLoading: isLoadingIphones, refetch: refetchIphones } = useQuery({
     queryKey: ['iphones'],
     queryFn: () => db.iphones.list(),
+    refetchOnMount: 'always',
+    staleTime: 0,
   });
 
-  const { data: consoles = [], isLoading: isLoadingConsoles } = useQuery({
+  const { data: consoles = [], isLoading: isLoadingConsoles, refetch: refetchConsoles } = useQuery({
     queryKey: ['consoles'],
     queryFn: () => db.consoles.list(),
+    refetchOnMount: 'always',
+    staleTime: 0,
   });
 
-  const { data: sales = [], isLoading: isLoadingSales } = useQuery({
+  const { data: sales = [], isLoading: isLoadingSales, refetch: refetchSales } = useQuery({
     queryKey: ['sales'],
     queryFn: () => db.sales.list(),
+    refetchOnMount: 'always',
+    staleTime: 0,
+    // Polling: Refetch every 15 seconds if there are pending signatures
+    refetchInterval: (query) => {
+      const salesData = query.state.data as any[];
+      if (salesData && salesData.some(s => !s.signature_data && !s.signed_at)) {
+        return 15000;
+      }
+      return false;
+    }
   });
 
-  const { data: clients = [], isLoading: isLoadingClients } = useQuery({
+  const { data: clients = [], isLoading: isLoadingClients, refetch: refetchClients } = useQuery({
     queryKey: ['clients'],
     queryFn: () => db.clients.list(),
+    refetchOnMount: 'always',
+    staleTime: 0,
   });
+
+  const handleRefreshAll = () => {
+    refetchIphones();
+    refetchConsoles();
+    refetchSales();
+    refetchClients();
+    refetchTip();
+    toast.success('Dados atualizados!');
+  };
 
   const availableIphones = iphones.filter(p => p.status === 'disponivel');
   const availableConsoles = consoles.filter(p => p.status === 'disponivel');
@@ -73,6 +97,59 @@ export default function Dashboard() {
       if (consoleItem) buyPrice = consoleItem.buy_price;
     }
     return sum + (sale.sell_price - buyPrice);
+  }, 0);
+
+  // Calculate revenue (Faturamento)
+  const totalRevenue = sales.reduce((sum, sale) => sum + sale.sell_price, 0);
+
+  // Calculate stock cost (Investimento)
+  const totalStockCost = availableIphones.reduce((sum, i) => sum + i.buy_price, 0) +
+                         availableConsoles.reduce((sum, c) => sum + c.buy_price, 0);
+
+  // Detailed Financial Calculations
+  const totalReceived = sales.reduce((sum, sale) => {
+    const downPayment = sale.down_payment || 0;
+    const totalAmount = sale.sell_price - downPayment;
+    
+    if (sale.installments && sale.installments > 1) {
+      // Check localStorage for custom payments (same logic as in Sales.tsx)
+      const storedPaymentsStr = localStorage.getItem(`inst_payments_${sale.id}`);
+      if (storedPaymentsStr) {
+        try {
+          const customPayments = JSON.parse(storedPaymentsStr) as Record<number, number>;
+          const totalPaidFromCustom = Object.values(customPayments).reduce<number>((sum, val) => sum + (Number(val) || 0), 0);
+          return sum + downPayment + totalPaidFromCustom;
+        } catch (e) {
+          // Fallback if JSON is invalid
+        }
+      }
+      
+      const totalInstallments = sale.installments || 1;
+      const installmentsPaid = sale.installments_paid || 0;
+      const installmentValue = totalAmount / totalInstallments;
+      return sum + downPayment + (installmentsPaid * installmentValue);
+    }
+    
+    // For 1 installment, we assume it's fully paid (cash/pix/card)
+    return sum + sale.sell_price;
+  }, 0);
+
+  const totalRemainingBalance = totalRevenue - totalReceived;
+  
+  const signedSales = sales.filter(s => s.signature_data || s.signed_at).length;
+  const pendingSales = sales.length - signedSales;
+  const signatureRate = sales.length ? (signedSales / sales.length) * 100 : 0;
+
+  const totalBuyPriceOfSoldItems = sales.reduce((sum, sale) => {
+    let buyPrice = 0;
+    if (sale.iphone_id) {
+      const iphone = iphones.find(i => i.id === sale.iphone_id);
+      if (iphone) buyPrice = iphone.buy_price;
+    } else if (sale.console_id) {
+      const consoleItem = consoles.find(c => c.id === sale.console_id);
+      if (consoleItem) buyPrice = consoleItem.buy_price;
+    }
+    return sum + buyPrice;
   }, 0);
 
   // Previews
@@ -96,6 +173,33 @@ export default function Dashboard() {
       sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
     };
   });
+
+  const revenuePreview = sales.slice(0, 3).map(sale => {
+    let label = 'Venda';
+    if (sale.iphone_id) {
+      const item = iphones.find(i => i.id === sale.iphone_id);
+      label = item ? `${item.model} ${item.storage}` : 'iPhone';
+    } else if (sale.console_id) {
+      const item = consoles.find(c => c.id === sale.console_id);
+      label = item ? `${item.model} ${item.version}` : 'Console';
+    }
+    const client = clients.find(c => c.id === sale.client_id);
+    const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
+    return {
+      label: clientDisplay,
+      value: formatBRL(sale.sell_price),
+      sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
+    };
+  });
+
+  const stockCostPreview = [...availableIphones, ...availableConsoles]
+    .sort((a, b) => b.buy_price - a.buy_price)
+    .slice(0, 3)
+    .map(item => ({
+      label: item.model,
+      value: formatBRL(item.buy_price),
+      sublabel: 'storage' in item ? item.storage : item.version
+    }));
 
   const salesPreview = sales.slice(0, 3).map(sale => {
     let label = 'Venda';
@@ -187,6 +291,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 animate-slide-up">
+
       {/* Banner de Dica Premium */}
       <div className="relative group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-4 sm:p-6 shadow-2xl transition-all duration-500 hover:bg-white/10">
         {/* Efeito de brilho de fundo */}
@@ -200,14 +305,41 @@ export default function Dashboard() {
                 <span className="h-[1px] w-4 bg-primary/50"></span>
                 <span className="text-[10px] font-black tracking-[0.2em] text-primary uppercase opacity-80">Insight Empreendedor</span>
               </div>
-              <button 
-                onClick={() => refetchTip()} 
-                disabled={loadingTip}
-                className="p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 disabled:opacity-50 active:scale-90"
-                title="Nova dica"
-              >
-                <RefreshCw className={cn("h-4 w-4 text-muted-foreground/60 hover:text-primary", loadingTip && "animate-spin")} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={async () => {
+                    const toastId = toast.loading('Sincronizando todas as assinaturas...');
+                    try {
+                      await queryClient.invalidateQueries({ queryKey: ['sales'] });
+                      await refetchSales();
+                      toast.success('Assinaturas sincronizadas com o servidor!', { id: toastId });
+                    } catch (e) {
+                      toast.error('Erro ao sincronizar.', { id: toastId });
+                    }
+                  }} 
+                  disabled={isLoadingSales}
+                  className="p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 disabled:opacity-50 active:scale-90"
+                  title="Sincronizar assinaturas agora"
+                >
+                  <ShieldCheck className={cn("h-4 w-4 text-emerald-500", isLoadingSales && "animate-pulse")} />
+                </button>
+                <button 
+                  onClick={handleRefreshAll} 
+                  disabled={isLoadingSales}
+                  className="p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 disabled:opacity-50 active:scale-90"
+                  title="Atualizar tudo"
+                >
+                  <RefreshCw className={cn("h-4 w-4 text-primary", (isLoadingSales || isLoadingIphones) && "animate-spin")} />
+                </button>
+                <button 
+                  onClick={() => refetchTip()} 
+                  disabled={loadingTip}
+                  className="p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 disabled:opacity-50 active:scale-90"
+                  title="Nova dica"
+                >
+                  <Sparkles className={cn("h-4 w-4 text-muted-foreground/60 hover:text-amber-500", loadingTip && "animate-pulse")} />
+                </button>
+              </div>
             </div>
 
             <div className="relative">
@@ -227,14 +359,154 @@ export default function Dashboard() {
         </div>
       </div>
       
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
         <StatCard title="Lucro Total" value={formatBRL(totalProfit)} icon={DollarSign} color="green" preview={profitPreview} />
+        <StatCard title="Faturamento Bruto" value={formatBRL(totalRevenue)} icon={Coins} color="primary" preview={revenuePreview} />
         <StatCard title="Vendas Realizadas" value={soldCount} icon={ShoppingCart} color="primary" preview={salesPreview} />
         <StatCard title="Em Estoque" value={availableCount} icon={Smartphone} color="yellow" preview={stockPreview} />
+        <StatCard title="Custo de Estoque" value={formatBRL(totalStockCost)} icon={Package} color="yellow" preview={stockCostPreview} />
         <StatCard title="Lucro Médio" value={formatBRL(sales.length ? totalProfit / sales.length : 0)} icon={TrendingUp} color="primary" preview={avgProfitPreview} />
       </div>
 
-      <Card className="border-none shadow-xl bg-background/60 backdrop-blur-md overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-1 border-none shadow-xl bg-background/60 backdrop-blur-md">
+          <CardHeader>
+            <CardTitle className="text-lg font-bold flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-primary" />
+              Detalhamento de Faturamento
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex justify-between items-center p-3 rounded-lg bg-primary/5 border border-primary/10">
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Faturamento Bruto</span>
+                  <span className="text-sm font-medium">Total Geral de Vendas</span>
+                </div>
+                <span className="text-lg font-bold text-primary">{formatBRL(totalRevenue)}</span>
+              </div>
+
+              <div className="flex justify-between items-center p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Total Recebido</span>
+                  <span className="text-sm font-medium">Entradas + Parcelas Pagas</span>
+                </div>
+                <span className="text-lg font-bold text-emerald-600">{formatBRL(totalReceived)}</span>
+              </div>
+
+              <div className="flex justify-between items-center p-3 rounded-lg bg-amber-500/5 border border-amber-500/10">
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Saldo Pendente</span>
+                  <span className="text-sm font-medium">A Receber em Parcelas</span>
+                </div>
+                <span className="text-lg font-bold text-amber-600">{formatBRL(totalRemainingBalance)}</span>
+              </div>
+
+              <div className="pt-2 mt-2 border-t space-y-1">
+                <p className="text-[10px] text-muted-foreground italic">
+                  * Faturamento Bruto = Soma do preço de venda de todos os itens.
+                </p>
+                <p className="text-[10px] text-muted-foreground italic">
+                  * O Lucro é calculado subtraindo o preço de compra do preço de venda.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-1 border-none shadow-xl bg-background/60 backdrop-blur-md">
+          <CardHeader>
+            <CardTitle className="text-lg font-bold flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-emerald-500" />
+              Análise de Assinaturas
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex justify-between items-center p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notas Assinadas</span>
+                  <span className="text-sm font-medium">Contratos Garantidos</span>
+                </div>
+                <span className="text-lg font-bold text-emerald-600">{signedSales}</span>
+              </div>
+
+              <div className="flex justify-between items-center p-3 rounded-lg bg-amber-500/5 border border-amber-500/10">
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Pendentes</span>
+                  <span className="text-sm font-medium">Aguardando Assinatura</span>
+                </div>
+                <span className="text-lg font-bold text-amber-600">{pendingSales}</span>
+              </div>
+
+              <div className="pt-2">
+                <div className="flex justify-between text-xs font-medium mb-1.5">
+                  <span className="text-muted-foreground">Taxa de Formalização</span>
+                  <span className="text-emerald-600">{signatureRate.toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-muted h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                    style={{ width: `${signatureRate}%` }}
+                  ></div>
+                </div>
+              </div>
+
+              <div className="pt-2 mt-2 border-t space-y-1">
+                <p className="text-[10px] text-muted-foreground italic">
+                  * O sistema sincroniza automaticamente assinaturas coletadas no portal público.
+                </p>
+                {pendingSales > 0 && (
+                  <p className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
+                    <RefreshCw className="h-2.5 w-2.5 animate-spin" /> Verificação em tempo real ativa
+                  </p>
+                )}
+              </div>
+
+              {pendingSales > 0 && (
+                <div className="pt-3 border-t">
+                  <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Aguardando Cliente:</h4>
+                  <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar">
+                    {sales.filter(s => !s.signature_data && !s.signed_at).slice(0, 5).map(sale => {
+                      const client = clients.find(c => c.id === sale.client_id);
+                      return (
+                        <div key={sale.id} className="flex items-center justify-between p-2 rounded bg-muted/30 border border-border/50">
+                          <div className="flex flex-col">
+                            <span className="text-[11px] font-bold truncate max-w-[120px]">{client?.name || 'Cliente'}</span>
+                            <span className="text-[9px] text-muted-foreground">{format(parseLocalDate(sale.sale_date), 'dd/MM')}</span>
+                          </div>
+                          <button 
+                            onClick={async () => {
+                              try {
+                                const baseUrl = window.location.origin;
+                                const link = `${baseUrl}/assinar/${sale.id}`;
+                                await navigator.clipboard.writeText(link);
+                                toast.success('Link de assinatura copiado!');
+                              } catch (e) {
+                                toast.error('Erro ao copiar link');
+                              }
+                            }}
+                            className="p-1.5 hover:bg-primary/10 rounded text-primary transition-colors"
+                            title="Copiar link de assinatura"
+                          >
+                            <Quote className="h-3 w-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {pendingSales > 5 && (
+                      <p className="text-[9px] text-center text-muted-foreground pt-1">
+                        + {pendingSales - 5} outras pendências
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-1 border-none shadow-xl bg-background/60 backdrop-blur-md overflow-hidden">
         <CardHeader className="pb-2 border-b border-border/50 bg-muted/20">
           <CardTitle className="text-lg font-bold flex items-center gap-2">
             <TrendingUp className="h-5 w-5 text-primary" />
@@ -276,5 +548,6 @@ export default function Dashboard() {
         </CardContent>
       </Card>
     </div>
-  );
+  </div>
+);
 }

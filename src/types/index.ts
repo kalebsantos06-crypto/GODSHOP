@@ -16,6 +16,7 @@ export interface Client {
   name: string;
   phone: string;
   cpf?: string;
+  birth_date?: string;
   email?: string;
   address?: string;
   street?: string;
@@ -24,6 +25,19 @@ export interface Client {
   complement?: string;
   city?: string;
   state?: string;
+  documento_url?: string;
+  assinatura_base64?: string;
+  token_cadastro?: string;
+  token_utilizado?: boolean;
+  token_expira_em?: string;
+  security_uuid?: string;
+  security_ip?: string;
+  security_browser?: string;
+  security_os?: string;
+  security_device?: string;
+  security_user?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Supplier {
@@ -54,6 +68,10 @@ export interface Sale {
   installment_frequency?: 'Semanal' | 'Quinzenal' | 'Mensal';
   down_payment?: number;
   first_installment_date?: string;
+  signature_data?: string;
+  signed_at?: string;
+  signed_ip?: string;
+  installments_paid?: number;
 }
 
 export interface PriceTableItem {

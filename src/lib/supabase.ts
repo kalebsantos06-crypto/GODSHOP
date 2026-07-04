@@ -1,5 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
+const dummyUrl = 'https://placeholder-project.supabase.co';
+const dummyKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder';
+
 let supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 if (supabaseUrl.endsWith('/rest/v1/')) {
   supabaseUrl = supabaseUrl.slice(0, -9);
@@ -12,7 +15,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase URL or Anon Key is missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment variables.');
 }
 
-export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
+export const supabase = createClient(supabaseUrl || dummyUrl, supabaseAnonKey || dummyKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,

@@ -6,12 +6,15 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { parseLocalDate } from '../lib/dateUtils';
 import { Link } from 'react-router-dom';
-import { Receipt } from 'lucide-react';
+import { Receipt, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '../lib/utils';
 
 export default function Invoices() {
-  const { data: sales = [], isLoading: isLoadingSales } = useQuery({
+  const { data: sales = [], isLoading: isLoadingSales, refetch: refetchSales } = useQuery({
     queryKey: ['sales'],
     queryFn: () => db.sales.list(),
+    refetchInterval: 30000,
   });
 
   const { data: iphones = [], isLoading: isLoadingIphones } = useQuery({
@@ -33,11 +36,30 @@ export default function Invoices() {
     return <div>Carregando...</div>;
   }
 
+  const handleSyncAll = async () => {
+    const toastId = toast.loading('Sincronizando assinaturas...');
+    try {
+      await refetchSales();
+      toast.success('Assinaturas sincronizadas!', { id: toastId });
+    } catch (e) {
+      toast.error('Erro ao sincronizar.');
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Notas Fiscais / Garantias</h1>
-        <p className="text-muted-foreground text-sm mt-1">Gere notas e termos de garantia para todas as vendas</p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Notas Fiscais / Garantias</h1>
+          <p className="text-muted-foreground text-sm mt-1">Gere notas e termos de garantia para todas as vendas</p>
+        </div>
+        <button 
+          onClick={handleSyncAll}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-all active:scale-95 text-sm font-medium shadow-sm"
+        >
+          <RefreshCw className={cn("h-4 w-4", isLoadingSales && "animate-spin")} />
+          Sincronizar Assinaturas
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -45,6 +67,7 @@ export default function Invoices() {
           const iphone = iphones.find(i => i.id === sale.iphone_id);
           const consoleItem = consoles.find(c => c.id === sale.console_id);
           const client = clients.find(c => c.id === sale.client_id);
+          const isSigned = !!sale.signature_data || !!sale.signed_at;
 
           return (
             <div key={sale.id} className="bg-card border rounded-xl p-6 shadow-sm flex flex-col">
@@ -57,11 +80,24 @@ export default function Invoices() {
                     <p className="font-mono">#{sale.id.split('-')[0].toUpperCase()}</p>
                   </div>
                 </div>
-                <div className="p-2 bg-primary/10 rounded-full text-primary">
-                  <Receipt className="h-5 w-5" />
+                <div className="flex flex-col items-end gap-2">
+                  <div className="p-2 bg-primary/10 rounded-full text-primary">
+                    <Receipt className="h-5 w-5" />
+                  </div>
                 </div>
               </div>
               <div className="space-y-1 mb-6 text-sm">
+                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border/50">
+                  {isSigned ? (
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Assinado
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600 bg-amber-50 px-2 py-1 rounded-md">
+                      <Clock className="h-3.5 w-3.5" /> Assinatura Pendente
+                    </span>
+                  )}
+                </div>
                 <p>
                   <span className="font-medium">Item:</span> {iphone ? `${iphone.model} ${iphone.storage}` : (consoleItem ? `${consoleItem.model} ${consoleItem.version}` : 'N/A')}
                 </p>
