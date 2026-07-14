@@ -12,13 +12,24 @@ interface ConsoleTableProps {
 }
 
 export default function ConsoleTable({ consoles, onEdit, onDelete }: ConsoleTableProps) {
+  const getCategoryLabel = (category?: string) => {
+    switch (category) {
+      case 'console': return 'Videogame';
+      case 'tv': return 'TV / Smart TV';
+      case 'rice_cooker': return 'Panela Elétrica';
+      case 'outro': return 'Outro';
+      default: return 'Videogame'; // Fallback for old seed data
+    }
+  };
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm text-left">
         <thead className="bg-muted/50 text-muted-foreground">
           <tr>
-            <th className="px-4 py-3 font-medium">Modelo</th>
-            <th className="px-4 py-3 font-medium">Versão</th>
+            <th className="px-4 py-3 font-medium">Categoria</th>
+            <th className="px-4 py-3 font-medium">Modelo / Marca</th>
+            <th className="px-4 py-3 font-medium">Versão / Detalhes</th>
             <th className="px-4 py-3 font-medium">Condição</th>
             <th className="px-4 py-3 font-medium">Preço (Compra)</th>
             <th className="px-4 py-3 font-medium">Data</th>
@@ -29,6 +40,11 @@ export default function ConsoleTable({ consoles, onEdit, onDelete }: ConsoleTabl
         <tbody className="divide-y">
           {consoles.map((console) => (
             <tr key={console.id} className="hover:bg-muted/50">
+              <td className="px-4 py-3">
+                <span className="bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">
+                  {getCategoryLabel(console.category)}
+                </span>
+              </td>
               <td className="px-4 py-3 font-medium">{console.model}</td>
               <td className="px-4 py-3">{console.version}</td>
               <td className="px-4 py-3">
@@ -69,8 +85,8 @@ export default function ConsoleTable({ consoles, onEdit, onDelete }: ConsoleTabl
           ))}
           {consoles.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                Nenhum console no estoque.
+              <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
+                Nenhum eletrônico no estoque.
               </td>
             </tr>
           )}

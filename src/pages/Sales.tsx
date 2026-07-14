@@ -274,12 +274,13 @@ export default function Sales() {
   const generateWhatsAppMessage = (sale: any, client: any, iphone: any, console: any, customPayments: { [key: number]: number }) => {
     if (!sale) return '';
     const clientName = client?.name || 'Cliente';
-    const itemName = iphone ? `${iphone.model} ${iphone.storage}` : (console ? `${console.model} - ${console.version}` : 'Aparelho');
+    const categoryName = console ? (console.category === 'tv' ? 'TV' : (console.category === 'rice_cooker' ? 'Panela Elétrica' : (console.category === 'outro' ? 'Eletro' : 'Console'))) : 'Aparelho';
+    const itemName = iphone ? `${iphone.model} ${iphone.storage}` : (console ? `${categoryName} ${console.model} - ${console.version}` : 'Aparelho');
     const totalAmount = sale.sell_price - (sale.down_payment || 0);
     
     // Sum total paid so far
-    const totalPaid = Object.values(customPayments).reduce((sum, val) => sum + (Number(val) || 0), 0);
-    const remaining = Math.max(0, totalAmount - totalPaid);
+    const totalPaid = Number(Object.values(customPayments).reduce((sum, val) => sum + (Number(val) || 0), 0).toFixed(2));
+    const remaining = Number(Math.max(0, totalAmount - totalPaid).toFixed(2));
     
     // Use the dynamic calculated schedule
     const calculatedList = getCalculatedInstallments(sale, customPayments);
@@ -290,8 +291,15 @@ export default function Sales() {
     let msg = `Olá, *${clientName}*! 📱✨\n\nPassando para confirmar o recebimento do seu pagamento. Seu carnê de parcelas referente à compra do *${itemName}* na *GODSHOP* foi atualizado:\n\n`;
     
     msg += `📊 *Resumo Financeiro:*\n`;
-    msg += `💰 *Valor Total Parcelado:* ${formatBRL(totalAmount)}\n`;
-    msg += `✅ *Total Pago:* ${formatBRL(totalPaid)} (${((totalPaid / totalAmount) * 100).toFixed(1)}%)\n`;
+    const downPayment = sale.down_payment || 0;
+    if (downPayment > 0) {
+      msg += `💰 *Valor do Aparelho:* ${formatBRL(sale.sell_price)}\n`;
+      msg += `💵 *Valor de Entrada Pago:* ${formatBRL(downPayment)}\n`;
+      msg += `📉 *Valor Restante Parcelado:* ${formatBRL(totalAmount)}\n`;
+    } else {
+      msg += `💰 *Valor Total Parcelado:* ${formatBRL(totalAmount)}\n`;
+    }
+    msg += `✅ *Total Pago nas Parcelas:* ${formatBRL(totalPaid)} (${((totalPaid / totalAmount) * 100).toFixed(1)}%)\n`;
     msg += `⏳ *Saldo Devedor:* ${formatBRL(remaining)}\n`;
     msg += `📋 *Resumo de Parcelas:* ${fullyPaidCount} pagas, ${pendingCount} pendentes\n\n`;
     
@@ -308,7 +316,12 @@ export default function Sales() {
       msg += `\n🛍️ *Muito obrigado por comprar na GODSHOP!* Agradecemos imensamente a sua preferência e confiança em nosso trabalho. Se precisar de qualquer suporte, estamos à disposição! 🤍`;
     } else {
       msg = `Olá, *${clientName}*! 🎉🥳\n\n*EXCELENTE NOTÍCIA!* Seu carnê de parcelas referente à compra do *${itemName}* foi *TOTALMENTE QUITADO*!\n\n`;
-      msg += `✅ *Total Pago:* ${formatBRL(totalAmount)} (100% Pago)\n\n`;
+      if (downPayment > 0) {
+        msg += `💰 *Valor do Aparelho:* ${formatBRL(sale.sell_price)}\n`;
+        msg += `💵 *Valor de Entrada Pago:* ${formatBRL(downPayment)}\n`;
+        msg += `📉 *Total das Parcelas:* ${formatBRL(totalAmount)}\n`;
+      }
+      msg += `✅ *Total Pago:* ${formatBRL(totalAmount + downPayment)} (100% Pago)\n\n`;
       msg += `🛍️ *Muito obrigado por comprar na GODSHOP!* Gostaríamos de agradecer imensamente pela sua parceria, preferência e por escolher a nossa loja. É uma honra ter você como cliente! Conte sempre conosco para suas próximas compras! 🤍✨`;
     }
     
@@ -465,17 +478,27 @@ export default function Sales() {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Console</label>
+              <label className="text-sm font-medium">Eletrônico / Eletro / Console</label>
               <select name="console_id" defaultValue={editingSale?.console_id} className="w-full p-2 border rounded-md bg-background">
                 <option value="">Selecione...</option>
                 {editingSale?.console_id && consoles.find(c => c.id === editingSale.console_id) && (
                   <option value={editingSale.console_id}>
-                    {consoles.find(c => c.id === editingSale.console_id)?.model} - {consoles.find(c => c.id === editingSale.console_id)?.version} (Atual)
+                    {(() => {
+                      const c = consoles.find(item => item.id === editingSale.console_id);
+                      if (!c) return '';
+                      const cat = c.category === 'tv' ? 'TV' : (c.category === 'rice_cooker' ? 'Panela Elétrica' : (c.category === 'outro' ? 'Outro' : 'Videogame'));
+                      return `[${cat}] ${c.model} - ${c.version} (Atual)`;
+                    })()}
                   </option>
                 )}
-                {availableConsoles.map(c => (
-                  <option key={c.id} value={c.id}>{c.model} - {c.version}</option>
-                ))}
+                {availableConsoles.map(c => {
+                  const cat = c.category === 'tv' ? 'TV' : (c.category === 'rice_cooker' ? 'Panela Elétrica' : (c.category === 'outro' ? 'Outro' : 'Videogame'));
+                  return (
+                    <option key={c.id} value={c.id}>
+                      [{cat}] {c.model} - {c.version}
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div className="space-y-2">
@@ -632,7 +655,7 @@ export default function Sales() {
                   <tr key={sale.id} className="hover:bg-muted/50">
                     <td className="px-4 py-3">{format(parseLocalDate(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</td>
                     <td className="px-4 py-3 font-medium">
-                      {iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${consoleObj.model} - ${consoleObj.version}` : 'N/A')}
+                      {iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${consoleObj.category === 'tv' ? '[TV] ' : (consoleObj.category === 'rice_cooker' ? '[Panela] ' : (consoleObj.category === 'outro' ? '[Eletro] ' : ''))}${consoleObj.model} - ${consoleObj.version}` : 'N/A')}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
@@ -692,16 +715,17 @@ export default function Sales() {
                           if (storedPaymentsStr) {
                             try {
                               customPayments = JSON.parse(storedPaymentsStr) as Record<number, number>;
-                              totalPaidFromCustom = Object.values(customPayments).reduce<number>((sum, val) => sum + (Number(val) || 0), 0);
+                              totalPaidFromCustom = Number(Object.values(customPayments).reduce<number>((sum, val) => sum + (Number(val) || 0), 0).toFixed(2));
                               hasCustomPayments = true;
                             } catch (e) {
                               window.console.error(e);
                             }
                           }
                           
-                          const remainingAmount = hasCustomPayments 
+                          const remainingAmount = Number((hasCustomPayments 
                             ? Math.max(0, totalAmount - totalPaidFromCustom)
-                            : Math.max(0, totalAmount - ((sale.installments_paid || 0) * installmentValue));
+                            : Math.max(0, totalAmount - ((sale.installments_paid || 0) * installmentValue))
+                          ).toFixed(2));
                             
                           const isFullySettled = remainingAmount <= 0.01;
 
@@ -816,9 +840,9 @@ export default function Sales() {
         const cleanPhone = client?.phone ? client.phone.replace(/\D/g, '') : '';
         const whatsappUrl = getWhatsAppUrl(cleanPhone, messageText);
         
-        const totalPaidAmount = Object.values(customInstallmentPayments).reduce<number>((sum, val) => sum + (Number(val) || 0), 0);
-        const remainingAmount = Math.max(0, totalAmount - totalPaidAmount);
-        const progressPercentage = Math.round((totalPaidAmount / totalAmount) * 100);
+        const totalPaidAmount = Number(Object.values(customInstallmentPayments).reduce<number>((sum, val) => sum + (Number(val) || 0), 0).toFixed(2));
+        const remainingAmount = Number(Math.max(0, totalAmount - totalPaidAmount).toFixed(2));
+        const progressPercentage = totalAmount > 0 ? Math.round((totalPaidAmount / totalAmount) * 100) : 100;
 
         return (
           <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 pb-24 sm:pb-6">
@@ -1101,10 +1125,9 @@ export default function Sales() {
                     // Save custom payment data to localStorage
                     localStorage.setItem(`inst_payments_${sale.id}`, JSON.stringify(customInstallmentPayments));
                     
-                    // Count how many are fully paid (paidValue >= instAmount)
-                    const countPaid = Object.keys(customInstallmentPayments).filter(
-                      key => (customInstallmentPayments[Number(key)] || 0) >= instAmount
-                    ).length;
+                    // Count how many are fully paid using the smart calculated schedule
+                    const calculated = getCalculatedInstallments(sale, customInstallmentPayments);
+                    const countPaid = calculated.filter(inst => inst.status === 'fully_paid').length;
                     
                     updateInstallmentsMutation.mutate({ id: sale.id, installments_paid: countPaid });
                   }}

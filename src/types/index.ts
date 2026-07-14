@@ -54,6 +54,7 @@ export interface Console {
   buy_date: string;
   status: 'disponivel' | 'vendido';
   condition: 'lacrado' | 'seminovo';
+  category?: string;
 }
 
 export interface Sale {

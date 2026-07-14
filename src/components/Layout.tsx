@@ -1,10 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp, User, LogIn, LogOut, X, Download, Eye, EyeOff } from 'lucide-react';
+import { 
+  LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, 
+  Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp, 
+  User, LogIn, LogOut, X, Download, Eye, EyeOff, Tv,
+  Bell, AlertCircle, AlertTriangle, Calendar, MessageSquare, ExternalLink, Check, DollarSign, Sparkles
+} from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
 import { db } from '../services/db';
+import { useQuery } from '@tanstack/react-query';
+import { parseLocalDate } from '../lib/dateUtils';
+import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
+import { formatBRL } from '../lib/formatCurrency';
+
+interface NotificationItem {
+  id: string;
+  clientName: string;
+  clientPhone: string;
+  itemName: string;
+  installmentIndex: number;
+  expectedAmount: number;
+  dueDate: Date;
+  status: 'fully_paid' | 'pending';
+  daysDiff: number;
+  saleId: string;
+  saleData: any;
+  clientData: any;
+  iphoneData: any;
+  consoleData: any;
+}
 
 export default function Layout() {
   const location = useLocation();
@@ -18,6 +44,293 @@ export default function Layout() {
   const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [isSignUpMode, setIsSignUpMode] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+
+  // Notifications state
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [notifTab, setNotifTab] = useState<'recent' | 'all'>('recent');
+  const [activeFloatingNotif, setActiveFloatingNotif] = useState<NotificationItem | null>(null);
+  const [notifPermission, setNotifPermission] = useState<string>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'default';
+  });
+
+  // Fetch data for notifications
+  const { data: salesList = [] } = useQuery({
+    queryKey: ['sales'],
+    queryFn: () => db.sales.list(),
+    enabled: isAuthenticated
+  });
+
+  const { data: clientsList = [] } = useQuery({
+    queryKey: ['clients'],
+    queryFn: () => db.clients.list(),
+    enabled: isAuthenticated
+  });
+
+  const { data: iphonesList = [] } = useQuery({
+    queryKey: ['iphones'],
+    queryFn: () => db.iphones.list(),
+    enabled: isAuthenticated
+  });
+
+  const { data: consolesList = [] } = useQuery({
+    queryKey: ['consoles'],
+    queryFn: () => db.consoles.list(),
+    enabled: isAuthenticated
+  });
+
+  // Installment helpers
+  const getInstallmentDate = (sale: any, index: number) => {
+    const baseDate = sale.first_installment_date ? parseLocalDate(sale.first_installment_date) : parseLocalDate(sale.sale_date);
+    const intervalMultiplier = sale.first_installment_date ? (index - 1) : index;
+    if (sale.installment_frequency === 'Semanal') {
+      return addDays(baseDate, intervalMultiplier * 7);
+    } else if (sale.installment_frequency === 'Quinzenal') {
+      return addDays(baseDate, intervalMultiplier * 15);
+    } else {
+      return addMonths(baseDate, intervalMultiplier);
+    }
+  };
+
+  const getCalculatedInstallments = (
+    sale: any,
+    customPayments: { [key: number]: number }
+  ) => {
+    if (!sale) return [];
+    const totalAmount = sale.sell_price - (sale.down_payment || 0);
+    const baseInstCount = sale.installments || 1;
+
+    const list: {
+      index: number;
+      expectedAmount: number;
+      paidAmount: number;
+      dueDate: Date;
+      status: 'fully_paid' | 'pending';
+    }[] = [];
+    
+    let totalPaid = 0;
+    const paidIndices: number[] = [];
+    const unpaidIndices: number[] = [];
+
+    for (let i = 1; i <= baseInstCount; i++) {
+      const p = customPayments[i] || 0;
+      if (p > 0.005) {
+        totalPaid += p;
+        paidIndices.push(i);
+      } else {
+        unpaidIndices.push(i);
+      }
+    }
+
+    let remainingUnpaid = totalAmount - totalPaid;
+    let extraIndex = baseInstCount + 1;
+    while (true) {
+      const p = customPayments[extraIndex] || 0;
+      if (p > 0.005) {
+        totalPaid += p;
+        remainingUnpaid = totalAmount - totalPaid;
+        paidIndices.push(extraIndex);
+        extraIndex++;
+      } else {
+        break;
+      }
+    }
+
+    if (remainingUnpaid > 0.01 && unpaidIndices.length === 0) {
+      unpaidIndices.push(extraIndex);
+    }
+
+    const allIndices = Array.from(new Set([...paidIndices, ...unpaidIndices])).sort((a, b) => a - b);
+
+    if (unpaidIndices.length > 0) {
+      const expectedPerUnpaid = Number((remainingUnpaid / unpaidIndices.length).toFixed(2));
+      const totalPaidExpected = paidIndices.reduce((sum, idx) => sum + (customPayments[idx] || 0), 0);
+      const countExceptLast = unpaidIndices.length - 1;
+      const sumExceptLast = countExceptLast * expectedPerUnpaid;
+      const lastUnpaidIndex = unpaidIndices[unpaidIndices.length - 1];
+      const lastExpected = Number((totalAmount - totalPaidExpected - sumExceptLast).toFixed(2));
+      
+      const expectedMap: { [key: number]: number } = {};
+      for (const idx of paidIndices) {
+        expectedMap[idx] = customPayments[idx] || 0;
+      }
+      for (let i = 0; i < unpaidIndices.length - 1; i++) {
+        expectedMap[unpaidIndices[i]] = expectedPerUnpaid;
+      }
+      expectedMap[lastUnpaidIndex] = lastExpected;
+
+      for (const idx of allIndices) {
+        const isPaid = paidIndices.includes(idx);
+        const paidVal = customPayments[idx] || 0;
+        const expectedVal = expectedMap[idx];
+
+        list.push({
+          index: idx,
+          expectedAmount: expectedVal,
+          paidAmount: paidVal,
+          dueDate: getInstallmentDate(sale, idx),
+          status: isPaid ? 'fully_paid' : 'pending'
+        });
+      }
+    } else {
+      for (const idx of allIndices) {
+        const paidVal = customPayments[idx] || 0;
+        list.push({
+          index: idx,
+          expectedAmount: paidVal,
+          paidAmount: paidVal,
+          dueDate: getInstallmentDate(sale, idx),
+          status: 'fully_paid'
+        });
+      }
+    }
+
+    return list;
+  };
+
+  // Compile notifications list
+  const notifications: NotificationItem[] = [];
+  
+  if (isAuthenticated && salesList && salesList.length > 0) {
+    const today = startOfDay(new Date());
+    
+    for (const sale of salesList) {
+      if (!sale.installments || sale.installments <= 1) continue;
+      
+      let customPayments: { [key: number]: number } = {};
+      try {
+        const stored = localStorage.getItem(`inst_payments_${sale.id}`);
+        if (stored) {
+          customPayments = JSON.parse(stored);
+        } else {
+          const instAmount = Number(((sale.sell_price - (sale.down_payment || 0)) / sale.installments).toFixed(2));
+          for (let i = 1; i <= sale.installments; i++) {
+            customPayments[i] = i <= (sale.installments_paid || 0) ? instAmount : 0;
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing custom payments:', e);
+      }
+      
+      const calculatedList = getCalculatedInstallments(sale, customPayments);
+      const client = clientsList.find((c: any) => c.id === sale.client_id);
+      const iphone = iphonesList.find((p: any) => p.id === sale.iphone_id);
+      const consoleObj = consolesList.find((p: any) => p.id === sale.console_id);
+      
+      const categoryName = consoleObj ? (consoleObj.category === 'tv' ? 'TV' : (consoleObj.category === 'rice_cooker' ? 'Panela Elétrica' : (consoleObj.category === 'outro' ? 'Eletro' : 'Console'))) : 'Aparelho';
+      const itemName = iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${categoryName} ${consoleObj.model} - ${consoleObj.version}` : 'Aparelho');
+      
+      for (const inst of calculatedList) {
+        if (inst.status === 'pending') {
+          const dueDay = startOfDay(inst.dueDate);
+          const daysDiff = differenceInDays(dueDay, today);
+          
+          notifications.push({
+            id: `${sale.id}_inst_${inst.index}`,
+            clientName: client?.name || 'Cliente Sem Nome',
+            clientPhone: client?.phone ? client.phone.replace(/\D/g, '') : '',
+            itemName,
+            installmentIndex: inst.index,
+            expectedAmount: inst.expectedAmount,
+            dueDate: inst.dueDate,
+            status: inst.status,
+            daysDiff,
+            saleId: sale.id,
+            saleData: sale,
+            clientData: client,
+            iphoneData: iphone,
+            consoleData: consoleObj
+          });
+        }
+      }
+    }
+  }
+
+  // Filter notifications
+  const recentNotifications = notifications.filter(n => n.daysDiff >= -2 && n.daysDiff <= 2).sort((a, b) => a.daysDiff - b.daysDiff);
+  const allNotifications = notifications.sort((a, b) => a.daysDiff - b.daysDiff);
+  const badgeCount = recentNotifications.length;
+
+  // Request native phone push permission
+  const requestPushPermission = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        const permission = await Notification.requestPermission();
+        setNotifPermission(permission);
+        if (permission === 'granted') {
+          toast.success('Notificações nativas ativadas! 🔔');
+          new Notification("GODSHOP Ativado ⚡", {
+            body: "Você agora receberá alertas diretamente na barra de notificações do seu celular!",
+            icon: logoImage || "/favicon.ico"
+          });
+        } else {
+          toast.error('Permissão negada. Ative as notificações nas configurações do seu celular.');
+        }
+      } catch (err) {
+        console.error('Error requesting notification permission:', err);
+      }
+    } else {
+      toast.error('Este dispositivo/navegador não suporta notificações de sistema.');
+    }
+  };
+
+  // Synchronize and trigger floating system-style reminders
+  useEffect(() => {
+    if (isAuthenticated && recentNotifications.length > 0) {
+      // 1. Native OS notification bar triggers (runs once per new ID)
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          const alreadySent = JSON.parse(localStorage.getItem('godshop_sent_push_alerts') || '[]');
+          const newSent = [...alreadySent];
+          let updated = false;
+
+          recentNotifications.forEach(n => {
+            if (!alreadySent.includes(n.id)) {
+              let msg = `A ${n.installmentIndex}ª parcela de ${formatBRL(n.expectedAmount)} do item ${n.itemName} `;
+              if (n.daysDiff === 0) msg += "vence HOJE!";
+              else if (n.daysDiff === 1) msg += "vence AMANHÃ!";
+              else if (n.daysDiff === 2) msg += "vence em 2 dias!";
+              else if (n.daysDiff === -1) msg += "venceu ONTEM!";
+              else if (n.daysDiff === -2) msg += "venceu há 2 dias!";
+              else msg += `vence em ${n.daysDiff} dias!`;
+
+              new Notification(`GODSHOP: ${n.clientName}`, {
+                body: msg,
+                icon: logoImage || "/favicon.ico",
+                tag: n.id,
+                requireInteraction: true
+              });
+              newSent.push(n.id);
+              updated = true;
+            }
+          });
+
+          if (updated) {
+            localStorage.setItem('godshop_sent_push_alerts', JSON.stringify(newSent));
+          }
+        } catch (e) {
+          console.error('Error triggering native push notification:', e);
+        }
+      }
+
+      // 2. Beautiful floating system island popup on page load
+      const sessionSeen = JSON.parse(sessionStorage.getItem('godshop_session_seen_alerts') || '[]');
+      const firstUnseen = recentNotifications.find(n => !sessionSeen.includes(n.id));
+
+      if (firstUnseen) {
+        setActiveFloatingNotif(firstUnseen);
+        sessionStorage.setItem('godshop_session_seen_alerts', JSON.stringify([...sessionSeen, firstUnseen.id]));
+
+        // Plays a subtle chime if desired or simply auto dismisses after 12s
+        const timer = setTimeout(() => {
+          setActiveFloatingNotif(null);
+        }, 12000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isAuthenticated, recentNotifications.length]);
   
   const [bgImage, setBgImage] = useState<string>('/background.jpg');
   const [logoImage, setLogoImage] = useState<string | null>(null);
@@ -112,7 +425,7 @@ export default function Layout() {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Estoque', href: '/inventory', icon: Smartphone },
-    { name: 'Consoles', href: '/consoles', icon: Gamepad2 },
+    { name: 'Eletrônicos', href: '/consoles', icon: Tv },
     { name: 'Vendas', href: '/sales', icon: ShoppingCart },
     { name: 'Clientes', href: '/clients', icon: Users },
     { name: 'Fornecedores', href: '/suppliers', icon: Truck },
@@ -128,6 +441,91 @@ export default function Layout() {
         theme === 'dark' ? 'dark' : ''
       )}
     >
+      {/* Real Smartphone-Style Floating Notification Banner */}
+      {activeFloatingNotif && (
+        <div className="fixed top-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-96 z-[9999] animate-in slide-in-from-top-12 duration-500">
+          <div className={cn(
+            "p-4 rounded-2xl border shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-all relative flex flex-col gap-3",
+            theme === 'dark' 
+              ? "bg-zinc-950/95 border-white/10 text-white" 
+              : "bg-white/95 border-black/10 text-zinc-900 shadow-xl"
+          )}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl border border-emerald-500/20">
+                  <Bell className="h-5 w-5 animate-bounce" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-extrabold text-[10px] tracking-widest uppercase text-emerald-500">GODSHOP NOTIFICAÇÃO</span>
+                    <span className="h-1 w-1 rounded-full bg-zinc-500"></span>
+                    <span className="text-[10px] text-muted-foreground font-medium">Agora mesmo</span>
+                  </div>
+                  <h5 className="font-bold text-sm">Lembrete de Vencimento!</h5>
+                </div>
+              </div>
+              <button 
+                onClick={() => setActiveFloatingNotif(null)}
+                className="p-1 rounded-lg hover:bg-muted/15 transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4 opacity-60 hover:opacity-100" />
+              </button>
+            </div>
+
+            <div className="space-y-1 pl-1">
+              <p className="text-xs font-semibold">
+                A <span className="text-emerald-500 font-bold">{activeFloatingNotif.installmentIndex}ª parcela</span> de <span className="font-bold underline decoration-emerald-500">{activeFloatingNotif.clientName}</span> está pendente!
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                Item: {activeFloatingNotif.itemName} • Vence: <span className="font-bold text-amber-500">{
+                  activeFloatingNotif.daysDiff === 0 ? "HOJE" : 
+                  activeFloatingNotif.daysDiff === 1 ? "AMANHÃ" : 
+                  activeFloatingNotif.daysDiff === 2 ? "EM 2 DIAS" : 
+                  activeFloatingNotif.daysDiff === -1 ? "ONTEM" : 
+                  activeFloatingNotif.daysDiff === -2 ? "HÁ 2 DIAS" : 
+                  `há ${Math.abs(activeFloatingNotif.daysDiff)} dias`
+                }</span>
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between bg-muted/30 px-3 py-2.5 rounded-xl border border-muted/20">
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Valor Cobrado</span>
+              <span className="font-black text-emerald-500 text-lg">{formatBRL(activeFloatingNotif.expectedAmount)}</span>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setActiveFloatingNotif(null)}
+                className="flex-1 py-2 text-xs font-semibold bg-muted/40 hover:bg-muted/60 rounded-xl border border-muted/20 transition cursor-pointer text-center"
+              >
+                Lembrar Depois
+              </button>
+              
+              {activeFloatingNotif.clientPhone ? (
+                <a
+                  href={`https://api.whatsapp.com/send?phone=${activeFloatingNotif.clientPhone}&text=${encodeURIComponent(
+                    `Olá, *${activeFloatingNotif.clientName}*! 😊 Passando para lembrar que a *${activeFloatingNotif.installmentIndex}ª Parcela* de *${formatBRL(activeFloatingNotif.expectedAmount)}* referente à compra do *${activeFloatingNotif.itemName}* ` +
+                    (activeFloatingNotif.daysDiff === 0 ? "vence *HOJE*!" : activeFloatingNotif.daysDiff === 1 ? "vence *AMANHÃ*!" : activeFloatingNotif.daysDiff === 2 ? "vence em *2 DIAS*!" : activeFloatingNotif.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(activeFloatingNotif.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                    ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setActiveFloatingNotif(null)}
+                  className="flex-1 py-2 text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/10 transition cursor-pointer text-center"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  Cobrar WhatsApp
+                </a>
+              ) : (
+                <span className="flex-1 py-2 text-xs font-bold bg-muted text-muted-foreground rounded-xl flex items-center justify-center gap-1 text-[10px] select-none">
+                  Sem Telefone
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Fixed Background Layer to avoid bg-fixed mobile issues */}
       <div 
         className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-700"
@@ -196,6 +594,217 @@ export default function Layout() {
         </div>
 
         <div className="flex-1 flex justify-end items-center gap-1.5 sm:gap-2">
+          {/* Notifications Bell & Dropdown */}
+          {isAuthenticated && (
+            <div className="relative">
+              <button
+                onClick={() => setIsNotifOpen(!isNotifOpen)}
+                className={cn(
+                  "p-2 rounded-lg border transition-all shadow-xl group relative flex items-center justify-center cursor-pointer",
+                  theme === 'dark' ? "bg-white/5 hover:bg-white/10 border-white/10" : "bg-black/5 hover:bg-black/10 border-black/10",
+                  isNotifOpen ? "ring-2 ring-emerald-500/50" : ""
+                )}
+                title="Notificações de Parcelas"
+              >
+                <Bell className={cn(
+                  "h-4 w-4 sm:h-5 sm:w-5 transition-transform", 
+                  theme === 'dark' ? "text-white/80" : "text-black/80",
+                  badgeCount > 0 ? "animate-wiggle" : ""
+                )} />
+                
+                {/* Badge for active notifications */}
+                {badgeCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500 text-[10px] font-bold text-white items-center justify-center">
+                      {badgeCount}
+                    </span>
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Dropdown Panel */}
+              {isNotifOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setIsNotifOpen(false)} 
+                  />
+                  <div className={cn(
+                    "absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200",
+                    theme === 'dark' 
+                      ? "bg-zinc-950/95 border-white/10 text-white backdrop-blur-xl" 
+                      : "bg-white/95 border-black/10 text-zinc-900 backdrop-blur-xl"
+                  )}>
+                    <div className="p-4 border-b border-muted/30 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-amber-500" />
+                        <h4 className="font-bold text-sm">Controle de Parcelas</h4>
+                      </div>
+                      <span className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                        badgeCount > 0 ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
+                      )}>
+                        {badgeCount} Alertas
+                      </span>
+                    </div>
+
+                    {/* Tabs */}
+                    <div className="flex border-b border-muted/30 text-xs">
+                      <button
+                        onClick={() => setNotifTab('recent')}
+                        className={cn(
+                          "flex-1 py-2 text-center font-semibold border-b-2 transition-colors cursor-pointer",
+                          notifTab === 'recent'
+                            ? "border-emerald-500 text-emerald-500"
+                            : "border-transparent text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        Recentes (-2 a +2 dias)
+                      </button>
+                      <button
+                        onClick={() => setNotifTab('all')}
+                        className={cn(
+                          "flex-1 py-2 text-center font-semibold border-b-2 transition-colors cursor-pointer",
+                          notifTab === 'all'
+                            ? "border-emerald-500 text-emerald-500"
+                            : "border-transparent text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        Todas Pendentes ({allNotifications.length})
+                      </button>
+                    </div>
+
+                    {/* Native system notification prompt */}
+                    {notifPermission !== 'granted' && (
+                      <div className="p-3 bg-emerald-500/10 border-b border-emerald-500/20 flex flex-col gap-1.5 text-center">
+                        <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-emerald-400">
+                          <Bell className="h-3.5 w-3.5 animate-bounce" />
+                          <span>Ativar Avisos na Tela do Celular?</span>
+                        </div>
+                        <p className="text-[10px] text-zinc-300">
+                          Receba avisos na barra de status do seu celular quando houver parcelas vencendo nos últimos 2 dias.
+                        </p>
+                        <button
+                          onClick={requestPushPermission}
+                          className="py-1 px-3 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black rounded-lg transition cursor-pointer self-center shadow-lg"
+                        >
+                          ATIVAR NOTIFICAÇÕES
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Scrollable List */}
+                    <div className="max-h-[360px] overflow-y-auto divide-y divide-muted/15 custom-scrollbar">
+                      {(notifTab === 'recent' ? recentNotifications : allNotifications).length === 0 ? (
+                        <div className="p-8 text-center text-xs text-muted-foreground space-y-2">
+                          <Check className="h-8 w-8 text-emerald-500 mx-auto" />
+                          <p className="font-medium">Nenhuma parcela pendente nesta lista!</p>
+                          <p className="text-[10px] opacity-70">Bom trabalho! Seus recebimentos estão em dia.</p>
+                        </div>
+                      ) : (
+                        (notifTab === 'recent' ? recentNotifications : allNotifications).map((item) => {
+                          // Define friendly diff text
+                          let diffLabel = '';
+                          let diffClass = '';
+                          
+                          if (item.daysDiff === 0) {
+                            diffLabel = 'Vence Hoje';
+                            diffClass = 'bg-amber-500/10 text-amber-500 font-bold border-amber-500/20';
+                          } else if (item.daysDiff === 1) {
+                            diffLabel = 'Vence Amanhã';
+                            diffClass = 'bg-blue-500/10 text-blue-500 font-medium border-blue-500/20';
+                          } else if (item.daysDiff === 2) {
+                            diffLabel = 'Vence em 2 dias';
+                            diffClass = 'bg-blue-500/5 text-blue-400 border-blue-500/10';
+                          } else if (item.daysDiff === -1) {
+                            diffLabel = 'Venceu Ontem';
+                            diffClass = 'bg-red-500/10 text-red-500 font-bold border-red-500/20 animate-pulse';
+                          } else if (item.daysDiff === -2) {
+                            diffLabel = 'Venceu há 2 dias';
+                            diffClass = 'bg-red-500/10 text-red-500 font-bold border-red-500/20';
+                          } else if (item.daysDiff < -2) {
+                            diffLabel = `Atrasada há ${Math.abs(item.daysDiff)} dias`;
+                            diffClass = 'bg-rose-500/10 text-rose-500 font-bold border-rose-500/20';
+                          } else {
+                            diffLabel = `Vence em ${item.daysDiff} dias`;
+                            diffClass = 'bg-neutral-500/10 text-neutral-400 border-neutral-500/15';
+                          }
+
+                          return (
+                            <div key={item.id} className="p-3.5 hover:bg-muted/10 transition-colors space-y-2 text-xs">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="space-y-0.5">
+                                  <div className="font-bold flex items-center gap-1">
+                                    <span>{item.clientName}</span>
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    <span>{item.itemName}</span>
+                                    <span>•</span>
+                                    <span className="font-medium">{item.installmentIndex}ª Parcela</span>
+                                  </div>
+                                </div>
+                                <span className={cn("text-[9px] px-1.5 py-0.5 rounded border uppercase tracking-wider", diffClass)}>
+                                  {diffLabel}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between bg-muted/25 p-2 rounded-lg border border-muted/30">
+                                <span className="text-muted-foreground text-[10px]">VALOR DA PARCELA</span>
+                                <span className="font-black text-emerald-500 text-sm">{formatBRL(item.expectedAmount)}</span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 pt-1">
+                                {item.clientPhone ? (
+                                  <a
+                                    href={`https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(
+                                      `Olá, *${item.clientName}*! 😊 Passando para lembrar que a *${item.installmentIndex}ª Parcela* de *${formatBRL(item.expectedAmount)}* referente à compra do *${item.itemName}* ` +
+                                      (item.daysDiff === 0 ? "vence *HOJE*!" : item.daysDiff === 1 ? "vence *AMANHÃ*!" : item.daysDiff === 2 ? "vence em *2 DIAS*!" : item.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(item.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                                      ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
+                                    )}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg flex items-center justify-center gap-1 transition cursor-pointer"
+                                  >
+                                    <MessageSquare className="h-3 w-3" />
+                                    Cobrar WhatsApp
+                                  </a>
+                                ) : (
+                                  <span className="flex-1 py-1.5 px-2 bg-muted text-muted-foreground font-bold rounded-lg flex items-center justify-center gap-1 text-[10px] select-none">
+                                    Sem Telefone
+                                  </span>
+                                )}
+                                
+                                <Link
+                                  to="/sales"
+                                  onClick={() => setIsNotifOpen(false)}
+                                  className="py-1.5 px-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold rounded-lg flex items-center justify-center gap-1 transition border border-zinc-700"
+                                  title="Ver na página de Vendas"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                </Link>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    
+                    <div className="p-3 bg-muted/20 border-t border-muted/50 text-center">
+                      <Link
+                        to="/sales"
+                        onClick={() => setIsNotifOpen(false)}
+                        className="text-[10px] font-black text-emerald-500 hover:underline"
+                      >
+                        ABRIR TELA DE VENDAS & CARNÊS →
+                      </Link>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           <button
             onClick={toggleNavBar}
             className={cn(

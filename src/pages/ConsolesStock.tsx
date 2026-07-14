@@ -26,11 +26,11 @@ export default function ConsolesStock() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['consoles'] });
       setIsAdding(false);
-      toast.success('Console adicionado ao estoque!');
+      toast.success('Eletrônico adicionado ao estoque!');
     },
     onError: (error: any) => {
-      console.error('Erro ao adicionar console:', error);
-      toast.error(`Erro ao adicionar console: ${error?.message || 'Erro desconhecido'}`);
+      console.error('Erro ao adicionar eletrônico:', error);
+      toast.error(`Erro ao adicionar eletrônico: ${error?.message || 'Erro desconhecido'}`);
     }
   });
 
@@ -39,11 +39,11 @@ export default function ConsolesStock() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['consoles'] });
       setEditingConsole(null);
-      toast.success('Console atualizado!');
+      toast.success('Eletrônico atualizado!');
     },
     onError: (error: any) => {
-      console.error('Erro ao atualizar console:', error);
-      toast.error(`Erro ao atualizar console: ${error?.message || 'Erro desconhecido'}`);
+      console.error('Erro ao atualizar eletrônico:', error);
+      toast.error(`Erro ao atualizar eletrônico: ${error?.message || 'Erro desconhecido'}`);
     }
   });
 
@@ -52,7 +52,7 @@ export default function ConsolesStock() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['consoles'] });
       setDeleteId(null);
-      toast.success('Console removido!');
+      toast.success('Eletrônico removido!');
     }
   });
 
@@ -64,6 +64,7 @@ export default function ConsolesStock() {
       version: formData.get('version') as string,
       condition: formData.get('condition') as string,
       buy_price: Number(formData.get('buy_price')),
+      category: (formData.get('category') as string) || 'console',
     };
 
     if (editingConsole) {
@@ -83,8 +84,8 @@ export default function ConsolesStock() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Estoque de Consoles</h1>
-          <p className="text-muted-foreground text-sm mt-1">Gerencie seus consoles</p>
+          <h1 className="text-2xl font-bold tracking-tight">Estoque de Eletrônicos & Eletros</h1>
+          <p className="text-muted-foreground text-sm mt-1">Gerencie consoles, TVs, panelas elétricas e outros eletrônicos</p>
         </div>
         <button 
           onClick={() => {
@@ -94,27 +95,36 @@ export default function ConsolesStock() {
           className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-primary/90"
         >
           <Plus className="h-4 w-4" />
-          {isAdding ? 'Fechar' : 'Adicionar Console'}
+          {isAdding ? 'Fechar' : 'Adicionar Eletrônico'}
         </button>
       </div>
 
       {(isAdding || editingConsole) && (
         <div className="bg-card border rounded-xl p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-4">{editingConsole ? 'Editar Console' : 'Novo Console'}</h2>
+          <h2 className="text-lg font-semibold mb-4">{editingConsole ? 'Editar Eletrônico' : 'Novo Eletrônico'}</h2>
           <form key={editingConsole?.id || 'new'} onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Modelo</label>
-              <input name="model" defaultValue={editingConsole?.model} required className="w-full p-2 border rounded-md" placeholder="Ex: PlayStation" />
+              <label className="text-sm font-medium">Categoria</label>
+              <select name="category" defaultValue={editingConsole?.category || 'console'} required className="w-full p-2 border rounded-md bg-background">
+                <option value="console">Videogame / Console</option>
+                <option value="tv">Televisor / TV</option>
+                <option value="rice_cooker">Panela Elétrica de Arroz</option>
+                <option value="outro">Outro Eletrônico / Eletro</option>
+              </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Versão</label>
-              <input name="version" defaultValue={editingConsole?.version} required className="w-full p-2 border rounded-md" placeholder="Ex: PS4" />
+              <label className="text-sm font-medium">Modelo / Marca</label>
+              <input name="model" defaultValue={editingConsole?.model} required className="w-full p-2 border rounded-md" placeholder="Ex: Samsung 55, PlayStation 5, Panela Mondial" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Versão / Detalhes</label>
+              <input name="version" defaultValue={editingConsole?.version} required className="w-full p-2 border rounded-md" placeholder="Ex: 4K Smart, Slim 1TB, 5 Xícaras 110V" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Condição</label>
               <select name="condition" defaultValue={editingConsole?.condition || 'seminovo'} required className="w-full p-2 border rounded-md bg-background">
-                <option value="lacrado">Lacrado (1 Ano)</option>
-                <option value="seminovo">Seminovo (6 Meses)</option>
+                <option value="lacrado">Lacrado (1 Ano de Garantia)</option>
+                <option value="seminovo">Seminovo (6 Meses de Garantia)</option>
               </select>
             </div>
             <div className="space-y-2">
@@ -149,8 +159,8 @@ export default function ConsolesStock() {
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
         onConfirm={() => deleteId && deleteMutation.mutate(deleteId)}
-        title="Excluir Console"
-        message="Tem certeza que deseja remover este console do estoque? Esta ação não pode ser desfeita."
+        title="Excluir Eletrônico"
+        message="Tem certeza que deseja remover este eletrônico do estoque? Esta ação não pode ser desfeita."
         confirmText="Excluir"
       />
     </div>

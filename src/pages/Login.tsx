@@ -25,6 +25,9 @@ export default function Login() {
     };
   }, []);
   
+  const isSupabaseConfigured = !!import.meta.env.VITE_SUPABASE_URL && 
+    !import.meta.env.VITE_SUPABASE_URL.includes('placeholder-project');
+
   const handleOfflineLogin = async () => {
     setIsLoading(true);
     try {
@@ -43,6 +46,19 @@ export default function Login() {
     setIsLoading(true);
     setShowOfflineOption(false);
     
+    if (!isSupabaseConfigured) {
+      try {
+        await enterOfflineMode(email);
+        toast.success('Iniciando em Modo Local/Offline (Banco de Dados Local Ativo) ⚡');
+        navigate('/');
+      } catch (err) {
+        toast.error('Erro ao acessar o modo offline.');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+    
     if (isRegistering) {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -53,8 +69,13 @@ export default function Login() {
         const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror');
         
         if (isNetwork) {
-          toast.error('Erro de conexão: Não foi possível cadastrar no servidor.');
-          setShowOfflineOption(true);
+          toast.warning('Erro de conexão. Entrando em Modo Offline...');
+          try {
+            await enterOfflineMode(email);
+            navigate('/');
+          } catch (offlineErr) {
+            toast.error('Falha ao entrar no modo offline.');
+          }
         } else {
           toast.error('Erro ao cadastrar: ' + error.message);
         }
@@ -80,8 +101,13 @@ export default function Login() {
         const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror');
         
         if (isNetwork) {
-          toast.error('Erro de conexão: Não foi possível contatar o servidor.');
-          setShowOfflineOption(true);
+          toast.warning('Servidor inacessível. Entrando em Modo Offline...');
+          try {
+            await enterOfflineMode(email);
+            navigate('/');
+          } catch (offlineErr) {
+            toast.error('Falha ao entrar no modo offline.');
+          }
         } else {
           toast.error('Erro ao fazer login: ' + error.message);
         }
@@ -112,6 +138,12 @@ export default function Login() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {!isSupabaseConfigured && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-400 text-center space-y-1 mb-2">
+                <p className="font-semibold">⚠️ Modo Demonstração / Offline Ativo</p>
+                <p className="text-neutral-300">As chaves do banco de dados Supabase não estão configuradas nesta hospedagem do Netlify. Você pode entrar digitando qualquer e-mail e senha para usar todo o sistema localmente!</p>
+              </div>
+            )}
             <div className="space-y-2">
               <label className="text-xs font-semibold tracking-wider uppercase text-muted-foreground">E-mail</label>
               <input 

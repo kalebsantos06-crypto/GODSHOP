@@ -63,6 +63,25 @@ const CHECKLIST_ITEMS = {
     { key: 'inicializacao_normal', label: 'Inicialização normal' },
     { key: 'serie_conferido', label: 'Número de série conferido' }
   ],
+  tv: [
+    { key: 'liga_normalmente', label: 'Liga normalmente' },
+    { key: 'entradas_hdmi_funcionando', label: 'Entradas HDMI e USB funcionando' },
+    { key: 'tela_sem_manchas', label: 'Tela sem manchas ou pixels queimados' },
+    { key: 'controle_remoto_conferido', label: 'Controle remoto funcionando' },
+    { key: 'wifi_smart_tv', label: 'Wi-Fi e Smart TV configurados/conferidos' },
+    { key: 'som_limpo', label: 'Alto-falantes / Áudio limpo' },
+    { key: 'acessorios_cabos', label: 'Pés/Suporte e cabos inclusos' },
+    { key: 'serie_conferido', label: 'Número de série conferido' }
+  ],
+  rice_cooker: [
+    { key: 'liga_normalmente_aquecendo', label: 'Liga normalmente e aquece' },
+    { key: 'botoes_alavanca', label: 'Botões de ligar e alavanca funcionando' },
+    { key: 'cuba_sem_riscos', label: 'Cuba antiaderente sem riscos ou amassados' },
+    { key: 'tampa_vedacao', label: 'Tampa e vedação de borracha íntegras' },
+    { key: 'acessorios_panela', label: 'Copo medidor e colher inclusos' },
+    { key: 'cabo_energia', label: 'Cabo de energia incluso e funcional' },
+    { key: 'limpo_higienizado', label: 'Produto limpo e higienizado' }
+  ],
   accessories: [
     { key: 'fonte', label: 'Fonte' },
     { key: 'cabo_usb', label: 'Cabo USB' },
@@ -123,6 +142,27 @@ const requiredConsoleKeys = [
   'usb_funcionando',
   'inicializacao_normal',
   'serie_conferido'
+];
+
+const requiredTvKeys = [
+  'liga_normalmente',
+  'entradas_hdmi_funcionando',
+  'tela_sem_manchas',
+  'controle_remoto_conferido',
+  'wifi_smart_tv',
+  'som_limpo',
+  'acessorios_cabos',
+  'serie_conferido'
+];
+
+const requiredRiceCookerKeys = [
+  'liga_normalmente_aquecendo',
+  'botoes_alavanca',
+  'cuba_sem_riscos',
+  'tampa_vedacao',
+  'acessorios_panela',
+  'cabo_energia',
+  'limpo_higienizado'
 ];
 
 export default function GuaranteeNote() {
@@ -205,6 +245,24 @@ export default function GuaranteeNote() {
   
   const saleDate = sale ? parseLocalDate(sale.sale_date) : new Date();
   const endDate = sale ? addMonths(saleDate, warrantyMonths) : new Date();
+
+  const getProductTypeLabel = () => {
+    if (iphone) return 'aparelho celular tipo iPhone';
+    if (!consoleItem) return 'produto';
+    if (consoleItem.category === 'tv') return 'televisor / TV';
+    if (consoleItem.category === 'rice_cooker') return 'eletrodoméstico (panela elétrica de arroz)';
+    if (consoleItem.category === 'outro') return 'aparelho eletrônico / eletro';
+    return 'console de videogame';
+  };
+
+  const getProductShortLabel = () => {
+    if (iphone) return 'aparelho';
+    if (!consoleItem) return 'produto';
+    if (consoleItem.category === 'tv') return 'televisor';
+    if (consoleItem.category === 'rice_cooker') return 'eletrodoméstico';
+    if (consoleItem.category === 'outro') return 'aparelho';
+    return 'console';
+  };
 
   // Fetch digital signature state on mount and update
   const checkSignature = async () => {
@@ -368,10 +426,17 @@ export default function GuaranteeNote() {
     let verifiedAt = checklistVerifiedAt;
     let verifiedBy = checklistVerifiedBy;
 
+    const isTv = consoleItem?.category === 'tv';
+    const isRiceCooker = consoleItem?.category === 'rice_cooker';
+
     const physicalComplete = requiredPhysicalKeys.every(k => !!currentChecklist[k]);
     const specificComplete = isSmartphone 
       ? requiredSmartphoneKeys.every(k => !!currentChecklist[k]) 
-      : (isConsole ? requiredConsoleKeys.every(k => !!currentChecklist[k]) : true);
+      : (isTv 
+          ? requiredTvKeys.every(k => !!currentChecklist[k]) 
+          : (isRiceCooker 
+              ? requiredRiceCookerKeys.every(k => !!currentChecklist[k]) 
+              : (isConsole ? requiredConsoleKeys.every(k => !!currentChecklist[k]) : true)));
 
     const complete = physicalComplete && specificComplete;
 
@@ -1134,7 +1199,7 @@ Caso tenha alguma dúvida, estamos à disposição! 👍`)}` : '#'}
 
                 <section>
                   <h2 className="text-lg font-bold border-b border-[#d1d5db] mb-3 pb-1">
-                    Detalhes do {iphone ? 'Aparelho' : 'Console'}
+                    Detalhes do {iphone ? 'Aparelho' : (consoleItem?.category === 'tv' ? 'Televisor / TV' : (consoleItem?.category === 'rice_cooker' ? 'Eletrodoméstico' : 'Console'))}
                   </h2>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     {iphone ? (
@@ -1252,7 +1317,7 @@ Caso tenha alguma dúvida, estamos à disposição! 👍`)}` : '#'}
                 {((sale.installments && sale.installments > 1) || sale.payment_method?.toLowerCase().includes('promissória') || sale.payment_method?.toLowerCase().includes('carnê')) && (
                   <section className="bg-[#f9fafb] p-4 rounded-lg border border-[#e5e7eb] text-sm space-y-3">
                     <h3 className="font-bold text-base mb-2">Cláusula de Reserva de Domínio, Inadimplência e Encargos</h3>
-                    <p>O {iphone ? 'aparelho celular tipo iPhone' : 'console de videogame'}, descrito neste documento, é vendido de forma parcelada, com pagamento em parcelas semanais, quinzenais e/ou mensais, permanecendo sua propriedade com o vendedor até a quitação integral do valor acordado, nos termos do art. 521 e seguintes do Código Civil.</p>
+                    <p>O {getProductTypeLabel()}, descrito neste documento, é vendido de forma parcelada, com pagamento em parcelas semanais, quinzenais e/ou mensais, permanecendo sua propriedade com o vendedor até a quitação integral do valor acordado, nos termos do art. 521 e seguintes do Código Civil.</p>
                     <p>Até a quitação total, o comprador detém apenas a posse direta do bem, comprometendo-se a mantê-lo em perfeito estado de conservação, ficando expressamente proibido vendê-lo, cedê-lo, transferi-lo ou onerá-lo a terceiros sem autorização formal do vendedor, sob pena de vencimento antecipado da dívida.</p>
                     <p>O não pagamento de qualquer parcela por período superior a 10 (dez) dias caracterizará inadimplência, constituindo o comprador automaticamente em mora.</p>
                     <p>Em caso de atraso, incidirão os seguintes encargos:</p>
@@ -1263,10 +1328,10 @@ Caso tenha alguma dúvida, estamos à disposição! 👍`)}` : '#'}
                     <p>Persistindo a inadimplência, poderá o vendedor, a seu exclusivo critério:</p>
                     <ul className="list-[lower-alpha] pl-5 space-y-1">
                       <li>exigir o pagamento imediato da totalidade da dívida vencida e vincenda (vencimento antecipado);</li>
-                      <li>rescindir o contrato, com a devolução imediata do {iphone ? 'aparelho' : 'console'};</li>
+                      <li>rescindir o contrato, com a devolução imediata do {getProductShortLabel()};</li>
                       <li>adotar as medidas judiciais cabíveis para recuperação do bem e/ou cobrança do débito, inclusive ação de busca e apreensão, quando aplicável.</li>
                     </ul>
-                    <p>Em caso de devolução, o {iphone ? 'aparelho' : 'console'} deverá ser restituído nas mesmas condições em que foi entregue, ressalvado o desgaste natural, ficando o comprador responsável por eventuais danos, perdas ou avarias constatadas.</p>
+                    <p>Em caso de devolução, o {getProductShortLabel()} deverá ser restituído nas mesmas condições em que foi entregue, ressalvado o desgaste natural, ficando o comprador responsável por eventuais danos, perdas ou avarias constatadas.</p>
                     <p>Os valores pagos poderão ser retidos, total ou parcialmente, para compensação do uso do bem, depreciação, despesas administrativas e prejuízos decorrentes da inadimplência, nos termos da legislação vigente.</p>
                     <p>Para fins de maior segurança jurídica, o presente instrumento poderá ser utilizado como título comprobatório da obrigação assumida, apto a embasar cobrança judicial mais célere.</p>
                     <p>Fica eleito o foro da comarca do domicílio do vendedor para dirimir quaisquer controvérsias oriundas deste contrato.</p>
