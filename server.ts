@@ -11,41 +11,45 @@ const PORT = 3000;
 app.use(express.json({ limit: "15mb" }));
 
 // Configure public sales file-system database
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = process.env.VERCEL ? path.join("/tmp", "data") : path.join(process.cwd(), "data");
 const SALES_FILE = path.join(DATA_DIR, "public_sales.json");
 const CLIENTS_FILE = path.join(DATA_DIR, "public_clients.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "public_settings.json");
 const TOKENS_FILE = path.join(DATA_DIR, "public_tokens.json");
 const USERS_FILE = path.join(DATA_DIR, "public_users.json");
 
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-if (!fs.existsSync(SALES_FILE)) {
-  fs.writeFileSync(SALES_FILE, JSON.stringify({}), "utf8");
-}
-if (!fs.existsSync(CLIENTS_FILE)) {
-  fs.writeFileSync(CLIENTS_FILE, JSON.stringify({}), "utf8");
-}
-if (!fs.existsSync(SETTINGS_FILE)) {
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify({}), "utf8");
-}
-if (!fs.existsSync(TOKENS_FILE)) {
-  fs.writeFileSync(TOKENS_FILE, JSON.stringify({}), "utf8");
-}
-if (!fs.existsSync(USERS_FILE)) {
-  const defaultUsers = [
-    {
-      id: "usr-1",
-      name: "Kaleb Santos",
-      email: "kalebsantos06@gmail.com",
-      phone: "(11) 99999-9999",
-      role: "Administrador",
-      status: "Ativo",
-      created_at: new Date().toISOString()
-    }
-  ];
-  fs.writeFileSync(USERS_FILE, JSON.stringify(defaultUsers, null, 2), "utf8");
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(SALES_FILE)) {
+    fs.writeFileSync(SALES_FILE, JSON.stringify({}), "utf8");
+  }
+  if (!fs.existsSync(CLIENTS_FILE)) {
+    fs.writeFileSync(CLIENTS_FILE, JSON.stringify({}), "utf8");
+  }
+  if (!fs.existsSync(SETTINGS_FILE)) {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({}), "utf8");
+  }
+  if (!fs.existsSync(TOKENS_FILE)) {
+    fs.writeFileSync(TOKENS_FILE, JSON.stringify({}), "utf8");
+  }
+  if (!fs.existsSync(USERS_FILE)) {
+    const defaultUsers = [
+      {
+        id: "usr-1",
+        name: "Kaleb Santos",
+        email: "kalebsantos06@gmail.com",
+        phone: "(11) 99999-9999",
+        role: "Administrador",
+        status: "Ativo",
+        created_at: new Date().toISOString()
+      }
+    ];
+    fs.writeFileSync(USERS_FILE, JSON.stringify(defaultUsers, null, 2), "utf8");
+  }
+} catch (fsErr) {
+  console.warn("[Vercel FS Warning] Initializing local files in fallback mode:", fsErr);
 }
 
 const readPublicUsers = (): any[] => {
@@ -1188,9 +1192,16 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://0.0.0.0:${PORT}`);
+    });
+  }
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
+

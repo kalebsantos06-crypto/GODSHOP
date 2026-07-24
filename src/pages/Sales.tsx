@@ -651,9 +651,49 @@ export default function Sales() {
                 const profit = iphone ? sale.sell_price - iphone.buy_price : (consoleObj ? sale.sell_price - consoleObj.buy_price : 0);
                 const remaining = sale.sell_price - (sale.down_payment || 0);
 
+                // Installments and Payments calculation
+                const isInstallmentSale = sale.installments && sale.installments > 1;
+                const storedPaymentsStr = localStorage.getItem(`inst_payments_${sale.id}`);
+                let customPayments: Record<number, number> = {};
+                let hasCustomPayments = false;
+                
+                if (storedPaymentsStr) {
+                  try {
+                    customPayments = JSON.parse(storedPaymentsStr) as Record<number, number>;
+                    hasCustomPayments = true;
+                  } catch (e) {
+                    window.console.error(e);
+                  }
+                } else if (isInstallmentSale) {
+                  const totalAmount = sale.sell_price - (sale.down_payment || 0);
+                  const totalInst = sale.installments || 1;
+                  const installmentValue = totalAmount / totalInst;
+                  for (let i = 1; i <= totalInst; i++) {
+                    customPayments[i] = i <= (sale.installments_paid || 0) ? installmentValue : 0;
+                  }
+                }
+
+                const calculatedList = isInstallmentSale ? getCalculatedInstallments(sale, customPayments) : [];
+                const nextPending = isInstallmentSale ? calculatedList.find(inst => inst.status === 'pending') : null;
+                const isFullySettled = isInstallmentSale ? !nextPending : false;
+
+                const totalInstsCount = isInstallmentSale ? (hasCustomPayments ? calculatedList.length : sale.installments) : 1;
+                const paidInstsCount = isInstallmentSale 
+                  ? (hasCustomPayments ? calculatedList.filter(inst => inst.status === 'fully_paid').length : (sale.installments_paid || 0))
+                  : 0;
+
+                const remainingAmount = isInstallmentSale 
+                  ? Number((hasCustomPayments 
+                      ? Math.max(0, sale.sell_price - (sale.down_payment || 0) - Object.values(customPayments).reduce((s, v) => s + (v || 0), 0))
+                      : Math.max(0, sale.sell_price - (sale.down_payment || 0) - ((sale.installments_paid || 0) * ((sale.sell_price - (sale.down_payment || 0)) / sale.installments)))
+                    ).toFixed(2))
+                  : 0;
+
                 return (
                   <tr key={sale.id} className="hover:bg-muted/50">
-                    <td className="px-4 py-3">{format(parseLocalDate(sale.sale_date), 'dd/MM/yyyy', { locale: ptBR })}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-medium">{format(parseLocalDate(sale.sale_date), 'dd/MM/yyyy')}</span>
+                    </td>
                     <td className="px-4 py-3 font-medium">
                       {iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${consoleObj.category === 'tv' ? '[TV] ' : (consoleObj.category === 'rice_cooker' ? '[Panela] ' : (consoleObj.category === 'outro' ? '[Eletro] ' : ''))}${consoleObj.model} - ${consoleObj.version}` : 'N/A')}
                     </td>
@@ -693,7 +733,7 @@ export default function Sales() {
                       {formatBRL(sale.sell_price)}
                       {sale.down_payment && sale.down_payment > 0 && (
                         <span className="text-xs text-muted-foreground block">
-                          Entrada: {formatBRL(sale.down_payment)}
+                           Entrada: {formatBRL(sale.down_payment)}
                         </span>
                       )}
                     </td>
@@ -701,62 +741,46 @@ export default function Sales() {
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
                         <span>{sale.payment_method}</span>
-                        {sale.installments && sale.installments > 1 && (() => {
-                          const totalAmount = sale.sell_price - (sale.down_payment || 0);
-                          const totalInst = sale.installments || 1;
-                          const installmentValue = totalAmount / totalInst;
-                          
-                          // Check if we have custom payments in localStorage
-                          const storedPaymentsStr = localStorage.getItem(`inst_payments_${sale.id}`);
-                          let totalPaidFromCustom = 0;
-                          let hasCustomPayments = false;
-                          let customPayments: Record<number, number> = {};
-                          
-                          if (storedPaymentsStr) {
-                            try {
-                              customPayments = JSON.parse(storedPaymentsStr) as Record<number, number>;
-                              totalPaidFromCustom = Number(Object.values(customPayments).reduce<number>((sum, val) => sum + (Number(val) || 0), 0).toFixed(2));
-                              hasCustomPayments = true;
-                            } catch (e) {
-                              window.console.error(e);
-                            }
-                          }
-                          
-                          const remainingAmount = Number((hasCustomPayments 
-                            ? Math.max(0, totalAmount - totalPaidFromCustom)
-                            : Math.max(0, totalAmount - ((sale.installments_paid || 0) * installmentValue))
-                          ).toFixed(2));
-                            
-                          const isFullySettled = remainingAmount <= 0.01;
-
-                          const calculatedList = getCalculatedInstallments(sale, customPayments);
-                          const totalInstsCount = hasCustomPayments ? calculatedList.length : totalInst;
-                          const paidInstsCount = hasCustomPayments 
-                            ? calculatedList.filter(inst => inst.status === 'fully_paid').length 
-                            : (sale.installments_paid || 0);
-                          
-                          return (
-                            <div className="text-xs text-muted-foreground block space-y-1 mt-1">
-                              <span className="block font-medium">{sale.installments}x {sale.installment_frequency === 'Semanal' ? 'Semanal' : (sale.installment_frequency === 'Quinzenal' ? 'Quinzenal' : 'Mensal')}</span>
-                              <span className="block font-semibold text-amber-700 dark:text-amber-400">
-                                Saldo Devedor: {formatBRL(remainingAmount)}
+                        {isInstallmentSale && (
+                          <div className="text-xs text-muted-foreground block space-y-1 mt-1">
+                            <span className="block font-medium">{sale.installments}x {sale.installment_frequency === 'Semanal' ? 'Semanal' : (sale.installment_frequency === 'Quinzenal' ? 'Quinzenal' : 'Mensal')}</span>
+                            <span className="block font-semibold text-amber-700 dark:text-amber-400">
+                              Saldo Devedor: {formatBRL(remainingAmount)}
+                            </span>
+                            {nextPending ? (
+                              <span className="block text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1 mt-0.5" title={`Próxima Parcela (${nextPending.index}ª)`}>
+                                <Calendar className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                Próxima Parcela: {format(nextPending.dueDate, 'dd/MM/yyyy')}
                               </span>
-                              {sale.first_installment_date && <span className="block text-[10px]">1ª parc: {format(parseLocalDate(sale.first_installment_date), 'dd/MM/yyyy')}</span>}
-                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                                <span className="text-emerald-600 font-medium flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                                  Pagas: {paidInstsCount} de {totalInstsCount}
-                                </span>
-                              </div>
-                              {isFullySettled && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-sm mt-1">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  QUITADO 🎉
-                                </span>
-                              )}
+                            ) : (
+                              <span className="block text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-0.5" title="Sem parcelas pendentes">
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                Quitada
+                              </span>
+                            )}
+                            {sale.first_installment_date && (
+                              <span className="block text-[10px]">
+                                {nextPending ? (
+                                  `${nextPending.index}ª parc: ${format(nextPending.dueDate, 'dd/MM/yyyy')}`
+                                ) : (
+                                  `1ª parc: ${format(parseLocalDate(sale.first_installment_date), 'dd/MM/yyyy')}`
+                                )}
+                              </span>
+                            )}
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                              <span className="text-emerald-600 font-medium flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                                Pagas: {paidInstsCount} de {totalInstsCount}
+                              </span>
                             </div>
-                          );
-                        })()}
+                            {isFullySettled && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-sm mt-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                QUITADO 🎉
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right">

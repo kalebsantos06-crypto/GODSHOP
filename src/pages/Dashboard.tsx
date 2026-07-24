@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { DollarSign, Smartphone, ShoppingCart, TrendingUp, RefreshCw, Sparkles, Quote, Database, AlertTriangle, CheckCircle2, Coins, Package, ShieldCheck } from 'lucide-react';
+import { DollarSign, Smartphone, ShoppingCart, TrendingUp, RefreshCw, Sparkles, Quote, Database, AlertTriangle, CheckCircle2, Coins, Package, ShieldCheck, MessageSquare, Bell } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/shared/StatCard';
 import { formatBRL } from '../lib/formatCurrency';
-import { format, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addDays, addMonths, startOfDay, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { parseLocalDate } from '../lib/dateUtils';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
@@ -281,6 +282,204 @@ export default function Dashboard() {
     };
   });
 
+  const getInstallmentDate = (sale: any, index: number) => {
+    const baseDate = sale.first_installment_date ? parseLocalDate(sale.first_installment_date) : parseLocalDate(sale.sale_date);
+    const intervalMultiplier = sale.first_installment_date ? (index - 1) : index;
+    if (sale.installment_frequency === 'Semanal') {
+      return addDays(baseDate, intervalMultiplier * 7);
+    } else if (sale.installment_frequency === 'Quinzenal') {
+      return addDays(baseDate, intervalMultiplier * 15);
+    } else {
+      return addMonths(baseDate, intervalMultiplier);
+    }
+  };
+
+  const getCalculatedInstallments = (
+    sale: any,
+    customPayments: { [key: number]: number }
+  ) => {
+    if (!sale) return [];
+    const totalAmount = sale.sell_price - (sale.down_payment || 0);
+    const baseInstCount = sale.installments || 1;
+
+    const list: {
+      index: number;
+      expectedAmount: number;
+      paidAmount: number;
+      dueDate: Date;
+      status: 'fully_paid' | 'pending';
+    }[] = [];
+    
+    let totalPaid = 0;
+    const paidIndices: number[] = [];
+    const unpaidIndices: number[] = [];
+
+    for (let i = 1; i <= baseInstCount; i++) {
+      const p = customPayments[i] || 0;
+      if (p > 0.005) {
+        totalPaid += p;
+        paidIndices.push(i);
+      } else {
+        unpaidIndices.push(i);
+      }
+    }
+
+    let remainingUnpaid = totalAmount - totalPaid;
+    let extraIndex = baseInstCount + 1;
+    while (true) {
+      const p = customPayments[extraIndex] || 0;
+      if (p > 0.005) {
+        totalPaid += p;
+        remainingUnpaid = totalAmount - totalPaid;
+        paidIndices.push(extraIndex);
+        extraIndex++;
+      } else {
+        break;
+      }
+    }
+
+    if (remainingUnpaid > 0.01 && unpaidIndices.length === 0) {
+      unpaidIndices.push(extraIndex);
+    }
+
+    const allIndices = Array.from(new Set([...paidIndices, ...unpaidIndices])).sort((a, b) => a - b);
+
+    if (unpaidIndices.length > 0) {
+      const expectedPerUnpaid = Number((remainingUnpaid / unpaidIndices.length).toFixed(2));
+      const totalPaidExpected = paidIndices.reduce((sum, idx) => sum + (customPayments[idx] || 0), 0);
+      const countExceptLast = unpaidIndices.length - 1;
+      const sumExceptLast = countExceptLast * expectedPerUnpaid;
+      const lastUnpaidIndex = unpaidIndices[unpaidIndices.length - 1];
+      const lastExpected = Number((totalAmount - totalPaidExpected - sumExceptLast).toFixed(2));
+      
+      const expectedMap: { [key: number]: number } = {};
+      for (const idx of paidIndices) {
+        expectedMap[idx] = customPayments[idx] || 0;
+      }
+      for (let i = 0; i < unpaidIndices.length - 1; i++) {
+        expectedMap[unpaidIndices[i]] = expectedPerUnpaid;
+      }
+      expectedMap[lastUnpaidIndex] = lastExpected;
+
+      for (const idx of allIndices) {
+        const isPaid = paidIndices.includes(idx);
+        const paidVal = customPayments[idx] || 0;
+        const expectedVal = expectedMap[idx];
+
+        list.push({
+          index: idx,
+          expectedAmount: expectedVal,
+          paidAmount: paidVal,
+          dueDate: getInstallmentDate(sale, idx),
+          status: isPaid ? 'fully_paid' : 'pending'
+        });
+      }
+    } else {
+      for (const idx of allIndices) {
+        const paidVal = customPayments[idx] || 0;
+        list.push({
+          index: idx,
+          expectedAmount: paidVal,
+          paidAmount: paidVal,
+          dueDate: getInstallmentDate(sale, idx),
+          status: 'fully_paid'
+        });
+      }
+    }
+
+    return list;
+  };
+
+  const getPendingNotificationsCount = () => {
+    let count = 0;
+    if (!sales || sales.length === 0) return 0;
+    const today = startOfDay(new Date());
+
+    for (const sale of sales) {
+      if (!sale.installments || sale.installments <= 1) continue;
+
+      let customPayments: { [key: number]: number } = {};
+      try {
+        const stored = localStorage.getItem(`inst_payments_${sale.id}`);
+        if (stored) {
+          customPayments = JSON.parse(stored);
+        } else {
+          const instAmount = Number(((sale.sell_price - (sale.down_payment || 0)) / sale.installments).toFixed(2));
+          for (let i = 1; i <= sale.installments; i++) {
+            customPayments[i] = i <= (sale.installments_paid || 0) ? instAmount : 0;
+          }
+        }
+      } catch (e) {
+        // Safe fallback
+      }
+
+      const calculatedList = getCalculatedInstallments(sale, customPayments);
+      for (const inst of calculatedList) {
+        if (inst.status === 'pending') {
+          const dueDay = startOfDay(inst.dueDate);
+          const daysDiff = differenceInDays(dueDay, today);
+          if (daysDiff <= 3) {
+            count++;
+          }
+        }
+      }
+    }
+    return count;
+  };
+
+  const pendingNotifCount = getPendingNotificationsCount();
+
+  const getUpcomingInstallments = () => {
+    const list: any[] = [];
+    if (!sales || sales.length === 0) return [];
+    const today = startOfDay(new Date());
+
+    for (const sale of sales) {
+      if (!sale.installments || sale.installments <= 1) continue;
+
+      let customPayments: { [key: number]: number } = {};
+      try {
+        const stored = localStorage.getItem(`inst_payments_${sale.id}`);
+        if (stored) {
+          customPayments = JSON.parse(stored);
+        } else {
+          const instAmount = Number(((sale.sell_price - (sale.down_payment || 0)) / sale.installments).toFixed(2));
+          for (let i = 1; i <= sale.installments; i++) {
+            customPayments[i] = i <= (sale.installments_paid || 0) ? instAmount : 0;
+          }
+        }
+      } catch (e) {}
+
+      const calculatedList = getCalculatedInstallments(sale, customPayments);
+      const client = clients.find(c => c.id === sale.client_id);
+      const iphone = iphones.find(i => i.id === sale.iphone_id);
+      const consoleObj = consoles.find(c => c.id === sale.console_id);
+      const categoryName = consoleObj ? (consoleObj.category === 'tv' ? 'TV' : (consoleObj.category === 'rice_cooker' ? 'Panela Elétrica' : (consoleObj.category === 'outro' ? 'Eletro' : 'Console'))) : 'Aparelho';
+      const itemName = iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${categoryName} ${consoleObj.model}` : 'Aparelho');
+
+      for (const inst of calculatedList) {
+        if (inst.status === 'pending') {
+          const dueDay = startOfDay(inst.dueDate);
+          const daysDiff = differenceInDays(dueDay, today);
+          list.push({
+            id: `${sale.id}_inst_${inst.index}`,
+            clientName: client?.name || 'Cliente Sem Nome',
+            clientPhone: client?.phone ? client.phone.replace(/\D/g, '') : '',
+            itemName,
+            installmentIndex: inst.index,
+            expectedAmount: inst.expectedAmount,
+            dueDate: inst.dueDate,
+            daysDiff
+          });
+        }
+      }
+    }
+
+    return list.sort((a, b) => a.daysDiff - b.daysDiff).slice(0, 3);
+  };
+
+  const upcomingInstallments = getUpcomingInstallments();
+
   if (isLoadingIphones || isLoadingSales || isLoadingConsoles || isLoadingClients) {
     return (
       <div className="flex h-[50vh] items-center justify-center">
@@ -306,6 +505,21 @@ export default function Dashboard() {
                 <span className="text-[10px] font-black tracking-[0.2em] text-primary uppercase opacity-80">Insight Empreendedor</span>
               </div>
               <div className="flex items-center gap-1">
+                <Link
+                  to="/settings?tab=automacao"
+                  className="relative p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 active:scale-90 flex items-center justify-center text-emerald-400 hover:text-emerald-300"
+                  title="Enviar Cobranças / Automação WhatsApp"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  {pendingNotifCount > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 text-[8px] font-bold text-white flex items-center justify-center">
+                        {pendingNotifCount}
+                      </span>
+                    </span>
+                  )}
+                </Link>
                 <button 
                   onClick={async () => {
                     const toastId = toast.loading('Sincronizando todas as assinaturas...');
@@ -410,6 +624,71 @@ export default function Dashboard() {
                   * O Lucro é calculado subtraindo o preço de compra do preço de venda.
                 </p>
               </div>
+
+              {upcomingInstallments.length > 0 && (
+                <div className="pt-3 border-t">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Cobranças WhatsApp:</h4>
+                    <Link to="/settings?tab=automacao" className="text-[9px] text-primary font-bold hover:underline">
+                      Ver tudo →
+                    </Link>
+                  </div>
+                  <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar">
+                    {upcomingInstallments.map((inst) => {
+                      let diffLabel = '';
+                      let diffClass = '';
+                      if (inst.daysDiff === 0) {
+                        diffLabel = 'Hoje';
+                        diffClass = 'text-amber-500 font-bold';
+                      } else if (inst.daysDiff === 1) {
+                        diffLabel = 'Amanhã';
+                        diffClass = 'text-blue-400 font-medium';
+                      } else if (inst.daysDiff < 0) {
+                        diffLabel = `Atrasada ${Math.abs(inst.daysDiff)}d`;
+                        diffClass = 'text-rose-500 font-bold animate-pulse';
+                      } else {
+                        diffLabel = `Em ${inst.daysDiff}d`;
+                        diffClass = 'text-muted-foreground';
+                      }
+
+                      return (
+                        <div key={inst.id} className="flex items-center justify-between p-2 rounded bg-muted/30 border border-border/50 text-xs">
+                          <div className="flex flex-col min-w-0 flex-1 pr-2">
+                            <span className="font-bold truncate">{inst.clientName}</span>
+                            <span className="text-[10px] text-muted-foreground truncate">
+                              {inst.installmentIndex}ª Parc. • {formatBRL(inst.expectedAmount)} • {inst.itemName}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={cn("text-[10px] uppercase", diffClass)}>
+                              {diffLabel}
+                            </span>
+                            {inst.clientPhone ? (
+                              <a
+                                href={`https://api.whatsapp.com/send?phone=${inst.clientPhone}&text=${encodeURIComponent(
+                                  `Olá, *${inst.clientName}*! 😊 Passando para lembrar que a *${inst.installmentIndex}ª Parcela* de *${formatBRL(inst.expectedAmount)}* referente à compra do *${inst.itemName}* ` +
+                                  (inst.daysDiff === 0 ? "vence *HOJE*!" : inst.daysDiff === 1 ? "vence *AMANHÃ*!" : inst.daysDiff === 2 ? "vence em *2 DIAS*!" : inst.daysDiff === 3 ? "vence em *3 DIAS*!" : inst.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(inst.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                                  ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded transition-colors flex items-center justify-center"
+                                title="Enviar lembrete via WhatsApp"
+                              >
+                                <MessageSquare className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground select-none" title="Sem telefone cadastrado">
+                                S/ Tel
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -50,11 +50,17 @@ export default function Layout() {
   const [notifTab, setNotifTab] = useState<'recent' | 'all'>('recent');
   const [activeFloatingNotif, setActiveFloatingNotif] = useState<NotificationItem | null>(null);
   const [notifPermission, setNotifPermission] = useState<string>(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      return Notification.permission;
+    if (typeof window !== 'undefined') {
+      if (localStorage.getItem('godshop_notif_force_enabled') === 'true') {
+        return 'granted';
+      }
+      if ('Notification' in window) {
+        return Notification.permission;
+      }
     }
     return 'default';
   });
+  const [isNotifGuideOpen, setIsNotifGuideOpen] = useState(false);
 
   // Fetch data for notifications
   const { data: salesList = [] } = useQuery({
@@ -249,30 +255,43 @@ export default function Layout() {
   }
 
   // Filter notifications
-  const recentNotifications = notifications.filter(n => n.daysDiff >= -2 && n.daysDiff <= 2).sort((a, b) => a.daysDiff - b.daysDiff);
+  const recentNotifications = notifications.filter(n => n.daysDiff <= 3).sort((a, b) => a.daysDiff - b.daysDiff);
   const allNotifications = notifications.sort((a, b) => a.daysDiff - b.daysDiff);
   const badgeCount = recentNotifications.length;
 
   // Request native phone push permission
   const requestPushPermission = async () => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      try {
-        const permission = await Notification.requestPermission();
-        setNotifPermission(permission);
-        if (permission === 'granted') {
-          toast.success('Notificações nativas ativadas! 🔔');
-          new Notification("GODSHOP Ativado ⚡", {
-            body: "Você agora receberá alertas diretamente na barra de notificações do seu celular!",
-            icon: logoImage || "/favicon.ico"
-          });
-        } else {
-          toast.error('Permissão negada. Ative as notificações nas configurações do seu celular.');
+    if (typeof window !== 'undefined') {
+      // First try requesting native notification permission
+      if ('Notification' in window) {
+        try {
+          const permission = await Notification.requestPermission();
+          setNotifPermission(permission);
+          if (permission === 'granted') {
+            localStorage.setItem('godshop_notif_force_enabled', 'true');
+            toast.success('Notificações nativas ativadas! 🔔');
+            try {
+              new Notification("GODSHOP Ativado ⚡", {
+                body: "Você agora receberá alertas diretamente na barra de notificações do seu celular!",
+                icon: logoImage || "/favicon.ico"
+              });
+            } catch (e) {
+              console.log("Could not trigger initial notification: ", e);
+            }
+            return;
+          }
+        } catch (err) {
+          console.error('Error requesting native permission:', err);
         }
-      } catch (err) {
-        console.error('Error requesting notification permission:', err);
       }
+
+      // If native permission was denied, not supported, or failed (e.g. inside an iframe),
+      // gracefully enable internal app notification system and save preference so they are never blocked.
+      localStorage.setItem('godshop_notif_force_enabled', 'true');
+      setNotifPermission('granted');
+      toast.success('Notificações ativadas no sistema do aplicativo! 🔔');
     } else {
-      toast.error('Este dispositivo/navegador não suporta notificações de sistema.');
+      toast.error('Este dispositivo/navegador não suporta notificações.');
     }
   };
 
@@ -292,8 +311,10 @@ export default function Layout() {
               if (n.daysDiff === 0) msg += "vence HOJE!";
               else if (n.daysDiff === 1) msg += "vence AMANHÃ!";
               else if (n.daysDiff === 2) msg += "vence em 2 dias!";
+              else if (n.daysDiff === 3) msg += "vence em 3 dias!";
               else if (n.daysDiff === -1) msg += "venceu ONTEM!";
               else if (n.daysDiff === -2) msg += "venceu há 2 dias!";
+              else if (n.daysDiff === -3) msg += "venceu há 3 dias!";
               else msg += `vence em ${n.daysDiff} dias!`;
 
               new Notification(`GODSHOP: ${n.clientName}`, {
@@ -420,7 +441,30 @@ export default function Layout() {
     }
   };
 
-  const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
+  const toggleTheme = () => {
+    setTheme(prev => {
+      const next = prev === 'light' ? 'dark' : 'light';
+      localStorage.setItem('app_theme', next);
+      window.dispatchEvent(new Event('theme_changed'));
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleOpenAuth = () => setIsAuthModalOpen(true);
+    const handleThemeChange = () => {
+      const saved = localStorage.getItem('app_theme') as 'light' | 'dark';
+      if (saved) {
+        setTheme(saved);
+      }
+    };
+    window.addEventListener('open_auth_modal', handleOpenAuth);
+    window.addEventListener('theme_changed', handleThemeChange);
+    return () => {
+      window.removeEventListener('open_auth_modal', handleOpenAuth);
+      window.removeEventListener('theme_changed', handleThemeChange);
+    };
+  }, []);
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -481,8 +525,10 @@ export default function Layout() {
                   activeFloatingNotif.daysDiff === 0 ? "HOJE" : 
                   activeFloatingNotif.daysDiff === 1 ? "AMANHÃ" : 
                   activeFloatingNotif.daysDiff === 2 ? "EM 2 DIAS" : 
+                  activeFloatingNotif.daysDiff === 3 ? "EM 3 DIAS" : 
                   activeFloatingNotif.daysDiff === -1 ? "ONTEM" : 
                   activeFloatingNotif.daysDiff === -2 ? "HÁ 2 DIAS" : 
+                  activeFloatingNotif.daysDiff === -3 ? "HÁ 3 DIAS" : 
                   `há ${Math.abs(activeFloatingNotif.daysDiff)} dias`
                 }</span>
               </p>
@@ -505,7 +551,7 @@ export default function Layout() {
                 <a
                   href={`https://api.whatsapp.com/send?phone=${activeFloatingNotif.clientPhone}&text=${encodeURIComponent(
                     `Olá, *${activeFloatingNotif.clientName}*! 😊 Passando para lembrar que a *${activeFloatingNotif.installmentIndex}ª Parcela* de *${formatBRL(activeFloatingNotif.expectedAmount)}* referente à compra do *${activeFloatingNotif.itemName}* ` +
-                    (activeFloatingNotif.daysDiff === 0 ? "vence *HOJE*!" : activeFloatingNotif.daysDiff === 1 ? "vence *AMANHÃ*!" : activeFloatingNotif.daysDiff === 2 ? "vence em *2 DIAS*!" : activeFloatingNotif.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(activeFloatingNotif.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                    (activeFloatingNotif.daysDiff === 0 ? "vence *HOJE*!" : activeFloatingNotif.daysDiff === 1 ? "vence *AMANHÃ*!" : activeFloatingNotif.daysDiff === 2 ? "vence em *2 DIAS*!" : activeFloatingNotif.daysDiff === 3 ? "vence em *3 DIAS*!" : activeFloatingNotif.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(activeFloatingNotif.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
                     ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
                   )}`}
                   target="_blank"
@@ -600,7 +646,7 @@ export default function Layout() {
               <button
                 onClick={() => setIsNotifOpen(!isNotifOpen)}
                 className={cn(
-                  "p-2 rounded-lg border transition-all shadow-xl group relative flex items-center justify-center cursor-pointer",
+                  "p-1.5 sm:p-2 rounded-lg border transition-all shadow-xl group relative flex items-center justify-center cursor-pointer",
                   theme === 'dark' ? "bg-white/5 hover:bg-white/10 border-white/10" : "bg-black/5 hover:bg-black/10 border-black/10",
                   isNotifOpen ? "ring-2 ring-emerald-500/50" : ""
                 )}
@@ -631,7 +677,7 @@ export default function Layout() {
                     onClick={() => setIsNotifOpen(false)} 
                   />
                   <div className={cn(
-                    "absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200",
+                    "fixed left-4 right-4 top-[68px] sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:w-96 sm:mt-2 rounded-2xl border shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200",
                     theme === 'dark' 
                       ? "bg-zinc-950/95 border-white/10 text-white backdrop-blur-xl" 
                       : "bg-white/95 border-black/10 text-zinc-900 backdrop-blur-xl"
@@ -644,7 +690,7 @@ export default function Layout() {
                       <span className={cn(
                         "text-[10px] font-bold px-2 py-0.5 rounded-full",
                         badgeCount > 0 ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
-                      )}>
+                       )}>
                         {badgeCount} Alertas
                       </span>
                     </div>
@@ -660,7 +706,7 @@ export default function Layout() {
                             : "border-transparent text-muted-foreground hover:text-foreground"
                         )}
                       >
-                        Recentes (-2 a +2 dias)
+                        Atrasadas / Recentes
                       </button>
                       <button
                         onClick={() => setNotifTab('all')}
@@ -671,26 +717,36 @@ export default function Layout() {
                             : "border-transparent text-muted-foreground hover:text-foreground"
                         )}
                       >
-                        Todas Pendentes ({allNotifications.length})
+                        Pendentes ({allNotifications.length})
                       </button>
                     </div>
 
-                    {/* Native system notification prompt */}
+                    {/* Native system notification prompt (Compact Horizontal Design) */}
                     {notifPermission !== 'granted' && (
-                      <div className="p-3 bg-emerald-500/10 border-b border-emerald-500/20 flex flex-col gap-1.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-emerald-400">
-                          <Bell className="h-3.5 w-3.5 animate-bounce" />
-                          <span>Ativar Avisos na Tela do Celular?</span>
+                      <div className="p-3 bg-emerald-500/5 border-b border-emerald-500/15 flex items-center justify-between gap-3 text-left">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                            <Bell className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+                            Avisos no Celular
+                          </p>
+                          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                            Receba alertas de vencimento na barra do aparelho.
+                          </p>
                         </div>
-                        <p className="text-[10px] text-zinc-300">
-                          Receba avisos na barra de status do seu celular quando houver parcelas vencendo nos últimos 2 dias.
-                        </p>
-                        <button
-                          onClick={requestPushPermission}
-                          className="py-1 px-3 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black rounded-lg transition cursor-pointer self-center shadow-lg"
-                        >
-                          ATIVAR NOTIFICAÇÕES
-                        </button>
+                        <div className="flex flex-col gap-1 shrink-0">
+                          <button
+                            onClick={requestPushPermission}
+                            className="py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-black rounded-lg transition cursor-pointer shadow-sm uppercase tracking-wider text-center"
+                          >
+                            Ativar
+                          </button>
+                          <button
+                            onClick={() => setIsNotifGuideOpen(true)}
+                            className="text-[9px] text-emerald-500 hover:underline text-center cursor-pointer"
+                          >
+                            Ajuda?
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -717,13 +773,19 @@ export default function Layout() {
                           } else if (item.daysDiff === 2) {
                             diffLabel = 'Vence em 2 dias';
                             diffClass = 'bg-blue-500/5 text-blue-400 border-blue-500/10';
+                          } else if (item.daysDiff === 3) {
+                            diffLabel = 'Vence em 3 dias';
+                            diffClass = 'bg-blue-500/5 text-blue-400 border-blue-500/10';
                           } else if (item.daysDiff === -1) {
                             diffLabel = 'Venceu Ontem';
                             diffClass = 'bg-red-500/10 text-red-500 font-bold border-red-500/20 animate-pulse';
                           } else if (item.daysDiff === -2) {
                             diffLabel = 'Venceu há 2 dias';
                             diffClass = 'bg-red-500/10 text-red-500 font-bold border-red-500/20';
-                          } else if (item.daysDiff < -2) {
+                          } else if (item.daysDiff === -3) {
+                            diffLabel = 'Venceu há 3 dias';
+                            diffClass = 'bg-red-500/10 text-red-500 font-bold border-red-500/20';
+                          } else if (item.daysDiff < -3) {
                             diffLabel = `Atrasada há ${Math.abs(item.daysDiff)} dias`;
                             diffClass = 'bg-rose-500/10 text-rose-500 font-bold border-rose-500/20';
                           } else {
@@ -734,17 +796,17 @@ export default function Layout() {
                           return (
                             <div key={item.id} className="p-3.5 hover:bg-muted/10 transition-colors space-y-2 text-xs">
                               <div className="flex items-start justify-between gap-2">
-                                <div className="space-y-0.5">
+                                <div className="space-y-0.5 min-w-0 flex-1">
                                   <div className="font-bold flex items-center gap-1">
-                                    <span>{item.clientName}</span>
+                                    <span className="truncate block">{item.clientName}</span>
                                   </div>
-                                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                                    <span>{item.itemName}</span>
+                                  <div className="text-[10px] text-muted-foreground flex items-center gap-1 truncate">
+                                    <span className="truncate">{item.itemName}</span>
                                     <span>•</span>
-                                    <span className="font-medium">{item.installmentIndex}ª Parcela</span>
+                                    <span className="font-medium shrink-0">{item.installmentIndex}ª Parc.</span>
                                   </div>
                                 </div>
-                                <span className={cn("text-[9px] px-1.5 py-0.5 rounded border uppercase tracking-wider", diffClass)}>
+                                <span className={cn("text-[9px] px-1.5 py-0.5 rounded border uppercase tracking-wider shrink-0", diffClass)}>
                                   {diffLabel}
                                 </span>
                               </div>
@@ -759,7 +821,7 @@ export default function Layout() {
                                   <a
                                     href={`https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(
                                       `Olá, *${item.clientName}*! 😊 Passando para lembrar que a *${item.installmentIndex}ª Parcela* de *${formatBRL(item.expectedAmount)}* referente à compra do *${item.itemName}* ` +
-                                      (item.daysDiff === 0 ? "vence *HOJE*!" : item.daysDiff === 1 ? "vence *AMANHÃ*!" : item.daysDiff === 2 ? "vence em *2 DIAS*!" : item.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(item.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                                      (item.daysDiff === 0 ? "vence *HOJE*!" : item.daysDiff === 1 ? "vence *AMANHÃ*!" : item.daysDiff === 2 ? "vence em *2 DIAS*!" : item.daysDiff === 3 ? "vence em *3 DIAS*!" : item.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(item.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
                                       ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
                                     )}`}
                                     target="_blank"
@@ -808,7 +870,7 @@ export default function Layout() {
           <button
             onClick={toggleNavBar}
             className={cn(
-              "p-2 rounded-lg border transition-all shadow-xl group",
+              "p-1.5 sm:p-2 rounded-lg border transition-all shadow-xl group cursor-pointer",
               theme === 'dark' ? "bg-white/5 hover:bg-white/10 border-white/10" : "bg-black/5 hover:bg-black/10 border-black/10"
             )}
             title={isNavBarVisible ? 'Ocultar Barra de Funções' : 'Mostrar Barra de Funções'}
@@ -820,45 +882,10 @@ export default function Layout() {
             )}
           </button>
 
-          <button
-            onClick={toggleTheme}
-            className={cn(
-              "p-2 rounded-lg border transition-all shadow-xl group",
-              theme === 'dark' ? "bg-white/5 hover:bg-white/10 border-white/10" : "bg-black/5 hover:bg-black/10 border-black/10"
-            )}
-            title={theme === 'dark' ? 'Mudar para Tema Claro' : 'Mudar para Tema Escuro'}
-          >
-            {theme === 'dark' ? (
-              <Sun className="h-4 w-4 sm:h-5 sm:w-5 text-white/80 group-hover:rotate-45 transition-transform" />
-            ) : (
-              <Moon className="h-4 w-4 sm:h-5 sm:w-5 text-black/80 group-hover:-rotate-12 transition-transform" />
-            )}
-          </button>
-          
-          <button
-            onClick={() => setIsAuthModalOpen(true)}
-            className={cn(
-              "flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all shadow-xl group",
-              theme === 'dark'
-                ? (isAuthenticated ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20" : "bg-white/5 hover:bg-white/10 border-white/10 text-white/80")
-                : (isAuthenticated ? "bg-emerald-500/5 border-emerald-500/15 text-emerald-600 hover:bg-emerald-500/10" : "bg-black/5 hover:bg-black/10 border-black/10 text-black/80")
-            )}
-            title={isAuthenticated ? `Conectado: ${user?.email}` : "Minha Conta"}
-          >
-            {isAuthenticated ? (
-              <User className="h-4 w-4 text-emerald-400" />
-            ) : (
-              <LogIn className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">
-              {isAuthenticated ? "Conta" : "Entrar"}
-            </span>
-          </button>
-
           <Link
             to="/settings"
             className={cn(
-              "flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all shadow-xl group",
+              "flex items-center gap-1.5 p-1.5 sm:px-3 sm:py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all shadow-xl group cursor-pointer",
               theme === 'dark' ? "bg-white/5 hover:bg-white/10 border-white/10 text-white/80" : "bg-black/5 hover:bg-black/10 border-black/10 text-black/80"
             )}
             title="Configurações"
@@ -1112,6 +1139,112 @@ export default function Layout() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Notification Guide Modal */}
+      {isNotifGuideOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            onClick={() => setIsNotifGuideOpen(false)}
+          />
+          
+          <div className={cn(
+            "relative w-full max-w-lg rounded-2xl border shadow-2xl p-6 overflow-hidden transition-all duration-300 animate-in zoom-in-95 max-h-[90vh] flex flex-col",
+            theme === 'dark' 
+              ? "bg-zinc-900 border-white/10 text-white" 
+              : "bg-white border-black/10 text-zinc-900"
+          )}>
+            <button
+              onClick={() => setIsNotifGuideOpen(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition cursor-pointer"
+            >
+              <X className="h-5 w-5 opacity-70" />
+            </button>
+
+            <div className="flex items-center gap-2 mb-4">
+              <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                <Bell className="h-5 w-5" />
+              </div>
+              <div className="text-left">
+                <h3 className="text-lg font-bold">Como Ativar Notificações</h3>
+                <p className="text-xs opacity-60">Siga as instruções para liberar alertas no seu celular</p>
+              </div>
+            </div>
+
+            {/* Check if inside iframe warning */}
+            {typeof window !== 'undefined' && window.self !== window.top && (
+              <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-500 text-left flex gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block mb-0.5 text-amber-400">Aviso: Painel de Testes do Sistema (Iframe)</strong>
+                  Você está visualizando o app em uma janela simulada de desenvolvimento. Navegadores bloqueiam solicitações de notificação por segurança aqui.
+                  <button 
+                    onClick={() => {
+                      window.open(window.location.href, '_blank');
+                    }}
+                    className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black rounded-lg transition cursor-pointer"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    ABRIR EM NOVA ABA (CELULAR / PC)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="overflow-y-auto pr-1 flex-1 space-y-4 text-left custom-scrollbar text-sm">
+              <div className="border-b dark:border-white/10 border-black/10 pb-4">
+                <h4 className="font-bold text-emerald-500 flex items-center gap-1.5 mb-2">
+                  <Smartphone className="h-4 w-4" /> 
+                  Celular Android (Chrome, Samsung Internet)
+                </h4>
+                <ol className="list-decimal list-inside space-y-1.5 pl-1 text-xs opacity-90">
+                  <li>No topo direito do navegador, toque nos <strong>três pontinhos (Menu)</strong>.</li>
+                  <li>Vá em <strong>Configurações</strong> e procure por <strong>Configurações do site</strong>.</li>
+                  <li>Toque em <strong>Notificações</strong>.</li>
+                  <li>Se estiver em "Bloqueado", altere para "Permitido". Se houver uma lista de sites, procure por este link e clique em <strong>Permitir Notificações</strong>.</li>
+                </ol>
+              </div>
+
+              <div className="border-b dark:border-white/10 border-black/10 pb-4">
+                <h4 className="font-bold text-emerald-500 flex items-center gap-1.5 mb-2">
+                  <User className="h-4 w-4" /> 
+                  iPhone / iOS (Safari)
+                </h4>
+                <div className="space-y-2 text-xs opacity-90 pl-1">
+                  <p>O iOS (sistema do iPhone) exige que você adicione o aplicativo à sua <strong>Tela de Início</strong> para permitir avisos nativos:</p>
+                  <ol className="list-decimal list-inside space-y-1.5">
+                    <li>No Safari, toque no botão de <strong>Compartilhar</strong> (ícone de quadrado com uma seta para cima na barra inferior).</li>
+                    <li>Role para baixo e selecione <strong>Adicionar à Tela de Início</strong> (Add to Home Screen).</li>
+                    <li>Abra o aplicativo através do novo ícone criado na tela de aplicativos do seu iPhone.</li>
+                    <li>Abra o painel de notificações e toque em <strong>ATIVAR NOTIFICAÇÕES</strong> novamente.</li>
+                  </ol>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-emerald-500 flex items-center gap-1.5 mb-2">
+                  <SettingsIcon className="h-4 w-4" /> 
+                  Computador (Chrome, Edge, Firefox)
+                </h4>
+                <ol className="list-decimal list-inside space-y-1.5 pl-1 text-xs opacity-90">
+                  <li>Na barra de endereços (onde fica o link), clique no <strong>ícone de cadeado</strong> que fica do lado esquerdo do endereço.</li>
+                  <li>Ative a opção de <strong>Notificações</strong> (mude para "Permitir").</li>
+                  <li>Atualize a página do aplicativo e clique em <strong>ATIVAR NOTIFICAÇÕES</strong> novamente.</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t dark:border-white/10 border-black/10 flex justify-end">
+              <button
+                onClick={() => setIsNotifGuideOpen(false)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-md"
+              >
+                Entendido
+              </button>
+            </div>
           </div>
         </div>
       )}

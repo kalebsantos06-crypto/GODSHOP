@@ -14,11 +14,36 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const safeGetStorage = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    console.warn(`localStorage read error for ${key}:`, e);
+    return null;
+  }
+};
+
+const safeSetStorage = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn(`localStorage write error for ${key}:`, e);
+  }
+};
+
+const safeRemoveStorage = (key: string): void => {
+  try {
+    localStorage.removeItem(key);
+  } catch (e) {
+    console.warn(`localStorage remove error for ${key}:`, e);
+  }
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(() => {
-    return localStorage.getItem('auth_offline_mode') === 'true';
+    return safeGetStorage('auth_offline_mode') === 'true';
   });
   const [loading, setLoading] = useState(true);
 
@@ -28,16 +53,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session.user);
         setIsAuthenticated(true);
         setIsOfflineMode(false);
-        localStorage.setItem('auth_cached_user', JSON.stringify(session.user));
-        localStorage.setItem('auth_offline_mode', 'false');
+        safeSetStorage('auth_cached_user', JSON.stringify(session.user));
+        safeSetStorage('auth_offline_mode', 'false');
       } else {
         // If there was no session, check if we are in offline mode with a cached user
-        const offlineMode = localStorage.getItem('auth_offline_mode') === 'true';
-        const cachedUserStr = localStorage.getItem('auth_cached_user');
+        const offlineMode = safeGetStorage('auth_offline_mode') === 'true';
+        const cachedUserStr = safeGetStorage('auth_cached_user');
         if (offlineMode && cachedUserStr) {
-          setUser(JSON.parse(cachedUserStr));
-          setIsAuthenticated(true);
-          setIsOfflineMode(true);
+          try {
+            setUser(JSON.parse(cachedUserStr));
+            setIsAuthenticated(true);
+            setIsOfflineMode(true);
+          } catch (e) {
+            setUser(null);
+            setIsAuthenticated(false);
+            setIsOfflineMode(false);
+          }
         } else {
           setUser(null);
           setIsAuthenticated(false);
@@ -47,12 +78,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }).catch((err) => {
       console.warn("Supabase auth session fetch failed, checking offline fallback", err);
-      const cachedUserStr = localStorage.getItem('auth_cached_user');
+      const cachedUserStr = safeGetStorage('auth_cached_user');
       if (cachedUserStr) {
-        setUser(JSON.parse(cachedUserStr));
-        setIsAuthenticated(true);
-        setIsOfflineMode(true);
-        localStorage.setItem('auth_offline_mode', 'true');
+        try {
+          setUser(JSON.parse(cachedUserStr));
+          setIsAuthenticated(true);
+          setIsOfflineMode(true);
+          safeSetStorage('auth_offline_mode', 'true');
+        } catch (e) {
+          setUser(null);
+          setIsAuthenticated(false);
+          setIsOfflineMode(false);
+        }
       } else {
         setUser(null);
         setIsAuthenticated(false);
@@ -66,19 +103,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(session.user);
         setIsAuthenticated(true);
         setIsOfflineMode(false);
-        localStorage.setItem('auth_cached_user', JSON.stringify(session.user));
-        localStorage.setItem('auth_offline_mode', 'false');
+        safeSetStorage('auth_cached_user', JSON.stringify(session.user));
+        safeSetStorage('auth_offline_mode', 'false');
       } else if (_event === 'SIGNED_OUT') {
         setUser(null);
         setIsAuthenticated(false);
         setIsOfflineMode(false);
-        localStorage.removeItem('auth_offline_mode');
-        localStorage.removeItem('auth_cached_user');
+        safeRemoveStorage('auth_offline_mode');
+        safeRemoveStorage('auth_cached_user');
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
 
   const login = async (email: string, password: string) => {
     try {
@@ -87,8 +125,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         setIsAuthenticated(true);
         setIsOfflineMode(false);
-        localStorage.setItem('auth_cached_user', JSON.stringify(data.user));
-        localStorage.setItem('auth_offline_mode', 'false');
+        safeSetStorage('auth_cached_user', JSON.stringify(data.user));
+        safeSetStorage('auth_offline_mode', 'false');
       }
       return { error };
     } catch (err: any) {
@@ -104,8 +142,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         setIsAuthenticated(true);
         setIsOfflineMode(false);
-        localStorage.setItem('auth_cached_user', JSON.stringify(data.user));
-        localStorage.setItem('auth_offline_mode', 'false');
+        safeSetStorage('auth_cached_user', JSON.stringify(data.user));
+        safeSetStorage('auth_offline_mode', 'false');
       }
       return { error };
     } catch (err: any) {
@@ -129,8 +167,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(fallbackUser);
     setIsAuthenticated(true);
     setIsOfflineMode(true);
-    localStorage.setItem('auth_cached_user', JSON.stringify(fallbackUser));
-    localStorage.setItem('auth_offline_mode', 'true');
+    safeSetStorage('auth_cached_user', JSON.stringify(fallbackUser));
+    safeSetStorage('auth_offline_mode', 'true');
     
     // Set a custom event to notify db services we switched to offline
     window.dispatchEvent(new CustomEvent('supabase_offline_status', { detail: { offline: true } }));
@@ -149,8 +187,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setIsAuthenticated(false);
     setIsOfflineMode(false);
-    localStorage.removeItem('auth_offline_mode');
-    localStorage.removeItem('auth_cached_user');
+    safeRemoveStorage('auth_offline_mode');
+    safeRemoveStorage('auth_cached_user');
   };
 
   if (loading) return null;

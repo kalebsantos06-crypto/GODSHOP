@@ -5,6 +5,7 @@ let authenticatedUserId: string | null = null;
 let lastKnownUserIdFromRows: string | null = null;
 let isSeeding = false;
 let seedingPromise: Promise<void> | null = null;
+const missingColumnsByTable: Record<string, Set<string>> = {};
 
 // Listen for auth state changes to keep authenticatedUserId in sync
 supabase.auth.onAuthStateChange((event, session) => {
@@ -122,7 +123,6 @@ export const db = {
 
     const tables = ['clients', 'suppliers', 'iphones', 'consoles', 'sales', 'prices'];
     const results = { synced: 0, failed: 0 };
-    const missingColumnsByTable: Record<string, Set<string>> = {};
 
     for (const table of tables) {
       const localItems = getLocalData(table);
@@ -218,8 +218,7 @@ export const db = {
             if (error.code === '23514') {
               if (table === 'sales' && error.message?.includes('installment_frequency')) {
                 cleanItem.installment_frequency = 'Mensal';
-                item.installment_frequency = 'Mensal';
-                tableModified = true;
+                // Do not overwrite item.installment_frequency in local cache to preserve user choice locally
                 retryCount++;
                 continue;
               }
@@ -1114,6 +1113,7 @@ export const db = {
           return {
             ...localItem,
             ...row,
+            installment_frequency: localItem?.installment_frequency || row.installment_frequency || 'Mensal',
             first_installment_date: row.first_installment_date || localItem?.first_installment_date
           };
         });
@@ -1149,8 +1149,16 @@ export const db = {
       data.installment_frequency = freq as any;
       
       // Proactively separate client-only properties to prevent any Supabase schema mismatch/retry warnings
-      const { first_installment_date, installments_paid, ...cleanDataForDb } = data as any;
+      const { installments_paid, ...cleanDataForDb } = data as any;
       const insertData = { ...cleanDataForDb, id } as any;
+
+      // Remove any known missing columns to avoid query failures
+      if (missingColumnsByTable['sales']) {
+        for (const col of missingColumnsByTable['sales']) {
+          delete insertData[col];
+        }
+      }
+
       try {
         const userId = await getCurrentUserId();
         if (userId) {
@@ -1194,7 +1202,7 @@ export const db = {
 
         // Keep local cache in sync query
         const localSales = getLocalData('sales');
-        const localNewItem = { ...newItem, first_installment_date, installments_paid };
+        const localNewItem = { ...newItem, first_installment_date: data.first_installment_date, installments_paid };
         setLocalData('sales', [...localSales, localNewItem]);
 
         if (data.iphone_id) {
@@ -1305,7 +1313,15 @@ export const db = {
         }
 
         // Proactively separate client-only properties to prevent any Supabase schema mismatch/retry warnings
-        const { first_installment_date, installments_paid, ...cleanDataForDb } = data as any;
+        const { installments_paid, ...cleanDataForDb } = data as any;
+
+        // Remove any known missing columns to avoid query failures
+        if (missingColumnsByTable['sales']) {
+          for (const col of missingColumnsByTable['sales']) {
+            delete cleanDataForDb[col];
+          }
+        }
+
         try {
           let salesUpdateQuery = supabase.from('sales').update(cleanDataForDb).eq('id', id);
           if (userId) salesUpdateQuery = salesUpdateQuery.eq('user_id', userId);
