@@ -33,9 +33,10 @@
           }
         }, true);
 
-        // Monkeypatch standard WebSocket to prevent HMR connection attempts from throwing in console
+        // Monkeypatch standard WebSocket ONLY in container dev environment to prevent HMR connection attempts from throwing
+        const isDevEnv = window.location.hostname.includes('ais-dev') || window.location.port === '3000';
         const RealWebSocket = window.WebSocket;
-        if (RealWebSocket) {
+        if (isDevEnv && RealWebSocket) {
           class MockWebSocket {
             constructor(url, protocols) {
               const urlStr = String(url);

@@ -48,7 +48,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+
+    // Safety timeout: Ensure loading finishes within 2.5s even if network or auth hangs
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) {
+        setLoading(false);
+      }
+    }, 2500);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!isMounted) return;
+      clearTimeout(safetyTimer);
       if (session?.user) {
         setUser(session.user);
         setIsAuthenticated(true);
@@ -77,6 +88,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setLoading(false);
     }).catch((err) => {
+      if (!isMounted) return;
+      clearTimeout(safetyTimer);
       console.warn("Supabase auth session fetch failed, checking offline fallback", err);
       const cachedUserStr = safeGetStorage('auth_cached_user');
       if (cachedUserStr) {
@@ -99,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
       if (session?.user) {
         setUser(session.user);
         setIsAuthenticated(true);
@@ -114,7 +128,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      clearTimeout(safetyTimer);
+      subscription.unsubscribe();
+    };
   }, []);
 
 
@@ -191,7 +209,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     safeRemoveStorage('auth_cached_user');
   };
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-slate-100">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-xs font-semibold tracking-wider uppercase text-slate-400">Carregando GODSHOP...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <AuthContext.Provider value={{ user, isAuthenticated, login, signUp, logout, enterOfflineMode, isOfflineMode }}>
