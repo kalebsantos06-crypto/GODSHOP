@@ -447,6 +447,17 @@ export default function Layout() {
   
   const [bgImage, setBgImage] = useState<string>('/background.jpg');
   const [logoImage, setLogoImage] = useState<string | null>(null);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(true);
+
+  useEffect(() => {
+    const handleStatus = (e: any) => {
+      if (e.detail && typeof e.detail.connected === 'boolean') {
+        setIsRealtimeConnected(e.detail.connected);
+      }
+    };
+    window.addEventListener('supabase_realtime_status', handleStatus);
+    return () => window.removeEventListener('supabase_realtime_status', handleStatus);
+  }, []);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('app_theme');
     return (saved as 'light' | 'dark') || 'dark';
@@ -968,6 +979,23 @@ export default function Layout() {
               )}
             </div>
           )}
+
+          {/* Realtime Supabase Connection Badge */}
+          <div 
+            className={cn(
+              "hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] font-bold tracking-wider uppercase transition-all shadow-md",
+              isRealtimeConnected 
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+            )}
+            title={isRealtimeConnected ? "Sincronização em Tempo Real Supabase Ativa ⚡" : "Reconectando Sincronização Supabase..."}
+          >
+            <span className={cn(
+              "h-2 w-2 rounded-full shrink-0",
+              isRealtimeConnected ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
+            )} />
+            <span>{isRealtimeConnected ? "Realtime" : "Reconectando"}</span>
+          </div>
 
           <button
             onClick={toggleNavBar}

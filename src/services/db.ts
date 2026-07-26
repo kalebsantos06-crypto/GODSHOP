@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { iPhone, Client, Supplier, Sale, PriceTableItem, Console } from '../types';
+import { broadcastLocalChange } from './realtime';
 
 let authenticatedUserId: string | null = null;
 let lastKnownUserIdFromRows: string | null = null;
@@ -17,7 +18,7 @@ supabase.auth.onAuthStateChange((event, session) => {
   }
 });
 
-const getCurrentUserId = async () => {
+export const getCurrentUserId = async () => {
   try {
     const { data: { session }, error } = await supabase.auth.getSession();
     if (!error && session?.user) {
@@ -75,6 +76,7 @@ const getLocalData = (table: string): any[] => {
 const setLocalData = (table: string, data: any[]) => {
   try {
     localStorage.setItem(`db_fallback_${table}`, JSON.stringify(data));
+    broadcastLocalChange(table);
   } catch (e) {
     console.error(`Error saving local data for ${table}:`, e);
   }

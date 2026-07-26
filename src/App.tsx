@@ -26,6 +26,7 @@ import ClientSignature from './pages/ClientSignature';
 import ClientRemoteRegister from './pages/ClientRemoteRegister';
 import { AuthProvider } from './types/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import { initRealtimeSync } from './services/realtime';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,6 +49,14 @@ function AppContent() {
     return null;
   }
   
+  // Initialize Supabase 100% Real-time synchronization
+  useEffect(() => {
+    const cleanup = initRealtimeSync(queryClient);
+    return () => {
+      cleanup();
+    };
+  }, []);
+
   useEffect(() => {
     if (isAuthenticated && user) {
       // Trigger background sync when user logs in or app starts authenticated

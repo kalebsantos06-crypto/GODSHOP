@@ -951,6 +951,27 @@ export default function Settings() {
                 <button
                   onClick={async () => {
                     try {
+                      const { fixDuplicates } = await import('../services/fixDuplicates');
+                      const toastId = toast.loading('Procurando e corrigindo duplicatas...');
+                      const res = await fixDuplicates();
+                      if (res.success) {
+                        toast.success(`Correção concluída! Clientes fundidos: ${res.clientsFixed}, Vendas apagadas: ${res.salesFixed}`, { id: toastId });
+                        queryClient.invalidateQueries();
+                      } else {
+                        toast.error('Erro ao corrigir duplicatas', { id: toastId });
+                      }
+                    } catch (e: any) {
+                      toast.error('Erro fatal: ' + e.message);
+                    }
+                  }}
+                  className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Corrigir Duplicatas
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
                       toast.promise(db.autoSeed(), {
                         loading: 'Carregando dados de exemplo...',
                         success: 'Dados de exemplo carregados!',
