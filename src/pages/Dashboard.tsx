@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../services/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { DollarSign, Smartphone, ShoppingCart, TrendingUp, RefreshCw, Sparkles, Quote, Database, AlertTriangle, CheckCircle2, Coins, Package, ShieldCheck, MessageSquare, Bell } from 'lucide-react';
+import { DollarSign, Smartphone, ShoppingCart, TrendingUp, RefreshCw, Sparkles, Quote, Database, AlertTriangle, CheckCircle2, Coins, Package, ShieldCheck, MessageSquare, Bell, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import StatCard from '../components/shared/StatCard';
@@ -480,6 +480,149 @@ export default function Dashboard() {
 
   const upcomingInstallments = getUpcomingInstallments();
 
+  const [isSendingAutomation, setIsSendingAutomation] = useState(false);
+
+  const getAllPendingNotifications = () => {
+    const list: any[] = [];
+    if (!sales || sales.length === 0) return [];
+    const today = startOfDay(new Date());
+
+    for (const sale of sales) {
+      if (!sale.installments || sale.installments <= 1) continue;
+
+      let customPayments: { [key: number]: number } = {};
+      try {
+        const stored = localStorage.getItem(`inst_payments_${sale.id}`);
+        if (stored) {
+          customPayments = JSON.parse(stored);
+        } else {
+          const instAmount = Number(((sale.sell_price - (sale.down_payment || 0)) / sale.installments).toFixed(2));
+          for (let i = 1; i <= sale.installments; i++) {
+            customPayments[i] = i <= (sale.installments_paid || 0) ? instAmount : 0;
+          }
+        }
+      } catch (e) {}
+
+      const calculatedList = getCalculatedInstallments(sale, customPayments);
+      const client = clients.find(c => c.id === sale.client_id);
+      const iphone = iphones.find(i => i.id === sale.iphone_id);
+      const consoleObj = consoles.find(c => c.id === sale.console_id);
+      const categoryName = consoleObj ? (consoleObj.category === 'tv' ? 'TV' : (consoleObj.category === 'rice_cooker' ? 'Panela Elétrica' : (consoleObj.category === 'outro' ? 'Eletro' : 'Console'))) : 'Aparelho';
+      const itemName = iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${categoryName} ${consoleObj.model}` : 'Aparelho');
+
+      for (const inst of calculatedList) {
+        if (inst.status === 'pending') {
+          const dueDay = startOfDay(inst.dueDate);
+          const daysDiff = differenceInDays(dueDay, today);
+          if (daysDiff <= 3) {
+            list.push({
+              id: `${sale.id}_inst_${inst.index}`,
+              clientName: client?.name || 'Cliente Sem Nome',
+              clientPhone: client?.phone ? client.phone.replace(/\D/g, '') : '',
+              itemName,
+              installmentIndex: inst.index,
+              expectedAmount: inst.expectedAmount,
+              dueDate: inst.dueDate,
+              daysDiff
+            });
+          }
+        }
+      }
+    }
+
+    return list.sort((a, b) => a.daysDiff - b.daysDiff);
+  };
+
+  const handleTriggerAutomations = async () => {
+    const items = getAllPendingNotifications();
+    if (items.length === 0) {
+      toast.info('Não há automações pendentes para disparar no momento! 🎉');
+      return;
+    }
+
+    const webhookUrl = localStorage.getItem('auto_webhook_url') || '';
+    const webhookToken = localStorage.getItem('auto_webhook_token') || '';
+    const isWebhookEnabled = localStorage.getItem('auto_webhook_enabled') === 'true';
+
+    const t3 = localStorage.getItem('auto_template_3_days') || "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}. Se precisar do Pix da GODSHOP, estamos à disposição! 🤍";
+    const t0 = localStorage.getItem('auto_template_day_of') || "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}). Se precisar do Pix da GODSHOP, estamos à disposição! 🤍";
+    const tOverdue = localStorage.getItem('auto_template_overdue') || "Olá, {cliente}! 😊 Notamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente. Caso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍";
+
+    setIsSendingAutomation(true);
+    const toastId = toast.loading(`Disparando automação para ${items.length} cobrança(s)...`);
+
+    let successCount = 0;
+    const useWebhook = isWebhookEnabled && Boolean(webhookUrl.trim());
+
+    for (const item of items) {
+      if (!item.clientPhone) continue;
+
+      let tmpl = t0;
+      if (item.daysDiff > 0) tmpl = t3;
+      else if (item.daysDiff < 0) tmpl = tOverdue;
+
+      const dueDateObj = typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate;
+      const formattedDueDate = format(dueDateObj, 'dd/MM/yyyy');
+      const absDays = Math.abs(item.daysDiff);
+
+      let text = tmpl
+        .replace(/{cliente}/g, item.clientName)
+        .replace(/{aparelho}/g, item.itemName)
+        .replace(/{parcela}/g, String(item.installmentIndex))
+        .replace(/{valor}/g, formatBRL(item.expectedAmount))
+        .replace(/{vencimento}/g, formattedDueDate)
+        .replace(/{dias_atraso}/g, String(absDays))
+        .replace(/{dias}/g, String(absDays));
+
+      if (item.daysDiff > 0) {
+        if (item.daysDiff === 1) text = text.replace(/em 3 dias|in 3 dias|há 3 dias|em 2 dias/gi, 'amanhã');
+        else if (item.daysDiff === 2) text = text.replace(/em 3 dias|in 3 dias|há 3 dias/gi, 'em 2 dias');
+      }
+
+      if (useWebhook) {
+        try {
+          const res = await fetch(webhookUrl.trim(), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(webhookToken ? { 'Authorization': `Bearer ${webhookToken}` } : {})
+            },
+            body: JSON.stringify({
+              phone: item.clientPhone,
+              message: text,
+              clientName: item.clientName,
+              itemName: item.itemName,
+              installmentIndex: item.installmentIndex,
+              expectedAmount: item.expectedAmount,
+              dueDate: format(dueDateObj, 'yyyy-MM-dd')
+            })
+          });
+          if (res.ok) successCount++;
+          else {
+            const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
+            window.open(url, '_blank');
+            successCount++;
+          }
+        } catch (e) {
+          const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
+          window.open(url, '_blank');
+          successCount++;
+        }
+      } else {
+        const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
+        window.open(url, '_blank');
+        successCount++;
+      }
+    }
+
+    setIsSendingAutomation(false);
+    if (useWebhook) {
+      toast.success(`🚀 Automação concluída! ${successCount} cobrança(s) enviada(s) via Webhook.`, { id: toastId });
+    } else {
+      toast.success(`📱 Automação acionada! Abriu ${successCount} conversa(s) no WhatsApp Web.`, { id: toastId });
+    }
+  };
+
   if (isLoadingIphones || isLoadingSales || isLoadingConsoles || isLoadingClients) {
     return (
       <div className="flex h-[50vh] items-center justify-center">
@@ -504,21 +647,27 @@ export default function Dashboard() {
                 <span className="h-[1px] w-4 bg-primary/50"></span>
                 <span className="text-[10px] font-black tracking-[0.2em] text-primary uppercase opacity-80">Insight Empreendedor</span>
               </div>
-              <div className="flex items-center gap-1">
-                <Link
-                  to="/settings?tab=automacao"
-                  className="relative p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 active:scale-90 flex items-center justify-center text-emerald-400 hover:text-emerald-300"
-                  title="Enviar Cobranças / Automação WhatsApp"
+              <div className="flex items-center gap-1.5">
+                {/* Botão de Disparar Automação Apenas Ícone */}
+                <button
+                  onClick={handleTriggerAutomations}
+                  disabled={isSendingAutomation}
+                  className="relative p-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-full transition-all duration-300 active:scale-90 flex items-center justify-center shadow-md shadow-emerald-950/40 cursor-pointer disabled:opacity-50 border border-emerald-400/20"
+                  title="Disparar Automação de Cobrança WhatsApp"
                 >
-                  <MessageSquare className="h-4 w-4" />
+                  <Zap className="h-4 w-4 text-amber-300 animate-pulse" />
                   {pendingNotifCount > 0 && (
-                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 text-[8px] font-bold text-white flex items-center justify-center">
-                        {pendingNotifCount}
-                      </span>
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] px-1 bg-red-500 text-white text-[9px] font-black rounded-full items-center justify-center border border-zinc-950">
+                      {pendingNotifCount}
                     </span>
                   )}
+                </button>
+                <Link
+                  to="/settings?tab=automacao"
+                  className="p-1.5 hover:bg-white/10 rounded-full transition-all duration-300 text-emerald-400 hover:text-emerald-300 flex items-center justify-center"
+                  title="Configurações de Automação"
+                >
+                  <MessageSquare className="h-4 w-4" />
                 </Link>
                 <button 
                   onClick={async () => {
@@ -667,7 +816,7 @@ export default function Dashboard() {
                               <a
                                 href={`https://api.whatsapp.com/send?phone=${inst.clientPhone}&text=${encodeURIComponent(
                                   `Olá, *${inst.clientName}*! 😊 Passando para lembrar que a *${inst.installmentIndex}ª Parcela* de *${formatBRL(inst.expectedAmount)}* referente à compra do *${inst.itemName}* ` +
-                                  (inst.daysDiff === 0 ? "vence *HOJE*!" : inst.daysDiff === 1 ? "vence *AMANHÃ*!" : inst.daysDiff === 2 ? "vence em *2 DIAS*!" : inst.daysDiff === 3 ? "vence em *3 DIAS*!" : inst.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(inst.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                                  (inst.daysDiff === 0 ? "vence *HOJE*!" : inst.daysDiff === 1 ? "vence *AMANHÃ*!" : inst.daysDiff === 2 ? "vence em *2 DIAS*!" : inst.daysDiff === 3 ? "vence em *3 DIAS*!" : inst.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(typeof inst.dueDate === 'string' ? parseLocalDate(inst.dueDate) : inst.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
                                   ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
                                 )}`}
                                 target="_blank"

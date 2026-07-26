@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, 
   Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp, 
   User, LogIn, LogOut, X, Download, Eye, EyeOff, Tv,
-  Bell, AlertCircle, AlertTriangle, Calendar, MessageSquare, ExternalLink, Check, DollarSign, Sparkles
+  Bell, AlertCircle, AlertTriangle, Calendar, MessageSquare, ExternalLink, Check, DollarSign, Sparkles, Zap
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../types/AuthContext';
@@ -295,6 +295,98 @@ export default function Layout() {
     }
   };
 
+  const [isSendingAllNotif, setIsSendingAllNotif] = useState(false);
+
+  const handleTriggerAllAutomations = async () => {
+    const targetList = notifTab === 'recent' ? recentNotifications : allNotifications;
+    if (targetList.length === 0) {
+      toast.info('Nenhuma notificação para disparar nesta aba!');
+      return;
+    }
+
+    const webhookUrl = localStorage.getItem('auto_webhook_url') || '';
+    const webhookToken = localStorage.getItem('auto_webhook_token') || '';
+    const isWebhookEnabled = localStorage.getItem('auto_webhook_enabled') === 'true';
+
+    const t3 = localStorage.getItem('auto_template_3_days') || "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}. Se precisar do Pix da GODSHOP, estamos à disposição! 🤍";
+    const t0 = localStorage.getItem('auto_template_day_of') || "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}). Se precisar do Pix da GODSHOP, estamos à disposição! 🤍";
+    const tOverdue = localStorage.getItem('auto_template_overdue') || "Olá, {cliente}! 😊 Notamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente. Caso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍";
+
+    setIsSendingAllNotif(true);
+    const toastId = toast.loading(`Disparando automação para ${targetList.length} notificação(ões)...`);
+
+    let successCount = 0;
+    const useWebhook = isWebhookEnabled && Boolean(webhookUrl.trim());
+
+    for (const item of targetList) {
+      if (!item.clientPhone) continue;
+
+      let tmpl = t0;
+      if (item.daysDiff > 0) tmpl = t3;
+      else if (item.daysDiff < 0) tmpl = tOverdue;
+
+      const dueDateObj = typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate;
+      const formattedDueDate = format(dueDateObj, 'dd/MM/yyyy');
+      const absDays = Math.abs(item.daysDiff);
+
+      let text = tmpl
+        .replace(/{cliente}/g, item.clientName)
+        .replace(/{aparelho}/g, item.itemName)
+        .replace(/{parcela}/g, String(item.installmentIndex))
+        .replace(/{valor}/g, formatBRL(item.expectedAmount))
+        .replace(/{vencimento}/g, formattedDueDate)
+        .replace(/{dias_atraso}/g, String(absDays))
+        .replace(/{dias}/g, String(absDays));
+
+      if (item.daysDiff > 0) {
+        if (item.daysDiff === 1) text = text.replace(/em 3 dias|in 3 dias|há 3 dias|em 2 dias/gi, 'amanhã');
+        else if (item.daysDiff === 2) text = text.replace(/em 3 dias|in 3 dias|há 3 dias/gi, 'em 2 dias');
+      }
+
+      if (useWebhook) {
+        try {
+          const res = await fetch(webhookUrl.trim(), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(webhookToken ? { 'Authorization': `Bearer ${webhookToken}` } : {})
+            },
+            body: JSON.stringify({
+              phone: item.clientPhone,
+              message: text,
+              clientName: item.clientName,
+              itemName: item.itemName,
+              installmentIndex: item.installmentIndex,
+              expectedAmount: item.expectedAmount,
+              dueDate: format(dueDateObj, 'yyyy-MM-dd')
+            })
+          });
+          if (res.ok) successCount++;
+          else {
+            const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
+            window.open(url, '_blank');
+            successCount++;
+          }
+        } catch (e) {
+          const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
+          window.open(url, '_blank');
+          successCount++;
+        }
+      } else {
+        const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
+        window.open(url, '_blank');
+        successCount++;
+      }
+    }
+
+    setIsSendingAllNotif(false);
+    if (useWebhook) {
+      toast.success(`🚀 Automação concluída! ${successCount} cobrança(s) disparada(s) via Webhook.`, { id: toastId });
+    } else {
+      toast.success(`📱 Automação acionada! Abriu ${successCount} conversa(s) no WhatsApp Web.`, { id: toastId });
+    }
+  };
+
   // Synchronize and trigger floating system-style reminders
   useEffect(() => {
     if (isAuthenticated && recentNotifications.length > 0) {
@@ -551,7 +643,7 @@ export default function Layout() {
                 <a
                   href={`https://api.whatsapp.com/send?phone=${activeFloatingNotif.clientPhone}&text=${encodeURIComponent(
                     `Olá, *${activeFloatingNotif.clientName}*! 😊 Passando para lembrar que a *${activeFloatingNotif.installmentIndex}ª Parcela* de *${formatBRL(activeFloatingNotif.expectedAmount)}* referente à compra do *${activeFloatingNotif.itemName}* ` +
-                    (activeFloatingNotif.daysDiff === 0 ? "vence *HOJE*!" : activeFloatingNotif.daysDiff === 1 ? "vence *AMANHÃ*!" : activeFloatingNotif.daysDiff === 2 ? "vence em *2 DIAS*!" : activeFloatingNotif.daysDiff === 3 ? "vence em *3 DIAS*!" : activeFloatingNotif.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(activeFloatingNotif.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                    (activeFloatingNotif.daysDiff === 0 ? "vence *HOJE*!" : activeFloatingNotif.daysDiff === 1 ? "vence *AMANHÃ*!" : activeFloatingNotif.daysDiff === 2 ? "vence em *2 DIAS*!" : activeFloatingNotif.daysDiff === 3 ? "vence em *3 DIAS*!" : activeFloatingNotif.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(typeof activeFloatingNotif.dueDate === 'string' ? parseLocalDate(activeFloatingNotif.dueDate) : activeFloatingNotif.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
                     ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
                   )}`}
                   target="_blank"
@@ -682,17 +774,27 @@ export default function Layout() {
                       ? "bg-zinc-950/95 border-white/10 text-white backdrop-blur-xl" 
                       : "bg-white/95 border-black/10 text-zinc-900 backdrop-blur-xl"
                   )}>
-                    <div className="p-4 border-b border-muted/30 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="h-4 w-4 text-amber-500" />
-                        <h4 className="font-bold text-sm">Controle de Parcelas</h4>
+                    <div className="p-3 border-b border-muted/30 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Sparkles className="h-4 w-4 text-amber-500 shrink-0" />
+                        <h4 className="font-bold text-sm truncate">Controle de Parcelas</h4>
                       </div>
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-full",
-                        badgeCount > 0 ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
-                       )}>
-                        {badgeCount} Alertas
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={handleTriggerAllAutomations}
+                          disabled={isSendingAllNotif}
+                          className="p-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-full transition-all flex items-center justify-center shadow-sm cursor-pointer disabled:opacity-50 border border-emerald-400/20 active:scale-90"
+                          title="Disparar Automação de Cobrança (WhatsApp / Webhook)"
+                        >
+                          <Zap className="h-3.5 w-3.5 text-amber-300 animate-pulse" />
+                        </button>
+                        <span className={cn(
+                          "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                          badgeCount > 0 ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500"
+                         )}>
+                          {badgeCount} Alertas
+                        </span>
+                      </div>
                     </div>
 
                     {/* Tabs */}
@@ -821,7 +923,7 @@ export default function Layout() {
                                   <a
                                     href={`https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(
                                       `Olá, *${item.clientName}*! 😊 Passando para lembrar que a *${item.installmentIndex}ª Parcela* de *${formatBRL(item.expectedAmount)}* referente à compra do *${item.itemName}* ` +
-                                      (item.daysDiff === 0 ? "vence *HOJE*!" : item.daysDiff === 1 ? "vence *AMANHÃ*!" : item.daysDiff === 2 ? "vence em *2 DIAS*!" : item.daysDiff === 3 ? "vence em *3 DIAS*!" : item.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(item.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                                      (item.daysDiff === 0 ? "vence *HOJE*!" : item.daysDiff === 1 ? "vence *AMANHÃ*!" : item.daysDiff === 2 ? "vence em *2 DIAS*!" : item.daysDiff === 3 ? "vence em *3 DIAS*!" : item.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
                                       ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
                                     )}`}
                                     target="_blank"

@@ -18,7 +18,7 @@ import { db } from '../services/db';
 import StorageExplorer from '../components/StorageExplorer';
 
 const DEFAULT_TEMPLATES = {
-  days_3_before: "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence in 3 dias ({vencimento}). Se precisar do Pix da GODSHOP, estamos à disposição! 🤍",
+  days_3_before: "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}. Se precisar do Pix da GODSHOP, estamos à disposição! 🤍",
   day_of: "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}). Se precisar do Pix da GODSHOP, estamos à disposição! 🤍",
   overdue: "Olá, {cliente}! 😊 Notamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente. Caso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍"
 };
@@ -248,24 +248,46 @@ export default function Settings() {
     localStorage.setItem('auto_template_3_days', template3Days);
     localStorage.setItem('auto_template_day_of', templateDayOf);
     localStorage.setItem('auto_template_overdue', templateOverdue);
-    toast.success('Configurações de automação salvas com sucesso! 🚀');
+    if (isWebhookEnabled && !webhookUrl.trim()) {
+      toast.success('Configurações salvas! Nota: Insira a URL do Webhook ou use o modo WhatsApp Web.');
+    } else {
+      toast.success('Configurações de automação salvas com sucesso! 🚀');
+    }
   };
 
   const getMessageText = (item: any) => {
     let template = templateDayOf;
-    if (item.daysDiff === 3) {
+    if (item.daysDiff > 0) {
       template = template3Days;
     } else if (item.daysDiff < 0) {
       template = templateOverdue;
     }
 
-    return template
+    const dueDateObj = typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate;
+    const formattedDueDate = format(dueDateObj, 'dd/MM/yyyy');
+    const absDays = Math.abs(item.daysDiff);
+
+    let text = template
       .replace(/{cliente}/g, item.clientName)
       .replace(/{aparelho}/g, item.itemName)
       .replace(/{parcela}/g, String(item.installmentIndex))
       .replace(/{valor}/g, formatBRL(item.expectedAmount))
-      .replace(/{vencimento}/g, format(item.dueDate, 'dd/MM/yyyy'))
-      .replace(/{dias_atraso}/g, String(Math.abs(item.daysDiff)));
+      .replace(/{vencimento}/g, formattedDueDate)
+      .replace(/{dias_atraso}/g, String(absDays))
+      .replace(/{dias}/g, String(absDays));
+
+    // Handle legacy/hardcoded template strings dynamically if daysDiff is 1, 2, or 3
+    if (item.daysDiff > 0) {
+      if (item.daysDiff === 1) {
+        text = text.replace(/em 3 dias|in 3 dias|há 3 dias|em 2 dias/gi, 'amanhã');
+      } else if (item.daysDiff === 2) {
+        text = text.replace(/em 3 dias|in 3 dias|há 3 dias/gi, 'em 2 dias');
+      } else if (item.daysDiff === 3) {
+        text = text.replace(/in 3 dias/gi, 'em 3 dias');
+      }
+    }
+
+    return text;
   };
 
   const handleSendSingle = async (item: any) => {
@@ -279,9 +301,11 @@ export default function Settings() {
 
     setSendingStatuses(prev => ({ ...prev, [item.id]: 'sending' }));
 
-    if (isWebhookEnabled && webhookUrl) {
+    const useWebhook = isWebhookEnabled && Boolean(webhookUrl?.trim());
+
+    if (useWebhook) {
       try {
-        const res = await fetch(webhookUrl, {
+        const res = await fetch(webhookUrl.trim(), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -294,7 +318,7 @@ export default function Settings() {
             itemName: item.itemName,
             installmentIndex: item.installmentIndex,
             expectedAmount: item.expectedAmount,
-            dueDate: format(item.dueDate, 'yyyy-MM-dd')
+            dueDate: format(typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate, 'yyyy-MM-dd')
           })
         });
 
@@ -306,9 +330,11 @@ export default function Settings() {
           throw new Error('Falha no webhook');
         }
       } catch (err) {
-        toast.error(`Erro ao enviar via Webhook para ${item.clientName}`);
-        setSendingStatuses(prev => ({ ...prev, [item.id]: 'failed' }));
-        addLog(item, 'failed', 'webhook');
+        toast.error(`Erro no Webhook. Abrindo via WhatsApp Web para ${item.clientName}...`);
+        const url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`;
+        window.open(url, '_blank');
+        setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
+        addLog(item, 'success', 'whatsapp_web');
       }
     } else {
       // Manual fallback via WhatsApp Web
@@ -341,9 +367,10 @@ export default function Settings() {
       return;
     }
 
-    if (isWebhookEnabled && !webhookUrl) {
-      toast.error('Configure a URL do Webhook nas configurações primeiro!');
-      return;
+    const useWebhook = isWebhookEnabled && Boolean(webhookUrl?.trim());
+
+    if (isWebhookEnabled && !webhookUrl?.trim()) {
+      toast.info('URL de Webhook não preenchida. Efetuando disparos via WhatsApp Web.');
     }
 
     setIsSendingAll(true);
@@ -355,9 +382,9 @@ export default function Settings() {
       
       setSendingStatuses(prev => ({ ...prev, [item.id]: 'sending' }));
 
-      if (isWebhookEnabled) {
+      if (useWebhook) {
         try {
-          const res = await fetch(webhookUrl, {
+          const res = await fetch(webhookUrl.trim(), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -370,7 +397,7 @@ export default function Settings() {
               itemName: item.itemName,
               installmentIndex: item.installmentIndex,
               expectedAmount: item.expectedAmount,
-              dueDate: format(item.dueDate, 'yyyy-MM-dd')
+              dueDate: format(typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate, 'yyyy-MM-dd')
             })
           });
 
@@ -379,17 +406,24 @@ export default function Settings() {
             setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
             addLog(item, 'success', 'webhook');
           } else {
-            setSendingStatuses(prev => ({ ...prev, [item.id]: 'failed' }));
-            addLog(item, 'failed', 'webhook');
+            // Fallback to WhatsApp Web if Webhook fails
+            const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
+            window.open(url, '_blank');
+            successCount++;
+            setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
+            addLog(item, 'success', 'whatsapp_web');
           }
         } catch (e) {
-          setSendingStatuses(prev => ({ ...prev, [item.id]: 'failed' }));
-          addLog(item, 'failed', 'webhook');
+          // Fallback to WhatsApp Web on network error
+          const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
+          window.open(url, '_blank');
+          successCount++;
+          setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
+          addLog(item, 'success', 'whatsapp_web');
         }
-        // Small delay to prevent rate limits
         await new Promise(resolve => setTimeout(resolve, 1000));
       } else {
-        // Manual opens one by one, with some delay so browser doesn't block them
+        // WhatsApp Web mode
         const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
         window.open(url, '_blank');
         setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
@@ -1011,11 +1045,17 @@ export default function Settings() {
 
               {isWebhookEnabled ? (
                 <div className="space-y-3 pt-1 animate-in slide-in-from-top-2 duration-200">
-                  <div className="p-3 bg-emerald-500/5 border border-emerald-500/10 rounded-lg text-[10px] text-emerald-500 flex items-start gap-1.5">
-                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                    <span>
-                      <strong>Instruções de Webhook:</strong> Enviaremos uma requisição <code>POST</code> com as chaves <code>phone</code> (número formatado) e <code>message</code> (corpo do texto).
-                    </span>
+                  <div className="p-3 bg-emerald-500/5 border border-emerald-500/10 rounded-lg text-[11px] text-emerald-400 space-y-1.5">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-emerald-400" />
+                      <span>Como configurar a URL do Webhook:</span>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-[10px] text-muted-foreground leading-relaxed pl-1">
+                      <li>Use a URL do seu Gateway (ex: <code>https://api.z-api.io/instances/.../send-text</code>, Evolution API, N8N, Make ou servidor próprio).</li>
+                      <li>Deve começar obrigatoriamente com <code>http://</code> ou <code>https://</code>.</li>
+                      <li>O sistema enviará um <strong>POST JSON</strong> contendo: <code>phone</code>, <code>message</code>, <code>client</code>, <code>amount</code>, <code>dueDate</code>.</li>
+                      <li>Se não tiver gateway, <strong>desative a chave acima</strong> para usar o envio 100% gratuito via WhatsApp Web!</li>
+                    </ul>
                   </div>
 
                   <div>
