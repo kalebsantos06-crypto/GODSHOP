@@ -647,6 +647,8 @@ export default function Settings() {
       {/* RENDER TAB: GERAL & DESIGN */}
       {activeTab === 'geral' && (
         <div className="space-y-6 animate-in fade-in duration-300">
+
+
           <div className="grid gap-6 md:grid-cols-2">
             {/* Card: Tema do Sistema */}
             <div className="bg-card border rounded-xl p-6 shadow-sm flex flex-col justify-between">

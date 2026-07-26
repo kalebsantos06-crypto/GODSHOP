@@ -10,6 +10,18 @@ import { Console } from '../types';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
 import ConsoleTable from '../components/ConsoleTable';
 
+const parseCurrencyInput = (value: any): number => {
+  if (typeof value === 'number') return isNaN(value) ? 0 : value;
+  if (!value) return 0;
+  const str = String(value).trim();
+  const normalized = str
+    .replace(/[^0-9.,-]/g, '')
+    .replace(/\.(?=[^,]*$)/g, '')
+    .replace(',', '.');
+  const num = parseFloat(normalized);
+  return isNaN(num) ? 0 : num;
+};
+
 export default function ConsolesStock() {
   const queryClient = useQueryClient();
   const [isAdding, setIsAdding] = useState(false);
@@ -59,11 +71,14 @@ export default function ConsolesStock() {
   const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    const rawPrice = formData.get('buy_price');
+    const parsedPrice = parseCurrencyInput(rawPrice);
+
     const data = {
-      model: formData.get('model') as string,
-      version: formData.get('version') as string,
+      model: (formData.get('model') as string)?.trim(),
+      version: (formData.get('version') as string)?.trim(),
       condition: formData.get('condition') as string,
-      buy_price: Number(formData.get('buy_price')),
+      buy_price: parsedPrice,
       category: (formData.get('category') as string) || 'console',
     };
 
@@ -128,14 +143,22 @@ export default function ConsolesStock() {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Preço de Compra</label>
-              <input name="buy_price" defaultValue={editingConsole?.buy_price} type="number" step="0.01" required className="w-full p-2 border rounded-md" placeholder="R$ 0,00" />
+              <label className="text-sm font-medium">Preço de Compra (R$)</label>
+              <input 
+                name="buy_price" 
+                defaultValue={editingConsole?.buy_price} 
+                type="text" 
+                inputMode="decimal"
+                required 
+                className="w-full p-2 border rounded-md" 
+                placeholder="R$ 0,00" 
+              />
             </div>
             <div className="flex items-end gap-2">
-              <button type="submit" className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium flex-1">
+              <button type="submit" className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium flex-1 cursor-pointer">
                 {editingConsole ? 'Atualizar' : 'Salvar'}
               </button>
-              <button type="button" onClick={() => { setIsAdding(false); setEditingConsole(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
+              <button type="button" onClick={() => { setIsAdding(false); setEditingConsole(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium cursor-pointer">
                 Cancelar
               </button>
             </div>

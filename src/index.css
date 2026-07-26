@@ -142,10 +142,30 @@
 @layer base {
   * {
     @apply border-border;
+    -webkit-tap-highlight-color: transparent;
   }
-  body {
+  html, body {
     @apply bg-background text-foreground overflow-hidden;
+    touch-action: manipulation;
+    overscroll-behavior-y: contain;
   }
+
+  /* Prevent browser automatic zoom on focus on mobile devices */
+  @media (max-width: 768px) {
+    input:not([type="checkbox"]):not([type="radio"]), 
+    select, 
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+}
+
+/* Safe area inset support for mobile notches and home indicators */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+.pt-safe {
+  padding-top: max(1rem, env(safe-area-inset-top));
 }
 
 .custom-scrollbar::-webkit-scrollbar {

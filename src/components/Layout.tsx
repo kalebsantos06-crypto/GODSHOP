@@ -7,6 +7,7 @@ import {
   Bell, AlertCircle, AlertTriangle, Calendar, MessageSquare, ExternalLink, Check, DollarSign, Sparkles, Zap
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { triggerHaptic } from '../lib/haptics';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
 import { db } from '../services/db';
@@ -448,6 +449,47 @@ export default function Layout() {
   const [bgImage, setBgImage] = useState<string>('/background.jpg');
   const [logoImage, setLogoImage] = useState<string | null>(null);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState<boolean>(true);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsAppInstalled(true);
+      setDeferredPrompt(null);
+      toast.success('GODSHOP instalado com sucesso no seu celular!');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    if (typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches) {
+      setIsAppInstalled(true);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    triggerHaptic('heavy');
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        toast.success('Instalando o aplicativo no seu dispositivo...');
+      }
+      setDeferredPrompt(null);
+    } else {
+      setIsNotifGuideOpen(true);
+    }
+  };
 
   useEffect(() => {
     const handleStatus = (e: any) => {
@@ -455,9 +497,16 @@ export default function Layout() {
         setIsRealtimeConnected(e.detail.connected);
       }
     };
+    const handleCustomInstall = () => {
+      handleInstallApp();
+    };
     window.addEventListener('supabase_realtime_status', handleStatus);
-    return () => window.removeEventListener('supabase_realtime_status', handleStatus);
-  }, []);
+    window.addEventListener('godshop_trigger_app_install', handleCustomInstall);
+    return () => {
+      window.removeEventListener('supabase_realtime_status', handleStatus);
+      window.removeEventListener('godshop_trigger_app_install', handleCustomInstall);
+    };
+  }, [deferredPrompt]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('app_theme');
     return (saved as 'light' | 'dark') || 'dark';
@@ -997,6 +1046,8 @@ export default function Layout() {
             <span>{isRealtimeConnected ? "Realtime" : "Reconectando"}</span>
           </div>
 
+
+
           <button
             onClick={toggleNavBar}
             className={cn(
@@ -1082,6 +1133,7 @@ export default function Layout() {
                   <Link
                     key={item.name}
                     to={item.href}
+                    onClick={() => triggerHaptic('light')}
                     className={cn(
                       "flex flex-col items-center justify-center gap-1.5 min-w-[76px] sm:min-w-[96px] p-2.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 relative group",
                       isActive 

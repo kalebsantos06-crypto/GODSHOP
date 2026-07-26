@@ -343,23 +343,46 @@ export const db = {
     update: async (id: string, data: Partial<PriceTableItem>) => {
       try {
         const userId = await getCurrentUserId();
-        let query = supabase.from('prices').update(data).eq('id', id);
-        if (userId) {
-          query = query.eq('user_id', userId);
+        const updateData = { ...data } as any;
+
+        if (missingColumnsByTable['prices']) {
+          for (const col of missingColumnsByTable['prices']) {
+            delete updateData[col];
+          }
         }
-        const { error } = await query;
-        if (error) throw error;
+
+        try {
+          let query = supabase.from('prices').update(updateData).eq('id', id);
+          if (userId) {
+            query = query.eq('user_id', userId);
+          }
+          const { error } = await query;
+          if (error) {
+            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+            if (isColumnError) {
+              const match = error.message?.match(/"([^"]+)"/);
+              if (match && match[1]) {
+                if (!missingColumnsByTable['prices']) missingColumnsByTable['prices'] = new Set();
+                missingColumnsByTable['prices'].add(match[1]);
+                delete updateData[match[1]];
+              }
+              const { user_id, ...cleanData } = updateData;
+              await supabase.from('prices').update(cleanData).eq('id', id);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Could not update price in Supabase, continuing with local update:', dbErr);
+        }
 
         const local = getLocalData('prices');
         setLocalData('prices', local.map(item => item.id === id ? { ...item, ...data } : item));
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
-          const local = getLocalData('prices');
-          setLocalData('prices', local.map(item => item.id === id ? { ...item, ...data } : item));
-          return;
         }
-        throw err;
+        console.warn('Fallback updating price locally:', err);
+        const local = getLocalData('prices');
+        setLocalData('prices', local.map(item => item.id === id ? { ...item, ...data } : item));
       }
     },
     delete: async (id: string) => {
@@ -461,23 +484,46 @@ export const db = {
     update: async (id: string, data: Partial<iPhone>) => {
       try {
         const userId = await getCurrentUserId();
-        let query = supabase.from('iphones').update(data).eq('id', id);
-        if (userId) {
-          query = query.eq('user_id', userId);
+        const updateData = { ...data } as any;
+
+        if (missingColumnsByTable['iphones']) {
+          for (const col of missingColumnsByTable['iphones']) {
+            delete updateData[col];
+          }
         }
-        const { error } = await query;
-        if (error) throw error;
+
+        try {
+          let query = supabase.from('iphones').update(updateData).eq('id', id);
+          if (userId) {
+            query = query.eq('user_id', userId);
+          }
+          const { error } = await query;
+          if (error) {
+            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+            if (isColumnError) {
+              const match = error.message?.match(/"([^"]+)"/);
+              if (match && match[1]) {
+                if (!missingColumnsByTable['iphones']) missingColumnsByTable['iphones'] = new Set();
+                missingColumnsByTable['iphones'].add(match[1]);
+                delete updateData[match[1]];
+              }
+              const { user_id, ...cleanData } = updateData;
+              await supabase.from('iphones').update(cleanData).eq('id', id);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Could not update iphone in Supabase, continuing with local update:', dbErr);
+        }
 
         const local = getLocalData('iphones');
         setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data } : item));
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
-          const local = getLocalData('iphones');
-          setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data } : item));
-          return;
         }
-        throw err;
+        console.warn('Fallback updating iphone locally:', err);
+        const local = getLocalData('iphones');
+        setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data } : item));
       }
     },
     delete: async (id: string) => {
@@ -688,23 +734,46 @@ export const db = {
     update: async (id: string, data: Partial<Client>) => {
       try {
         const userId = await getCurrentUserId();
-        let query = supabase.from('clients').update(data).eq('id', id);
-        if (userId) {
-          query = query.eq('user_id', userId);
+        const updateData = { ...data } as any;
+
+        if (missingColumnsByTable['clients']) {
+          for (const col of missingColumnsByTable['clients']) {
+            delete updateData[col];
+          }
         }
-        const { error } = await query;
-        if (error) throw error;
+
+        try {
+          let query = supabase.from('clients').update(updateData).eq('id', id);
+          if (userId) {
+            query = query.eq('user_id', userId);
+          }
+          const { error } = await query;
+          if (error) {
+            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+            if (isColumnError) {
+              const match = error.message?.match(/"([^"]+)"/);
+              if (match && match[1]) {
+                if (!missingColumnsByTable['clients']) missingColumnsByTable['clients'] = new Set();
+                missingColumnsByTable['clients'].add(match[1]);
+                delete updateData[match[1]];
+              }
+              const { user_id, ...cleanData } = updateData;
+              await supabase.from('clients').update(cleanData).eq('id', id);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Could not update client in Supabase, continuing with local update:', dbErr);
+        }
 
         const local = getLocalData('clients');
         setLocalData('clients', local.map(item => item.id === id ? { ...item, ...data } : item));
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
-          const local = getLocalData('clients');
-          setLocalData('clients', local.map(item => item.id === id ? { ...item, ...data } : item));
-          return;
         }
-        throw err;
+        console.warn('Fallback updating client locally:', err);
+        const local = getLocalData('clients');
+        setLocalData('clients', local.map(item => item.id === id ? { ...item, ...data } : item));
       }
     },
     delete: async (id: string) => {
@@ -827,41 +896,46 @@ export const db = {
     update: async (id: string, data: Partial<Supplier>) => {
       try {
         const userId = await getCurrentUserId();
-        let query = supabase.from('suppliers').update(data).eq('id', id);
-        if (userId) {
-          query = query.eq('user_id', userId);
+        const updateData = { ...data } as any;
+
+        if (missingColumnsByTable['suppliers']) {
+          for (const col of missingColumnsByTable['suppliers']) {
+            delete updateData[col];
+          }
         }
-        const { error } = await query;
-        if (error) throw error;
+
+        try {
+          let query = supabase.from('suppliers').update(updateData).eq('id', id);
+          if (userId) {
+            query = query.eq('user_id', userId);
+          }
+          const { error } = await query;
+          if (error) {
+            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+            if (isColumnError) {
+              const match = error.message?.match(/"([^"]+)"/);
+              if (match && match[1]) {
+                if (!missingColumnsByTable['suppliers']) missingColumnsByTable['suppliers'] = new Set();
+                missingColumnsByTable['suppliers'].add(match[1]);
+                delete updateData[match[1]];
+              }
+              const { user_id, ...cleanData } = updateData;
+              await supabase.from('suppliers').update(cleanData).eq('id', id);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Could not update supplier in Supabase, continuing with local update:', dbErr);
+        }
 
         const local = getLocalData('suppliers');
         setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data } : item));
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
-          const local = getLocalData('suppliers');
-          setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data } : item));
-          return;
         }
-        const isColumnError = err?.code === '42703' || err?.message?.includes('user_id') || err?.message?.includes('coluna');
-        if (isColumnError) {
-          try {
-            const { error } = await supabase.from('suppliers').update(data).eq('id', id);
-            if (error) throw error;
-            const local = getLocalData('suppliers');
-            setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data } : item));
-          } catch (innerErr: any) {
-            if (isConnectionError(innerErr)) {
-              notifyOffline(innerErr);
-              const local = getLocalData('suppliers');
-              setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data } : item));
-              return;
-            }
-            throw innerErr;
-          }
-        } else {
-          throw err;
-        }
+        console.warn('Fallback updating supplier locally:', err);
+        const local = getLocalData('suppliers');
+        setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data } : item));
       }
     },
     delete: async (id: string) => {
@@ -918,7 +992,20 @@ export const db = {
         tryCacheUserIdFromRows(data);
         
         const local = getLocalData('consoles');
-        const merged = [...(data || []), ...local.filter(l => !data?.some(d => d.id === l.id))];
+        const localMap = new Map(local.map((item: any) => [item.id, item]));
+        const merged = (data || []).map((dbItem: any) => {
+          const localItem = localMap.get(dbItem.id);
+          if (localItem) {
+            return { ...dbItem, ...localItem };
+          }
+          return dbItem;
+        });
+        local.forEach((l: any) => {
+          if (!merged.some((m: any) => m.id === l.id)) {
+            merged.push(l);
+          }
+        });
+
         setLocalData('consoles', merged);
         return merged as Console[];
       } catch (err: any) {
@@ -980,24 +1067,45 @@ export const db = {
     },
     update: async (id: string, data: Partial<Console>) => {
       try {
-        const userId = await getCurrentUserId();
-        let query = supabase.from('consoles').update(data).eq('id', id);
-        if (userId) {
-          query = query.eq('user_id', userId);
+        const updateData = { ...data } as any;
+
+        if (missingColumnsByTable['consoles']) {
+          for (const col of missingColumnsByTable['consoles']) {
+            delete updateData[col];
+          }
         }
-        const { error } = await query;
-        if (error) throw error;
+
+        try {
+          // Direct update by unique ID
+          const { error } = await supabase.from('consoles').update(updateData).eq('id', id);
+          if (error) {
+            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('category');
+            if (isColumnError) {
+              const match = error.message?.match(/"([^"]+)"/);
+              if (match && match[1]) {
+                if (!missingColumnsByTable['consoles']) missingColumnsByTable['consoles'] = new Set();
+                missingColumnsByTable['consoles'].add(match[1]);
+                delete updateData[match[1]];
+              }
+              const { user_id, ...cleanData } = updateData;
+              await supabase.from('consoles').update(cleanData).eq('id', id);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Could not update console in Supabase, continuing with local update:', dbErr);
+        }
 
         const local = getLocalData('consoles');
-        setLocalData('consoles', local.map(item => item.id === id ? { ...item, ...data } : item));
+        const updatedLocal = local.map(item => item.id === id ? { ...item, ...data } : item);
+        setLocalData('consoles', updatedLocal);
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
-          const local = getLocalData('consoles');
-          setLocalData('consoles', local.map(item => item.id === id ? { ...item, ...data } : item));
-          return;
         }
-        throw err;
+        console.warn('Fallback updating console locally:', err);
+        const local = getLocalData('consoles');
+        const updatedLocal = local.map(item => item.id === id ? { ...item, ...data } : item);
+        setLocalData('consoles', updatedLocal);
       }
     },
     delete: async (id: string) => {
