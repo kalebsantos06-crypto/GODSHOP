@@ -3,16 +3,59 @@ import { createClient } from '@supabase/supabase-js';
 const dummyUrl = 'https://placeholder-project.supabase.co';
 const dummyKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder';
 
-let supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const getRawUrl = (): string => {
+  try {
+    const custom = typeof localStorage !== 'undefined' ? localStorage.getItem('custom_supabase_url') : null;
+    if (custom && custom.trim()) return custom.trim();
+  } catch (e) {}
+  return import.meta.env.VITE_SUPABASE_URL || '';
+};
+
+const getRawKey = (): string => {
+  try {
+    const custom = typeof localStorage !== 'undefined' ? localStorage.getItem('custom_supabase_key') : null;
+    if (custom && custom.trim()) return custom.trim();
+  } catch (e) {}
+  return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+};
+
+let supabaseUrl = getRawUrl();
 if (supabaseUrl.endsWith('/rest/v1/')) {
   supabaseUrl = supabaseUrl.slice(0, -9);
 } else if (supabaseUrl.endsWith('/rest/v1')) {
   supabaseUrl = supabaseUrl.slice(0, -8);
 }
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+const supabaseAnonKey = getRawKey();
+
+export const isSupabaseConfigured = (): boolean => {
+  const url = getRawUrl();
+  const key = getRawKey();
+  return Boolean(url && key && !url.includes('placeholder-project'));
+};
+
+export const setCustomSupabaseCredentials = (url: string, key: string) => {
+  try {
+    let cleanUrl = url.trim();
+    if (cleanUrl.endsWith('/rest/v1/')) {
+      cleanUrl = cleanUrl.slice(0, -9);
+    } else if (cleanUrl.endsWith('/rest/v1')) {
+      cleanUrl = cleanUrl.slice(0, -8);
+    }
+    localStorage.setItem('custom_supabase_url', cleanUrl);
+    localStorage.setItem('custom_supabase_key', key.trim());
+  } catch (e) {}
+};
+
+export const clearCustomSupabaseCredentials = () => {
+  try {
+    localStorage.removeItem('custom_supabase_url');
+    localStorage.removeItem('custom_supabase_key');
+  } catch (e) {}
+};
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase URL or Anon Key is missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment variables.');
+  console.warn('Supabase URL or Anon Key is missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment variables or localStorage.');
 }
 
 export const supabase = createClient(supabaseUrl || dummyUrl, supabaseAnonKey || dummyKey, {
@@ -32,3 +75,4 @@ export const supabase = createClient(supabaseUrl || dummyUrl, supabaseAnonKey ||
     }
   }
 });
+
