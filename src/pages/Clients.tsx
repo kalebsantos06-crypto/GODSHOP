@@ -330,7 +330,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       });
       if (res.ok) {
         const tokenData = await res.json();
-        const link = `${window.location.origin}/cadastro-cliente?token=${tokenData.token}`;
+        const link = `${window.location.origin}/#/cadastro-cliente?token=${tokenData.token}`;
         navigator.clipboard.writeText(link);
         setCopied(true);
         toast.success('Link único gerado e copiado! (Válido por 1 uso / 24h)');

@@ -38,7 +38,8 @@ export class ErrorBoundary extends Component<Props, State> {
     } catch (e) {
       console.warn('Failed to clear storage:', e);
     }
-    window.location.href = '/';
+    window.location.hash = '/';
+    window.location.reload();
   };
 
   public render() {

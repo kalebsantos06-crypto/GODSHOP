@@ -4,7 +4,7 @@
  */
 
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useSearchParams } from 'react-router-dom';
+import { HashRouter, Routes, Route, useSearchParams } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/Layout';
@@ -39,7 +39,14 @@ const queryClient = new QueryClient({
 function AppContent() {
   const { user, isAuthenticated } = useAuth();
   const [searchParams] = useSearchParams();
-  const assinarId = searchParams.get('assinatura');
+  const assinarId = searchParams.get('assinatura') || new URLSearchParams(window.location.search).get('assinatura');
+  const legacyToken = new URLSearchParams(window.location.search).get('token');
+
+  // Handle legacy remote register links
+  if (legacyToken && window.location.pathname === '/cadastro-cliente') {
+    window.location.href = `${window.location.origin}/#/cadastro-cliente?token=${legacyToken}`;
+    return null;
+  }
   
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -95,11 +102,11 @@ function AppContent() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <HashRouter>
         <AuthProvider>
           <AppContent />
         </AuthProvider>
-      </BrowserRouter>
+      </HashRouter>
     </QueryClientProvider>
   );
 }

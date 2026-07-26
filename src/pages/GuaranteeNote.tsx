@@ -685,7 +685,7 @@ export default function GuaranteeNote() {
   const signatureOrigin = appOrigin.includes('ais-dev-') 
     ? appOrigin.replace('ais-dev-', 'ais-pre-') 
     : appOrigin;
-  const signatureLink = `${signatureOrigin}/?assinatura=${id}`;
+  const signatureLink = `${signatureOrigin}/#/assinar/${id}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(signatureLink);

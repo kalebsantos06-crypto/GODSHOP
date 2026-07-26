@@ -907,7 +907,7 @@ export default function Dashboard() {
                             onClick={async () => {
                               try {
                                 const baseUrl = window.location.origin;
-                                const link = `${baseUrl}/assinar/${sale.id}`;
+                                const link = `${baseUrl}/#/assinar/${sale.id}`;
                                 await navigator.clipboard.writeText(link);
                                 toast.success('Link de assinatura copiado!');
                               } catch (e) {
