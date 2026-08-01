@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { getBaseUrl, copyToClipboard } from '../utils/url';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { db } from '../services/db';
@@ -187,7 +188,7 @@ export default function GuaranteeNote() {
   } | null>(null);
   const [copied, setCopied] = useState(false);
   const [showSharePanel, setShowSharePanel] = useState(false);
-  const appOrigin = window.location.origin;
+  const appOrigin = getBaseUrl();
 
   // Checklist & Registration State
   const [checklist, setChecklist] = useState<{ [key: string]: boolean }>({});
@@ -687,11 +688,15 @@ export default function GuaranteeNote() {
     : appOrigin;
   const signatureLink = `${signatureOrigin}/#/assinar/${id}`;
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(signatureLink);
-    setCopied(true);
-    toast.success('Link de assinatura copiado com sucesso!');
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyLink = async () => {
+    const success = await copyToClipboard(signatureLink);
+    if (success) {
+      setCopied(true);
+      toast.success('Link de assinatura copiado com sucesso!');
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.info(`Link de assinatura: ${signatureLink}`);
+    }
   };
 
   if (isLoadingSales || isLoadingIphones || isLoadingConsoles || isLoadingClients || isLoadingPrices) {

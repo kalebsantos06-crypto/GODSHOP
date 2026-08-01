@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { copyToClipboard } from '../utils/url';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
@@ -336,11 +337,15 @@ export default function Sales() {
     return `https://api.whatsapp.com/send?phone=${clean}&text=${encodeURIComponent(text)}`;
   };
 
-  const handleCopyMessage = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    toast.success('Mensagem de atualização copiada para a área de transferência!');
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyMessage = async (text: string) => {
+    const success = await copyToClipboard(text);
+    if (success) {
+      setCopied(true);
+      toast.success('Mensagem de atualização copiada para a área de transferência!');
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.info('Mensagem pronta');
+    }
   };
 
   const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {

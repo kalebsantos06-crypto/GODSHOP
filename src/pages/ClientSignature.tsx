@@ -134,15 +134,132 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
     }
   }, [id]);
 
-  // Dynamically toggle body overflow so standalone public route can scroll
+  // Dynamically toggle body overflow so standalone public route can scroll smoothly
   useEffect(() => {
-    document.body.classList.remove('overflow-hidden');
-    document.body.classList.add('overflow-y-auto');
+    document.body.style.setProperty('overflow', 'auto', 'important');
+    document.documentElement.style.setProperty('overflow', 'auto', 'important');
     return () => {
-      document.body.classList.remove('overflow-y-auto');
-      document.body.classList.add('overflow-hidden');
+      document.body.style.removeProperty('overflow');
+      document.documentElement.style.removeProperty('overflow');
     };
   }, []);
+
+  // Non-passive touch listeners for mobile canvas drawing on iOS Safari
+  useEffect(() => {
+    const bindCanvasTouch = (
+      canvas: HTMLCanvasElement | null,
+      onStart: (e: TouchEvent) => void,
+      onMove: (e: TouchEvent) => void,
+      onEnd: () => void
+    ) => {
+      if (!canvas) return () => {};
+
+      const handleStart = (e: TouchEvent) => {
+        e.preventDefault();
+        onStart(e);
+      };
+
+      const handleMove = (e: TouchEvent) => {
+        e.preventDefault();
+        onMove(e);
+      };
+
+      const handleEnd = () => {
+        onEnd();
+      };
+
+      canvas.addEventListener('touchstart', handleStart, { passive: false });
+      canvas.addEventListener('touchmove', handleMove, { passive: false });
+      canvas.addEventListener('touchend', handleEnd);
+
+      return () => {
+        canvas.removeEventListener('touchstart', handleStart);
+        canvas.removeEventListener('touchmove', handleMove);
+        canvas.removeEventListener('touchend', handleEnd);
+      };
+    };
+
+    const clean1 = bindCanvasTouch(
+      canvasRef.current,
+      (e) => {
+        isDrawing.current = true;
+        const { x, y } = getCoordinates(e, canvasRef.current);
+        lastX.current = x;
+        lastY.current = y;
+      },
+      (e) => {
+        if (!isDrawing.current) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (!canvas || !ctx) return;
+        const { x, y } = getCoordinates(e, canvas);
+        ctx.beginPath();
+        ctx.moveTo(lastX.current, lastY.current);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        lastX.current = x;
+        lastY.current = y;
+        setHasDrawn(true);
+      },
+      () => { isDrawing.current = false; }
+    );
+
+    const clean2 = bindCanvasTouch(
+      witness1CanvasRef.current,
+      (e) => {
+        isDrawingWitness1.current = true;
+        const { x, y } = getCoordinates(e, witness1CanvasRef.current);
+        lastXWitness1.current = x;
+        lastYWitness1.current = y;
+      },
+      (e) => {
+        if (!isDrawingWitness1.current) return;
+        const canvas = witness1CanvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (!canvas || !ctx) return;
+        const { x, y } = getCoordinates(e, canvas);
+        ctx.beginPath();
+        ctx.moveTo(lastXWitness1.current, lastYWitness1.current);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        lastXWitness1.current = x;
+        lastYWitness1.current = y;
+        setHasDrawnWitness1(true);
+      },
+      () => { isDrawingWitness1.current = false; }
+    );
+
+    const clean3 = bindCanvasTouch(
+      witness2CanvasRef.current,
+      (e) => {
+        isDrawingWitness2.current = true;
+        const { x, y } = getCoordinates(e, witness2CanvasRef.current);
+        lastXWitness2.current = x;
+        lastYWitness2.current = y;
+      },
+      (e) => {
+        if (!isDrawingWitness2.current) return;
+        const canvas = witness2CanvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (!canvas || !ctx) return;
+        const { x, y } = getCoordinates(e, canvas);
+        ctx.beginPath();
+        ctx.moveTo(lastXWitness2.current, lastYWitness2.current);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        lastXWitness2.current = x;
+        lastYWitness2.current = y;
+        setHasDrawnWitness2(true);
+      },
+      () => { isDrawingWitness2.current = false; }
+    );
+
+    return () => {
+      clean1();
+      clean2();
+      clean3();
+    };
+  }, [loading, error, data?.signature_data]);
 
   // Handle canvas drawing size & context configuration
   useEffect(() => {

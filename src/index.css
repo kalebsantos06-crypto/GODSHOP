@@ -145,9 +145,8 @@
     -webkit-tap-highlight-color: transparent;
   }
   html, body {
-    @apply bg-background text-foreground overflow-hidden;
+    @apply bg-background text-foreground min-h-screen;
     touch-action: manipulation;
-    overscroll-behavior-y: contain;
   }
 
   /* Prevent browser automatic zoom on focus on mobile devices */

@@ -811,7 +811,7 @@ export default function Settings() {
                 </p>
               </div>
 
-              {isAuthenticated && !isOfflineMode ? (
+              {isAuthenticated ? (
                 <div className="p-3 rounded-xl border border-emerald-500/10 bg-emerald-500/5 text-emerald-400 text-xs flex items-center gap-2.5 shrink-0 self-start md:self-center">
                   <div className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -826,15 +826,15 @@ export default function Settings() {
                 <div className="p-3 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-500 text-xs flex items-center gap-2.5 shrink-0 self-start md:self-center">
                   <ShieldAlert className="h-4 w-4 shrink-0" />
                   <div>
-                    <p className="font-bold">Modo Local Ativo</p>
-                    <p className="opacity-80 text-[10px]">Sem backup automático</p>
+                    <p className="font-bold">Não Autenticado</p>
+                    <p className="opacity-80 text-[10px]">Faça login para ativar o backup</p>
                   </div>
                 </div>
               )}
             </div>
 
             <div>
-              {isAuthenticated && !isOfflineMode ? (
+              {isAuthenticated ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <button
                     onClick={async () => {

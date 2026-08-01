@@ -37,18 +37,45 @@ const queryClient = new QueryClient({
   },
 });
 
+function checkAndRedirectPublicUrls(): boolean {
+  if (typeof window === 'undefined') return false;
+  
+  const pathname = window.location.pathname;
+  const search = window.location.search;
+  const hash = window.location.hash;
+
+  if (!hash) {
+    const origin = window.location.origin;
+    
+    // Direct path-based links like /cadastro-cliente or /assinar/123
+    if (pathname && pathname !== '/' && pathname !== '/index.html') {
+      window.location.replace(`${origin}/#${pathname}${search}`);
+      return true;
+    } 
+    
+    // Query param links like /?token=xyz or /?assinatura=123
+    if (search) {
+      const params = new URLSearchParams(search);
+      const token = params.get('token');
+      const assinatura = params.get('assinatura') || params.get('id');
+      if (token) {
+        window.location.replace(`${origin}/#/cadastro-cliente?token=${token}`);
+        return true;
+      }
+      if (assinatura) {
+        window.location.replace(`${origin}/#/assinar/${assinatura}`);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function AppContent() {
   const { user, isAuthenticated } = useAuth();
   const [searchParams] = useSearchParams();
   const assinarId = searchParams.get('assinatura') || new URLSearchParams(window.location.search).get('assinatura');
-  const legacyToken = new URLSearchParams(window.location.search).get('token');
 
-  // Handle legacy remote register links
-  if (legacyToken && window.location.pathname === '/cadastro-cliente') {
-    window.location.href = `${window.location.origin}/#/cadastro-cliente?token=${legacyToken}`;
-    return null;
-  }
-  
   // Initialize Supabase 100% Real-time synchronization
   useEffect(() => {
     const cleanup = initRealtimeSync(queryClient);
@@ -109,6 +136,17 @@ function AppContent() {
 }
 
 export default function App() {
+  const isRedirecting = checkAndRedirectPublicUrls();
+
+  if (isRedirecting) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
+        <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full mb-3" />
+        <p className="text-sm font-medium text-slate-300">Redirecionando para o portal seguro...</p>
+      </div>
+    );
+  }
+
   return (
     <QueryClientProvider client={queryClient}>
       <HashRouter>

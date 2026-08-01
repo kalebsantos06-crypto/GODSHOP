@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getBaseUrl, copyToClipboard } from '../utils/url';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
@@ -330,11 +331,15 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       });
       if (res.ok) {
         const tokenData = await res.json();
-        const link = `${window.location.origin}/#/cadastro-cliente?token=${tokenData.token}`;
-        navigator.clipboard.writeText(link);
-        setCopied(true);
-        toast.success('Link único gerado e copiado! (Válido por 1 uso / 24h)');
-        setTimeout(() => setCopied(false), 3000);
+        const link = `${getBaseUrl()}/#/cadastro-cliente?token=${tokenData.token}`;
+        const copiedSuccess = await copyToClipboard(link);
+        if (copiedSuccess) {
+          setCopied(true);
+          toast.success('Link único gerado e copiado! (Válido por 1 uso / 24h)');
+          setTimeout(() => setCopied(false), 3000);
+        } else {
+          toast.success(`Link gerado: ${link}`);
+        }
       } else {
         toast.error('Erro ao gerar token de link único.');
       }

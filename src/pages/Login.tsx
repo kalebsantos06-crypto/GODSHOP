@@ -79,74 +79,90 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setShowOfflineOption(false);
     
     if (!isSupabaseConfigured) {
-      try {
-        await enterOfflineMode(email);
-        toast.success('Iniciando em Modo Local/Offline (Banco de Dados Local Ativo) ⚡');
-        navigate('/');
-      } catch (err) {
-        toast.error('Erro ao acessar o modo offline.');
-      } finally {
-        setIsLoading(false);
-      }
+      toast.error('O Supabase não está configurado. Por favor, insira a URL e a Chave do Supabase abaixo.');
+      setShowSupabaseConfig(true);
+      setIsLoading(false);
       return;
     }
     
     if (isRegistering) {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-      if (error) {
-        const errorMsg = String(error.message || error).toLowerCase();
-        const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror');
-        
-        if (isNetwork) {
-          toast.warning('Erro de conexão. Entrando em Modo Offline...');
-          try {
-            await enterOfflineMode(email);
-            navigate('/');
-          } catch (offlineErr) {
-            toast.error('Falha ao entrar no modo offline.');
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (error) {
+          const errorMsg = String(error.message || error.name || error).toLowerCase();
+          const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror') || errorMsg.includes('fetch');
+          
+          if (isNetwork) {
+            toast.error('Erro de conexão com o Supabase (Failed to fetch). Verifique sua internet.');
+          } else {
+            let friendlyMsg = error.message;
+            if (friendlyMsg?.includes('User already registered')) {
+              friendlyMsg = 'Este e-mail já está cadastrado. Faça login.';
+            } else if (friendlyMsg?.includes('Password should be at least')) {
+              friendlyMsg = 'A senha deve ter pelo menos 6 caracteres.';
+            }
+            toast.error('Erro ao cadastrar: ' + (friendlyMsg || 'Verifique os dados.'));
           }
+          setIsLoading(false);
         } else {
-          toast.error('Erro ao cadastrar: ' + error.message);
+          toast.success('Cadastro realizado com sucesso!');
+          const { error: loginError } = await login(email, password);
+          setIsLoading(false);
+          if (!loginError) {
+            navigate('/');
+          } else {
+            toast.info('Verifique se recebeu um e-mail de confirmação ou tente fazer login.');
+            setIsRegistering(false);
+          }
         }
+      } catch (err: any) {
         setIsLoading(false);
-      } else {
-        toast.success('Cadastro realizado com sucesso!');
-        // Tenta fazer login automaticamente
-        const { error: loginError } = await login(email, password);
-        setIsLoading(false);
-        if (!loginError) {
-          navigate('/');
+        const errorMsg = String(err?.message || err).toLowerCase();
+        const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror') || errorMsg.includes('fetch');
+        if (isNetwork) {
+          toast.error('Erro de conexão com o Supabase. Verifique sua internet.');
         } else {
-          toast.info('Verifique se recebeu um e-mail de confirmação ou faça login.');
-          setIsRegistering(false);
+          toast.error('Erro ao cadastrar: ' + (err?.message || 'Tente novamente.'));
         }
       }
     } else {
-      const { error } = await login(email, password);
-      setIsLoading(false);
-      if (error) {
-        const errorMsg = String(error.message || error).toLowerCase();
-        const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror');
-        
-        if (isNetwork) {
-          toast.warning('Servidor inacessível. Entrando em Modo Offline...');
-          try {
-            await enterOfflineMode(email);
-            navigate('/');
-          } catch (offlineErr) {
-            toast.error('Falha ao entrar no modo offline.');
+      try {
+        const { error } = await login(email, password);
+        setIsLoading(false);
+        if (error) {
+          const errorMsg = String(error.message || error.name || error).toLowerCase();
+          const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror') || errorMsg.includes('fetch');
+          
+          if (isNetwork) {
+            toast.error('Erro de conexão com o Supabase (Failed to fetch). Verifique sua internet.');
+          } else {
+            let friendlyMsg = error.message;
+            if (friendlyMsg?.includes('Invalid login credentials')) {
+              friendlyMsg = 'E-mail ou senha incorretos.';
+            } else if (friendlyMsg?.includes('Email not confirmed')) {
+              friendlyMsg = 'E-mail não confirmado. Por favor, verifique sua caixa de entrada.';
+            } else if (friendlyMsg?.includes('User not found')) {
+              friendlyMsg = 'Usuário não encontrado. Cadastre-se primeiro.';
+            }
+            toast.error('Erro ao fazer login: ' + (friendlyMsg || 'Credenciais inválidas.'));
           }
         } else {
-          toast.error('Erro ao fazer login: ' + error.message);
+          navigate('/');
         }
-      } else {
-        navigate('/');
+      } catch (err: any) {
+        setIsLoading(false);
+        const errorMsg = String(err?.message || err).toLowerCase();
+        const isNetwork = errorMsg.includes('failed to fetch') || errorMsg.includes('network') || errorMsg.includes('load') || errorMsg.includes('cors') || errorMsg.includes('typeerror') || errorMsg.includes('fetch');
+        if (isNetwork) {
+          toast.error('Erro de conexão com o Supabase (Failed to fetch). Verifique sua internet.');
+        } else {
+          toast.error('Erro ao fazer login: ' + (err?.message || 'Falha na autenticação.'));
+        }
       }
     }
   };
@@ -319,19 +335,6 @@ export default function Login() {
               )}
             </button>
 
-            {showOfflineOption && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-500 text-center space-y-2">
-                <p>O servidor está inacessível no momento (rede instável ou offline).</p>
-                <button
-                  type="button"
-                  onClick={handleOfflineLogin}
-                  className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold py-1.5 px-3 rounded transition-colors cursor-pointer"
-                >
-                  Entrar em Modo Offline
-                </button>
-              </div>
-            )}
-            
             <div className="text-center pt-2">
               <button
                 type="button"
@@ -339,16 +342,6 @@ export default function Login() {
                 className="text-sm text-primary hover:underline font-medium cursor-pointer"
               >
                 {isRegistering ? 'Já tem uma conta? Faça login' : 'Ainda não tem conta? Cadastre-se'}
-              </button>
-            </div>
-
-            <div className="text-center pt-2 border-t border-white/5 mt-2">
-              <button
-                type="button"
-                onClick={handleOfflineLogin}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                Trabalhar Offline (Sem Internet)
               </button>
             </div>
           </form>

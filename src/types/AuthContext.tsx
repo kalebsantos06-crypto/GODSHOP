@@ -139,7 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string) => {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (data.user) {
+      if (data?.user) {
         setUser(data.user);
         setIsAuthenticated(true);
         setIsOfflineMode(false);
@@ -156,7 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = async (email: string, password: string) => {
     try {
       const { data, error } = await supabase.auth.signUp({ email, password });
-      if (data.user) {
+      if (data?.user) {
         setUser(data.user);
         setIsAuthenticated(true);
         setIsOfflineMode(false);

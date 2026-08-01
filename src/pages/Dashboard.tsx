@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getBaseUrl, copyToClipboard } from '../utils/url';
 import { db } from '../services/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DollarSign, Smartphone, ShoppingCart, TrendingUp, RefreshCw, Sparkles, Quote, Database, AlertTriangle, CheckCircle2, Coins, Package, ShieldCheck, MessageSquare, Bell, Zap } from 'lucide-react';
@@ -906,10 +907,14 @@ export default function Dashboard() {
                           <button 
                             onClick={async () => {
                               try {
-                                const baseUrl = window.location.origin;
+                                const baseUrl = getBaseUrl();
                                 const link = `${baseUrl}/#/assinar/${sale.id}`;
-                                await navigator.clipboard.writeText(link);
-                                toast.success('Link de assinatura copiado!');
+                                const success = await copyToClipboard(link);
+                                if (success) {
+                                  toast.success('Link de assinatura copiado!');
+                                } else {
+                                  toast.info(`Link de assinatura: ${link}`);
+                                }
                               } catch (e) {
                                 toast.error('Erro ao copiar link');
                               }
