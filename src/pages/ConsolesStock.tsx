@@ -77,6 +77,7 @@ export default function ConsolesStock() {
     const data = {
       model: (formData.get('model') as string)?.trim(),
       version: (formData.get('version') as string)?.trim(),
+      ram: (formData.get('ram') as string)?.trim() || '',
       condition: formData.get('condition') as string,
       buy_price: parsedPrice,
       category: (formData.get('category') as string) || 'console',
@@ -136,10 +137,38 @@ export default function ConsolesStock() {
               <input name="version" defaultValue={editingConsole?.version} required className="w-full p-2 border rounded-md" placeholder="Ex: 4K Smart, Slim 1TB, 5 Xícaras 110V" />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Condição</label>
-              <select name="condition" defaultValue={editingConsole?.condition || 'seminovo'} required className="w-full p-2 border rounded-md bg-background">
-                <option value="lacrado">Lacrado (1 Ano de Garantia)</option>
-                <option value="seminovo">Seminovo (6 Meses de Garantia)</option>
+              <label className="text-sm font-medium">Memória RAM</label>
+              <input 
+                name="ram" 
+                defaultValue={editingConsole?.ram} 
+                className="w-full p-2 border rounded-md" 
+                placeholder="Ex: 8GB, 16GB..." 
+                list="ram-options-console"
+              />
+              <datalist id="ram-options-console">
+                <option value="4GB" />
+                <option value="6GB" />
+                <option value="8GB" />
+                <option value="12GB" />
+                <option value="16GB" />
+                <option value="24GB" />
+                <option value="32GB" />
+                <option value="64GB" />
+              </datalist>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Condição / Garantia</label>
+              <select name="condition" defaultValue={editingConsole?.condition || 'seminovo_6m'} required className="w-full p-2 border rounded-md bg-background">
+                <optgroup label="Lacrado / Novo">
+                  <option value="lacrado_3m">Lacrado (3 Meses de Garantia)</option>
+                  <option value="lacrado_6m">Lacrado (6 Meses de Garantia)</option>
+                  <option value="lacrado_1ano">Lacrado (1 Ano de Garantia)</option>
+                </optgroup>
+                <optgroup label="Seminovo / Usado">
+                  <option value="seminovo_3m">Seminovo (3 Meses de Garantia)</option>
+                  <option value="seminovo_6m">Seminovo (6 Meses de Garantia)</option>
+                  <option value="seminovo_1ano">Seminovo (1 Ano de Garantia)</option>
+                </optgroup>
               </select>
             </div>
             <div className="space-y-2">

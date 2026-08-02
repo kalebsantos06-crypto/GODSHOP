@@ -7,9 +7,12 @@ import { Plus, FileText, Filter, Edit2, Trash2, CheckCircle2, Clock, CreditCard,
 import { toast } from 'sonner';
 import { format, isWithinInterval, startOfDay, endOfDay, addDays, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, getInstallmentDate, getCalculatedInstallments, CalculatedInstallment } from '../lib/dateUtils';
+import { broadcastLocalChange } from '../services/realtime';
 import { Link } from 'react-router-dom';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
+import WhatsAppStatusModal from '../components/WhatsAppStatusModal';
+import { WhatsAppStatusType } from '../lib/whatsappUtils';
 import { Console } from '../types';
 import { cn } from '../lib/utils';
 
@@ -23,6 +26,11 @@ export default function Sales() {
   const [tempDownPayment, setTempDownPayment] = useState<number>(0);
   const [tempInstallments, setTempInstallments] = useState<number>(1);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // WhatsApp Status Modal States
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [statusClientData, setStatusClientData] = useState<{ name: string; phone: string; itemName?: string } | null>(null);
+  const [statusDefaultType, setStatusDefaultType] = useState<WhatsAppStatusType>('order_preparing');
   
   // Installment Management States
   const [selectedSaleForInstallments, setSelectedSaleForInstallments] = useState<any>(null);
@@ -111,12 +119,13 @@ export default function Sales() {
   });
 
   const updateInstallmentsMutation = useMutation({
-    mutationFn: ({ id, installments_paid }: { id: string, installments_paid: number }) => 
-      db.sales.update(id, { installments_paid }),
+    mutationFn: ({ id, installments_paid, custom_payments }: { id: string, installments_paid: number, custom_payments?: string }) => 
+      db.sales.update(id, { installments_paid, custom_payments }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
+      broadcastLocalChange('sales');
       setSelectedSaleForInstallments(null);
-      toast.success('Parcelas atualizadas com sucesso!');
+      toast.success('Parcelas e cronograma atualizados em tempo real!');
     },
     onError: (error: any) => {
       console.error('Erro ao atualizar parcelas:', error);
@@ -132,17 +141,23 @@ export default function Sales() {
     const totalAmount = sale.sell_price - (sale.down_payment || 0);
     const instAmount = totalAmount / totalInst;
     
-    const stored = localStorage.getItem(`inst_payments_${sale.id}`);
-    if (stored) {
+    let loadedPayments = null;
+    if (sale.custom_payments) {
       try {
-        setCustomInstallmentPayments(JSON.parse(stored));
-      } catch (e) {
-        const initial: { [key: number]: number } = {};
-        for (let i = 1; i <= totalInst; i++) {
-          initial[i] = i <= (sale.installments_paid || 0) ? instAmount : 0;
-        }
-        setCustomInstallmentPayments(initial);
+        loadedPayments = typeof sale.custom_payments === 'string' ? JSON.parse(sale.custom_payments) : sale.custom_payments;
+      } catch (e) {}
+    }
+    if (!loadedPayments) {
+      const stored = localStorage.getItem(`inst_payments_${sale.id}`);
+      if (stored) {
+        try {
+          loadedPayments = JSON.parse(stored);
+        } catch (e) {}
       }
+    }
+
+    if (loadedPayments) {
+      setCustomInstallmentPayments(loadedPayments);
     } else {
       const initial: { [key: number]: number } = {};
       for (let i = 1; i <= totalInst; i++) {
@@ -152,124 +167,6 @@ export default function Sales() {
     }
     
     setCopied(false);
-  };
-
-  const getInstallmentDate = (sale: any, index: number) => {
-    const baseDate = sale.first_installment_date ? parseLocalDate(sale.first_installment_date) : parseLocalDate(sale.sale_date);
-    const intervalMultiplier = sale.first_installment_date ? (index - 1) : index;
-    let dueDate;
-    if (sale.installment_frequency === 'Semanal') {
-      dueDate = addDays(baseDate, intervalMultiplier * 7);
-    } else if (sale.installment_frequency === 'Quinzenal') {
-      dueDate = addDays(baseDate, intervalMultiplier * 15);
-    } else {
-      dueDate = addMonths(baseDate, intervalMultiplier);
-    }
-    return dueDate;
-  };
-
-  interface CalculatedInstallment {
-    index: number;
-    expectedAmount: number;
-    paidAmount: number;
-    dueDate: Date;
-    status: 'fully_paid' | 'pending';
-  }
-
-  const getCalculatedInstallments = (
-    sale: any,
-    customPayments: { [key: number]: number }
-  ): CalculatedInstallment[] => {
-    if (!sale) return [];
-    const totalAmount = sale.sell_price - (sale.down_payment || 0);
-    const baseInstCount = sale.installments || 1;
-
-    const list: CalculatedInstallment[] = [];
-    
-    // First, let's gather the payments for the base installments
-    let totalPaid = 0;
-    const paidIndices: number[] = [];
-    const unpaidIndices: number[] = [];
-
-    for (let i = 1; i <= baseInstCount; i++) {
-      const p = customPayments[i] || 0;
-      if (p > 0.005) {
-        totalPaid += p;
-        paidIndices.push(i);
-      } else {
-        unpaidIndices.push(i);
-      }
-    }
-
-    // Check if there is still a remaining unpaid balance and we have custom payments on any extra installments
-    let remainingUnpaid = totalAmount - totalPaid;
-    
-    let extraIndex = baseInstCount + 1;
-    while (true) {
-      const p = customPayments[extraIndex] || 0;
-      if (p > 0.005) {
-        totalPaid += p;
-        remainingUnpaid = totalAmount - totalPaid;
-        paidIndices.push(extraIndex);
-        extraIndex++;
-      } else {
-        break;
-      }
-    }
-
-    // Now, if there is STILL a remaining unpaid balance (> 0.01) and we have no unpaid base installments,
-    // we must add at least one open extra installment to hold the remaining balance.
-    if (remainingUnpaid > 0.01 && unpaidIndices.length === 0) {
-      unpaidIndices.push(extraIndex);
-    }
-
-    // Sort all indices
-    const allIndices = Array.from(new Set([...paidIndices, ...unpaidIndices])).sort((a, b) => a - b);
-
-    if (unpaidIndices.length > 0) {
-      const expectedPerUnpaid = Number((remainingUnpaid / unpaidIndices.length).toFixed(2));
-      const totalPaidExpected = paidIndices.reduce((sum, idx) => sum + (customPayments[idx] || 0), 0);
-      const countExceptLast = unpaidIndices.length - 1;
-      const sumExceptLast = countExceptLast * expectedPerUnpaid;
-      const lastUnpaidIndex = unpaidIndices[unpaidIndices.length - 1];
-      const lastExpected = Number((totalAmount - totalPaidExpected - sumExceptLast).toFixed(2));
-      
-      const expectedMap: { [key: number]: number } = {};
-      for (const idx of paidIndices) {
-        expectedMap[idx] = customPayments[idx] || 0;
-      }
-      for (let i = 0; i < unpaidIndices.length - 1; i++) {
-        expectedMap[unpaidIndices[i]] = expectedPerUnpaid;
-      }
-      expectedMap[lastUnpaidIndex] = lastExpected;
-
-      for (const idx of allIndices) {
-        const isPaid = paidIndices.includes(idx);
-        const paidVal = customPayments[idx] || 0;
-        const expectedVal = expectedMap[idx];
-
-        list.push({
-          index: idx,
-          expectedAmount: expectedVal,
-          paidAmount: paidVal,
-          dueDate: getInstallmentDate(sale, idx),
-          status: isPaid ? 'fully_paid' : 'pending'
-        });
-      }
-    } else {
-      for (const idx of allIndices) {
-        const paidVal = customPayments[idx] || 0;
-        list.push({
-          index: idx,
-          expectedAmount: paidVal,
-          paidAmount: paidVal,
-          dueDate: getInstallmentDate(sale, idx),
-          status: 'fully_paid'
-        });
-      }
-    }
-
-    return list;
   };
 
   const generateWhatsAppMessage = (sale: any, client: any, iphone: any, console: any, customPayments: { [key: number]: number }) => {
@@ -365,8 +262,8 @@ export default function Sales() {
       payment_method: formData.get('payment_method'),
       installments: Number(formData.get('installments')) || 1,
       installment_frequency: (formData.get('installment_frequency') as 'Semanal' | 'Quinzenal' | 'Mensal') || 'Mensal',
-      sale_date: formData.get('sale_date') ? new Date(formData.get('sale_date') as string).toISOString() : new Date().toISOString(),
-      first_installment_date: firstInstallmentDate ? new Date(firstInstallmentDate as string).toISOString() : undefined,
+      sale_date: formData.get('sale_date') ? (formData.get('sale_date') as string) : format(new Date(), 'yyyy-MM-dd'),
+      first_installment_date: firstInstallmentDate ? (firstInstallmentDate as string) : undefined,
     });
   };
 
@@ -389,8 +286,8 @@ export default function Sales() {
         payment_method: formData.get('payment_method'),
         installments: Number(formData.get('installments')) || 1,
         installment_frequency: (formData.get('installment_frequency') as 'Semanal' | 'Quinzenal' | 'Mensal') || 'Mensal',
-        sale_date: formData.get('sale_date') ? new Date(formData.get('sale_date') as string).toISOString() : editingSale.sale_date,
-        first_installment_date: firstInstallmentDate ? new Date(firstInstallmentDate as string).toISOString() : null,
+        sale_date: formData.get('sale_date') ? (formData.get('sale_date') as string) : editingSale.sale_date,
+        first_installment_date: firstInstallmentDate ? (firstInstallmentDate as string) : null,
       }
     });
   };
@@ -694,6 +591,8 @@ export default function Sales() {
                     ).toFixed(2))
                   : 0;
 
+                const saleItemName = iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${consoleObj.model} - ${consoleObj.version}` : 'Aparelho');
+
                 return (
                   <tr key={sale.id} className="hover:bg-muted/50">
                     <td className="px-4 py-3">
@@ -789,7 +688,27 @@ export default function Sales() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => {
+                            if (!client?.phone) {
+                              toast.error('Cliente desta venda não possui telefone cadastrado.');
+                              return;
+                            }
+                            setStatusClientData({
+                              name: client?.name || 'Cliente',
+                              phone: client.phone,
+                              itemName: saleItemName
+                            });
+                            setStatusDefaultType('order_preparing');
+                            setStatusModalOpen(true);
+                          }}
+                          className="bg-emerald-600/10 text-emerald-500 hover:bg-emerald-600 hover:text-white transition-all p-1.5 rounded-lg text-xs flex items-center gap-1 font-bold cursor-pointer"
+                          title="Avisar Cliente via WhatsApp (Preparando, A Caminho, Agradecimento, Cadastro)"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          <span className="hidden sm:inline">Status</span>
+                        </button>
                         {sale.installments && sale.installments > 1 && (
                           <button 
                             onClick={() => handleOpenInstallmentsModal(sale)}
@@ -1158,7 +1077,11 @@ export default function Sales() {
                     const calculated = getCalculatedInstallments(sale, customInstallmentPayments);
                     const countPaid = calculated.filter(inst => inst.status === 'fully_paid').length;
                     
-                    updateInstallmentsMutation.mutate({ id: sale.id, installments_paid: countPaid });
+                    updateInstallmentsMutation.mutate({ 
+                      id: sale.id, 
+                      installments_paid: countPaid,
+                      custom_payments: JSON.stringify(customInstallmentPayments)
+                    });
                   }}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 sm:px-6 sm:py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-md flex items-center gap-2"
                 >
@@ -1169,6 +1092,16 @@ export default function Sales() {
           </div>
         );
       })()}
+
+      {/* MODAL DE NOTIFICAÇÃO WHATSAPP */}
+      <WhatsAppStatusModal
+        isOpen={statusModalOpen}
+        onClose={() => setStatusModalOpen(false)}
+        clientName={statusClientData?.name || ''}
+        clientPhone={statusClientData?.phone || ''}
+        itemName={statusClientData?.itemName || ''}
+        defaultStatusType={statusDefaultType}
+      />
     </div>
   );
 }

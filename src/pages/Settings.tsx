@@ -10,7 +10,8 @@ import { backupService } from '../services/backupService';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '../lib/utils';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
-import { parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, getSaleNotifications } from '../lib/dateUtils';
+import { DEFAULT_STATUS_TEMPLATES } from '../lib/whatsappUtils';
 import { formatBRL } from '../lib/formatCurrency';
 import { useSearchParams } from 'react-router-dom';
 
@@ -64,6 +65,16 @@ export default function Settings() {
   const [templateDayOf, setTemplateDayOf] = useState(() => localStorage.getItem('auto_template_day_of') || DEFAULT_TEMPLATES.day_of);
   const [templateOverdue, setTemplateOverdue] = useState(() => localStorage.getItem('auto_template_overdue') || DEFAULT_TEMPLATES.overdue);
 
+  // Status notification templates (8 Sequential Shipping Steps)
+  const [templateRegistration, setTemplateRegistration] = useState(() => localStorage.getItem('auto_template_registration') || DEFAULT_STATUS_TEMPLATES.registration);
+  const [templateOrderConfirmed, setTemplateOrderConfirmed] = useState(() => localStorage.getItem('auto_template_order_confirmed') || DEFAULT_STATUS_TEMPLATES.order_confirmed);
+  const [templateOrderPreparing, setTemplateOrderPreparing] = useState(() => localStorage.getItem('auto_template_order_preparing') || DEFAULT_STATUS_TEMPLATES.order_preparing);
+  const [templateOrderReady, setTemplateOrderReady] = useState(() => localStorage.getItem('auto_template_order_ready') || DEFAULT_STATUS_TEMPLATES.order_ready);
+  const [templateOrderOnWay, setTemplateOrderOnWay] = useState(() => localStorage.getItem('auto_template_order_on_way') || DEFAULT_STATUS_TEMPLATES.order_on_way);
+  const [templateOrderDelivered, setTemplateOrderDelivered] = useState(() => localStorage.getItem('auto_template_order_delivered') || DEFAULT_STATUS_TEMPLATES.order_delivered);
+  const [templateGuaranteeSent, setTemplateGuaranteeSent] = useState(() => localStorage.getItem('auto_template_guarantee_sent') || DEFAULT_STATUS_TEMPLATES.guarantee_sent);
+  const [templateOrderThankYou, setTemplateOrderThankYou] = useState(() => localStorage.getItem('auto_template_order_thank_you') || DEFAULT_STATUS_TEMPLATES.order_thank_you);
+
   // Sent logs history
   const [sentLogs, setSentLogs] = useState<{ id: string; clientName: string; itemName: string; installmentIndex: number; sentAt: string; status: 'success' | 'failed'; method: 'webhook' | 'whatsapp_web' }[]>(() => {
     try {
@@ -102,144 +113,10 @@ export default function Settings() {
     enabled: isAuthenticated
   });
 
-  // Installment helpers
-  const getInstallmentDate = (sale: any, index: number) => {
-    const baseDate = sale.first_installment_date ? parseLocalDate(sale.first_installment_date) : parseLocalDate(sale.sale_date);
-    const intervalMultiplier = sale.first_installment_date ? (index - 1) : index;
-    if (sale.installment_frequency === 'Semanal') {
-      return addDays(baseDate, intervalMultiplier * 7);
-    } else if (sale.installment_frequency === 'Quinzenal') {
-      return addDays(baseDate, intervalMultiplier * 15);
-    } else {
-      return addMonths(baseDate, intervalMultiplier);
-    }
-  };
-
-  const getCalculatedInstallments = (sale: any, customPayments: any) => {
-    const list = [];
-    const installmentsCount = sale.installments || 1;
-    const totalAmount = sale.sell_price - (sale.down_payment || 0);
-
-    const paidIndices: number[] = [];
-    const unpaidIndices: number[] = [];
-
-    for (let i = 1; i <= installmentsCount; i++) {
-      if (customPayments[i] && customPayments[i] > 0) {
-        paidIndices.push(i);
-      } else {
-        unpaidIndices.push(i);
-      }
-    }
-
-    const totalPaid = paidIndices.reduce((sum, idx) => sum + (customPayments[idx] || 0), 0);
-    const remainingUnpaid = totalAmount - totalPaid;
-
-    const allIndices = Array.from(new Set([...paidIndices, ...unpaidIndices])).sort((a, b) => a - b);
-
-    if (unpaidIndices.length > 0) {
-      const expectedPerUnpaid = Number((remainingUnpaid / unpaidIndices.length).toFixed(2));
-      const totalPaidExpected = paidIndices.reduce((sum, idx) => sum + (customPayments[idx] || 0), 0);
-      const countExceptLast = unpaidIndices.length - 1;
-      const sumExceptLast = countExceptLast * expectedPerUnpaid;
-      const lastUnpaidIndex = unpaidIndices[unpaidIndices.length - 1];
-      const lastExpected = Number((totalAmount - totalPaidExpected - sumExceptLast).toFixed(2));
-      
-      const expectedMap: { [key: number]: number } = {};
-      for (const idx of paidIndices) {
-        expectedMap[idx] = customPayments[idx] || 0;
-      }
-      for (let i = 0; i < unpaidIndices.length - 1; i++) {
-        expectedMap[unpaidIndices[i]] = expectedPerUnpaid;
-      }
-      expectedMap[lastUnpaidIndex] = lastExpected;
-
-      for (const idx of allIndices) {
-        const isPaid = paidIndices.includes(idx);
-        const paidVal = customPayments[idx] || 0;
-        const expectedVal = expectedMap[idx];
-
-        list.push({
-          index: idx,
-          expectedAmount: expectedVal,
-          paidAmount: paidVal,
-          dueDate: getInstallmentDate(sale, idx),
-          status: isPaid ? 'fully_paid' : 'pending' as const
-        });
-      }
-    } else {
-      for (const idx of allIndices) {
-        const paidVal = customPayments[idx] || 0;
-        list.push({
-          index: idx,
-          expectedAmount: paidVal,
-          paidAmount: paidVal,
-          dueDate: getInstallmentDate(sale, idx),
-          status: 'fully_paid' as const
-        });
-      }
-    }
-
-    return list;
-  };
-
-  // Compile notifications list for the dashboard/dispatch queue
-  const pendingNotifications: any[] = [];
-  
-  if (isAuthenticated && salesList && salesList.length > 0) {
-    const today = startOfDay(new Date());
-    
-    for (const sale of salesList) {
-      if (!sale.installments || sale.installments <= 1) continue;
-      
-      let customPayments: { [key: number]: number } = {};
-      try {
-        const stored = localStorage.getItem(`inst_payments_${sale.id}`);
-        if (stored) {
-          customPayments = JSON.parse(stored);
-        } else {
-          const instAmount = Number(((sale.sell_price - (sale.down_payment || 0)) / sale.installments).toFixed(2));
-          for (let i = 1; i <= sale.installments; i++) {
-            customPayments[i] = i <= (sale.installments_paid || 0) ? instAmount : 0;
-          }
-        }
-      } catch (e) {
-        console.error('Error parsing custom payments:', e);
-      }
-      
-      const calculatedList = getCalculatedInstallments(sale, customPayments);
-      const client = clientsList.find((c: any) => c.id === sale.client_id);
-      const iphone = iphonesList.find((p: any) => p.id === sale.iphone_id);
-      const consoleObj = consolesList.find((p: any) => p.id === sale.console_id);
-      
-      const categoryName = consoleObj ? (consoleObj.category === 'tv' ? 'TV' : (consoleObj.category === 'rice_cooker' ? 'Panela Elétrica' : (consoleObj.category === 'outro' ? 'Eletro' : 'Console'))) : 'Aparelho';
-      const itemName = iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${categoryName} ${consoleObj.model} - ${consoleObj.version}` : 'Aparelho');
-      
-      for (const inst of calculatedList) {
-        if (inst.status === 'pending') {
-          const dueDay = startOfDay(inst.dueDate);
-          const daysDiff = differenceInDays(dueDay, today);
-          
-          if (daysDiff <= 3) {
-            pendingNotifications.push({
-              id: `${sale.id}_inst_${inst.index}`,
-              clientName: client?.name || 'Cliente Sem Nome',
-              clientPhone: client?.phone ? client.phone.replace(/\D/g, '') : '',
-              itemName,
-              installmentIndex: inst.index,
-              expectedAmount: inst.expectedAmount,
-              dueDate: inst.dueDate,
-              status: inst.status,
-              daysDiff,
-              saleId: sale.id
-            });
-          }
-        }
-      }
-    }
-  }
-
-  // Sort notification list so urgent ones are at the top
-  pendingNotifications.sort((a, b) => a.daysDiff - b.daysDiff);
+  // Real-time notifications for automated messaging dispatch
+  const pendingNotifications = isAuthenticated 
+    ? getSaleNotifications(salesList, clientsList, iphonesList, consolesList).filter(n => n.daysDiff <= 3) 
+    : [];
 
   const saveAutomationSettings = () => {
     localStorage.setItem('auto_webhook_url', webhookUrl);
@@ -248,6 +125,14 @@ export default function Settings() {
     localStorage.setItem('auto_template_3_days', template3Days);
     localStorage.setItem('auto_template_day_of', templateDayOf);
     localStorage.setItem('auto_template_overdue', templateOverdue);
+    localStorage.setItem('auto_template_registration', templateRegistration);
+    localStorage.setItem('auto_template_order_confirmed', templateOrderConfirmed);
+    localStorage.setItem('auto_template_order_preparing', templateOrderPreparing);
+    localStorage.setItem('auto_template_order_ready', templateOrderReady);
+    localStorage.setItem('auto_template_order_on_way', templateOrderOnWay);
+    localStorage.setItem('auto_template_order_delivered', templateOrderDelivered);
+    localStorage.setItem('auto_template_guarantee_sent', templateGuaranteeSent);
+    localStorage.setItem('auto_template_order_thank_you', templateOrderThankYou);
     if (isWebhookEnabled && !webhookUrl.trim()) {
       toast.success('Configurações salvas! Nota: Insira a URL do Webhook ou use o modo WhatsApp Web.');
     } else {
@@ -1135,37 +1020,135 @@ export default function Settings() {
               </div>
 
               <div className="space-y-4">
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-3">
+                  <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-1">Status de Clientes e Pedidos</h4>
+                  <p className="text-[11px] text-muted-foreground">Personalize os modelos de WhatsApp enviados ao cadastrar clientes e atualizar o andamento de pedidos.</p>
+                </div>
+
                 <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">Aviso Prévio (Faltando 3 Dias)</span>
+                  <span className="text-xs font-bold text-foreground block mb-1">✨ Etapa 1: Boas-Vindas & Cadastro Concluído</span>
                   <textarea
                     rows={2}
-                    value={template3Days}
-                    onChange={(e) => setTemplate3Days(e.target.value)}
+                    value={templateRegistration}
+                    onChange={(e) => setTemplateRegistration(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Olá, {cliente}... vencendo em 3 dias..."
+                    placeholder="Prezado(a) {cliente}... Cadastro realizado..."
                   />
                 </div>
 
                 <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">Aviso no Dia do Vencimento</span>
+                  <span className="text-xs font-bold text-foreground block mb-1">💳 Etapa 2: Pedido Confirmado & Pagamento Aprovado</span>
                   <textarea
                     rows={2}
-                    value={templateDayOf}
-                    onChange={(e) => setTemplateDayOf(e.target.value)}
+                    value={templateOrderConfirmed}
+                    onChange={(e) => setTemplateOrderConfirmed(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Olá, {cliente}... vencendo hoje..."
+                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) foi confirmado..."
                   />
                 </div>
 
                 <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">Alerta de Atraso (Após Vencimento)</span>
+                  <span className="text-xs font-bold text-foreground block mb-1">📦 Etapa 3: Testes Técnicos & Preparação</span>
                   <textarea
                     rows={2}
-                    value={templateOverdue}
-                    onChange={(e) => setTemplateOverdue(e.target.value)}
+                    value={templateOrderPreparing}
+                    onChange={(e) => setTemplateOrderPreparing(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Olá, {cliente}... vencido e pendente..."
+                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) está em testes..."
                   />
+                </div>
+
+                <div>
+                  <span className="text-xs font-bold text-foreground block mb-1">🎁 Etapa 4: Embalado & Pronto para Envio (Despacho)</span>
+                  <textarea
+                    rows={2}
+                    value={templateOrderReady}
+                    onChange={(e) => setTemplateOrderReady(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
+                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) está pronto para envio..."
+                  />
+                </div>
+
+                <div>
+                  <span className="text-xs font-bold text-foreground block mb-1">🚚 Etapa 5: Despachado & Em Rota de Entrega</span>
+                  <textarea
+                    rows={2}
+                    value={templateOrderOnWay}
+                    onChange={(e) => setTemplateOrderOnWay(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
+                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) saiu para entrega..."
+                  />
+                </div>
+
+                <div>
+                  <span className="text-xs font-bold text-foreground block mb-1">🎉 Etapa 6: Pedido Entregue com Sucesso</span>
+                  <textarea
+                    rows={2}
+                    value={templateOrderDelivered}
+                    onChange={(e) => setTemplateOrderDelivered(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
+                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) foi entregue..."
+                  />
+                </div>
+
+                <div>
+                  <span className="text-xs font-bold text-foreground block mb-1">🛡️ Etapa 7: Termo de Garantia Oficial Ativado</span>
+                  <textarea
+                    rows={2}
+                    value={templateGuaranteeSent}
+                    onChange={(e) => setTemplateGuaranteeSent(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
+                    placeholder="Prezado(a) {cliente}... Sua garantia referente ao {aparelho}..."
+                  />
+                </div>
+
+                <div>
+                  <span className="text-xs font-bold text-foreground block mb-1">🤍 Etapa 8: Agradecimento & Pós-Venda VIP</span>
+                  <textarea
+                    rows={2}
+                    value={templateOrderThankYou}
+                    onChange={(e) => setTemplateOrderThankYou(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
+                    placeholder="Prezado(a) {cliente}... Muito obrigado por comprar seu {aparelho}..."
+                  />
+                </div>
+
+                <div className="pt-3 border-t border-white/10">
+                  <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-3">Lembretes de Carnê e Vencimentos</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <span className="text-xs font-bold text-foreground block mb-1">Aviso Prévio (Faltando 3 Dias)</span>
+                      <textarea
+                        rows={2}
+                        value={template3Days}
+                        onChange={(e) => setTemplate3Days(e.target.value)}
+                        className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
+                        placeholder="Olá, {cliente}... vencendo em 3 dias..."
+                      />
+                    </div>
+
+                    <div>
+                      <span className="text-xs font-bold text-foreground block mb-1">Aviso no Dia do Vencimento</span>
+                      <textarea
+                        rows={2}
+                        value={templateDayOf}
+                        onChange={(e) => setTemplateDayOf(e.target.value)}
+                        className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
+                        placeholder="Olá, {cliente}... vencendo hoje..."
+                      />
+                    </div>
+
+                    <div>
+                      <span className="text-xs font-bold text-foreground block mb-1">Alerta de Atraso (Após Vencimento)</span>
+                      <textarea
+                        rows={2}
+                        value={templateOverdue}
+                        onChange={(e) => setTemplateOverdue(e.target.value)}
+                        className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
+                        placeholder="Olá, {cliente}... vencido e pendente..."
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

@@ -8,6 +8,7 @@ import { formatBRL } from '../lib/formatCurrency';
 import { format, addMonths, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { parseLocalDate } from '../lib/dateUtils';
+import { getConditionLabel, getWarrantyMonths } from '../lib/utils';
 import { Printer, ArrowLeft, Download, MessageCircle, FileDown, Smartphone, Share2, Copy, Check, ExternalLink, ShieldCheck, PenTool, Camera, Trash2, Plus, Image as ImageIcon, Lock, AlertTriangle, Eye, RefreshCw, Sparkles, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -241,8 +242,9 @@ export default function GuaranteeNote() {
   const consoleItem = sale ? consoles.find(c => c.id === sale.console_id) : null;
   const client = sale ? clients.find(c => c.id === sale.client_id) : null;
 
-  const isLacrado = (iphone?.condition === 'lacrado') || (consoleItem?.condition === 'lacrado');
-  const warrantyMonths = isLacrado ? 12 : 6;
+  const itemCondition = iphone?.condition || consoleItem?.condition;
+  const isLacrado = String(itemCondition || '').startsWith('lacrado');
+  const warrantyMonths = getWarrantyMonths(itemCondition);
   
   const saleDate = sale ? parseLocalDate(sale.sale_date) : new Date();
   const endDate = sale ? addMonths(saleDate, warrantyMonths) : new Date();
@@ -1212,16 +1214,18 @@ Caso tenha alguma dúvida, estamos à disposição! 👍`)}` : '#'}
                         <p><span className="font-semibold">Modelo:</span> {iphone.model}</p>
                         <p><span className="font-semibold">IMEI / Serial:</span> <span className="font-mono">{iphone.imei || 'N/A'}</span></p>
                         <p><span className="font-semibold">Armazenamento:</span> {iphone.storage}</p>
+                        {iphone.ram && <p><span className="font-semibold">Memória RAM:</span> {iphone.ram}</p>}
                         <p><span className="font-semibold">Cor:</span> {iphone.color}</p>
-                        <p><span className="font-semibold">Condição:</span> <span className="capitalize">{iphone.condition || 'Seminovo'}</span></p>
-                        <p><span className="font-semibold">Status:</span> {iphone.condition === 'lacrado' ? 'Novo/Lacrado' : 'Seminovo/Usado'}</p>
+                        <p><span className="font-semibold">Condição:</span> <span>{getConditionLabel(iphone.condition)}</span></p>
+                        <p><span className="font-semibold">Status:</span> {String(iphone.condition || '').startsWith('lacrado') ? 'Novo / Lacrado' : 'Seminovo / Usado'}</p>
                       </>
                     ) : (
                       <>
                         <p><span className="font-semibold">Modelo:</span> {consoleItem?.model}</p>
                         <p><span className="font-semibold">Versão:</span> {consoleItem?.version}</p>
-                        <p><span className="font-semibold">Condição:</span> <span className="capitalize">{consoleItem?.condition || 'Seminovo'}</span></p>
-                        <p><span className="font-semibold">Status:</span> {consoleItem?.condition === 'lacrado' ? 'Novo/Lacrado' : 'Seminovo/Usado'}</p>
+                        {consoleItem?.ram && <p><span className="font-semibold">Memória RAM:</span> {consoleItem.ram}</p>}
+                        <p><span className="font-semibold">Condição:</span> <span>{getConditionLabel(consoleItem?.condition)}</span></p>
+                        <p><span className="font-semibold">Status:</span> {String(consoleItem?.condition || '').startsWith('lacrado') ? 'Novo / Lacrado' : 'Seminovo / Usado'}</p>
                       </>
                     )}
                   </div>

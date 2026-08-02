@@ -4,6 +4,7 @@ import { Console } from '../types';
 import { formatBRL } from '../lib/formatCurrency';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { getConditionLabel } from '../lib/utils';
 
 interface ConsoleTableProps {
   consoles: Console[];
@@ -30,6 +31,7 @@ export default function ConsoleTable({ consoles, onEdit, onDelete }: ConsoleTabl
             <th className="px-4 py-3 font-medium">Categoria</th>
             <th className="px-4 py-3 font-medium">Modelo / Marca</th>
             <th className="px-4 py-3 font-medium">Versão / Detalhes</th>
+            <th className="px-4 py-3 font-medium">RAM</th>
             <th className="px-4 py-3 font-medium">Condição</th>
             <th className="px-4 py-3 font-medium">Preço (Compra)</th>
             <th className="px-4 py-3 font-medium">Data</th>
@@ -47,11 +49,12 @@ export default function ConsoleTable({ consoles, onEdit, onDelete }: ConsoleTabl
               </td>
               <td className="px-4 py-3 font-medium">{console.model}</td>
               <td className="px-4 py-3">{console.version}</td>
+              <td className="px-4 py-3">{console.ram || '-'}</td>
               <td className="px-4 py-3">
                 <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                  console.condition === 'lacrado' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-700 border border-slate-200'
+                  String(console.condition || '').startsWith('lacrado') ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-700 border border-slate-200'
                 }`}>
-                  {console.condition === 'lacrado' ? 'Lacrado' : 'Seminovo'}
+                  {getConditionLabel(console.condition)}
                 </span>
               </td>
               <td className="px-4 py-3">{formatBRL(console.buy_price)}</td>

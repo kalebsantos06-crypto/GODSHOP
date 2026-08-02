@@ -6,6 +6,8 @@ import { db } from '../services/db';
 import { Plus, Trash2, Phone, Edit2, MessageCircle, Link as LinkIcon, Copy, Check, Mail, FileText, MapPin, Eye, Shield, Laptop, Calendar, User, Info, Smartphone, FileSpreadsheet, X, Sparkles, ZoomIn, ZoomOut, RotateCw, Printer, Download, CreditCard, ExternalLink, Lock, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
+import WhatsAppStatusModal from '../components/WhatsAppStatusModal';
+import { WhatsAppStatusType } from '../lib/whatsappUtils';
 import { useAuth } from '../types/AuthContext';
 
 export default function Clients() {
@@ -15,6 +17,11 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState<any>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // WhatsApp Status Modal States
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [statusClientData, setStatusClientData] = useState<{ name: string; phone: string; itemName?: string } | null>(null);
+  const [statusDefaultType, setStatusDefaultType] = useState<WhatsAppStatusType>('registration');
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPreviewClient, setSelectedPreviewClient] = useState<any>(null);
@@ -933,15 +940,21 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                     <Phone className="h-4 w-4" />
                     <span className="text-sm">{client.phone}</span>
                   </div>
-                  <a 
-                    href={`https://wa.me/55${client.phone.replace(/\D/g, '')}`} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="bg-emerald-500 text-white p-2 rounded-full hover:bg-emerald-600 transition-colors shadow-sm"
-                    title="Enviar WhatsApp"
+                  <button 
+                    onClick={() => {
+                      setStatusClientData({
+                        name: client.name,
+                        phone: client.phone
+                      });
+                      setStatusDefaultType('registration');
+                      setStatusModalOpen(true);
+                    }}
+                    className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl hover:bg-emerald-500 transition-all shadow-sm flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+                    title="Avisar Status via WhatsApp (Cadastro, Pedido, Entrega)"
                   >
-                    <MessageCircle className="h-4 w-4" />
-                  </a>
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    <span>Avisar Status</span>
+                  </button>
                 </div>
                 {client.cpf && (
                   <div className="text-sm">
@@ -1065,15 +1078,21 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="font-semibold text-sm text-neutral-200">{selectedPreviewClient.phone || 'Não informado'}</span>
                       {selectedPreviewClient.phone && (
-                        <a 
-                          href={`https://wa.me/55${selectedPreviewClient.phone.replace(/\D/g, '')}`} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="bg-emerald-500 hover:bg-emerald-600 text-white p-1 rounded-full transition-colors shadow-sm"
-                          title="Iniciar conversa no WhatsApp"
+                        <button 
+                          onClick={() => {
+                            setStatusClientData({
+                              name: selectedPreviewClient.name,
+                              phone: selectedPreviewClient.phone
+                            });
+                            setStatusDefaultType('registration');
+                            setStatusModalOpen(true);
+                          }}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1 cursor-pointer"
+                          title="Avisar Status via WhatsApp"
                         >
-                          <MessageCircle className="h-3 w-3" />
-                        </a>
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          <span>Avisar Status</span>
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1445,6 +1464,16 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
           </div>
         </div>
       )}
+
+      {/* MODAL DE STATUS WHATSAPP */}
+      <WhatsAppStatusModal
+        isOpen={statusModalOpen}
+        onClose={() => setStatusModalOpen(false)}
+        clientName={statusClientData?.name || ''}
+        clientPhone={statusClientData?.phone || ''}
+        itemName={statusClientData?.itemName || ''}
+        defaultStatusType={statusDefaultType}
+      />
     </div>
   );
 }

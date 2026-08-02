@@ -181,7 +181,6 @@ export const db = {
 
             // CRITICAL: Proactively remove ALL known problematic columns that are NOT in the DB schema
             const salesCalculatedFields = [
-              'installments_paid', 
               'installments_list', 
               'client', 
               'iphone', 
@@ -421,7 +420,20 @@ export const db = {
         tryCacheUserIdFromRows(data);
         
         const local = getLocalData('iphones');
-        const merged = [...(data || []), ...local.filter(l => !data?.some(d => d.id === l.id))];
+        const localMap = new Map(local.map((item: any) => [item.id, item]));
+        const merged = (data || []).map((dbItem: any) => {
+          const localItem = localMap.get(dbItem.id);
+          if (localItem) {
+            return { ...localItem, ...dbItem, ram: dbItem.ram || localItem.ram || '' };
+          }
+          return dbItem;
+        });
+        local.forEach((l: any) => {
+          if (!merged.some((m: any) => m.id === l.id)) {
+            merged.push(l);
+          }
+        });
+
         setLocalData('iphones', merged);
         return merged as iPhone[];
       } catch (err: any) {
@@ -443,15 +455,25 @@ export const db = {
         let { data: newItem, error } = await supabase.from('iphones').insert(insertData).select().single();
         
         if (error) {
-          const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+          const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('column');
           if (isColumnError) {
-            const { user_id, ...cleanData } = insertData;
+            const match = error.message?.match(/"([^"]+)"/);
+            if (match && match[1]) {
+              if (!missingColumnsByTable['iphones']) missingColumnsByTable['iphones'] = new Set();
+              missingColumnsByTable['iphones'].add(match[1]);
+            }
+            const cleanData = { ...insertData };
+            delete cleanData.user_id;
+            if (match && match[1]) delete cleanData[match[1]];
+            delete cleanData.ram;
+
             const { data: retryItem, error: retryError } = await supabase.from('iphones').insert(cleanData).select().single();
             if (!retryError) {
-              newItem = retryItem;
+              newItem = { ...insertData, ...retryItem };
               error = null;
             } else {
-              error = retryError;
+              newItem = { ...insertData };
+              error = null;
             }
           }
         }
@@ -459,26 +481,25 @@ export const db = {
         if (error) {
           if (error.code === '42501' || error.message?.includes('row-level security')) {
             console.warn('RLS Violation on iphones table. Falling back to local storage.', error);
-            const fallbackItem = { ...insertData } as iPhone;
-            const local = getLocalData('iphones');
-            setLocalData('iphones', [...local, fallbackItem]);
-            return fallbackItem;
           }
-          throw error;
+          const fallbackItem = { ...insertData } as iPhone;
+          const local = getLocalData('iphones');
+          setLocalData('iphones', [...local, fallbackItem]);
+          return fallbackItem;
         }
 
+        const itemToReturn = { ...insertData, ...newItem };
         const local = getLocalData('iphones');
-        setLocalData('iphones', [...local, newItem]);
-        return newItem as iPhone;
+        setLocalData('iphones', [...local, itemToReturn]);
+        return itemToReturn as iPhone;
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
-          const newItem = { ...data, id } as iPhone;
-          const local = getLocalData('iphones');
-          setLocalData('iphones', [...local, newItem]);
-          return newItem;
         }
-        throw err;
+        const newItem = { ...data, id } as iPhone;
+        const local = getLocalData('iphones');
+        setLocalData('iphones', [...local, newItem]);
+        return newItem;
       }
     },
     update: async (id: string, data: Partial<iPhone>) => {
@@ -996,7 +1017,7 @@ export const db = {
         const merged = (data || []).map((dbItem: any) => {
           const localItem = localMap.get(dbItem.id);
           if (localItem) {
-            return { ...dbItem, ...localItem };
+            return { ...localItem, ...dbItem, ram: dbItem.ram || localItem.ram || '' };
           }
           return dbItem;
         });
@@ -1027,15 +1048,25 @@ export const db = {
         let { data: newItem, error } = await supabase.from('consoles').insert(insertData).select().single();
         
         if (error) {
-          const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+          const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('column');
           if (isColumnError) {
-            const { user_id, ...cleanData } = insertData;
+            const match = error.message?.match(/"([^"]+)"/);
+            if (match && match[1]) {
+              if (!missingColumnsByTable['consoles']) missingColumnsByTable['consoles'] = new Set();
+              missingColumnsByTable['consoles'].add(match[1]);
+            }
+            const cleanData = { ...insertData };
+            delete cleanData.user_id;
+            if (match && match[1]) delete cleanData[match[1]];
+            delete cleanData.ram;
+
             const { data: retryItem, error: retryError } = await supabase.from('consoles').insert(cleanData).select().single();
             if (!retryError) {
-              newItem = retryItem;
+              newItem = { ...insertData, ...retryItem };
               error = null;
             } else {
-              error = retryError;
+              newItem = { ...insertData };
+              error = null;
             }
           }
         }
@@ -1043,26 +1074,25 @@ export const db = {
         if (error) {
           if (error.code === '42501' || error.message?.includes('row-level security')) {
             console.warn('RLS Violation on consoles table. Falling back to local storage.', error);
-            const fallbackItem = { ...insertData } as Console;
-            const local = getLocalData('consoles');
-            setLocalData('consoles', [...local, fallbackItem]);
-            return fallbackItem;
           }
-          throw error;
+          const fallbackItem = { ...insertData } as Console;
+          const local = getLocalData('consoles');
+          setLocalData('consoles', [...local, fallbackItem]);
+          return fallbackItem;
         }
 
+        const itemToReturn = { ...insertData, ...newItem };
         const local = getLocalData('consoles');
-        setLocalData('consoles', [...local, newItem]);
-        return newItem as Console;
+        setLocalData('consoles', [...local, itemToReturn]);
+        return itemToReturn as Console;
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
-          const newItem = { ...data, id } as Console;
-          const local = getLocalData('consoles');
-          setLocalData('consoles', [...local, newItem]);
-          return newItem;
         }
-        throw err;
+        const newItem = { ...data, id } as Console;
+        const local = getLocalData('consoles');
+        setLocalData('consoles', [...local, newItem]);
+        return newItem;
       }
     },
     update: async (id: string, data: Partial<Console>) => {
@@ -1220,10 +1250,17 @@ export const db = {
         // 1. Start with database items and enrich them with local data (canonical)
         const enrichedFromDb = (data || []).map(row => {
           const localItem = localData.find(item => item.id === row.id);
+          const instPaid = (row.installments_paid !== undefined && row.installments_paid !== null)
+            ? row.installments_paid
+            : (localItem?.installments_paid ?? 0);
+          const customPayments = row.custom_payments || localItem?.custom_payments;
+
           return {
             ...localItem,
             ...row,
-            installment_frequency: localItem?.installment_frequency || row.installment_frequency || 'Mensal',
+            installments_paid: instPaid,
+            custom_payments: customPayments,
+            installment_frequency: row.installment_frequency || localItem?.installment_frequency || 'Mensal',
             first_installment_date: row.first_installment_date || localItem?.first_installment_date
           };
         });
@@ -1258,8 +1295,8 @@ export const db = {
       }
       data.installment_frequency = freq as any;
       
-      // Proactively separate client-only properties to prevent any Supabase schema mismatch/retry warnings
-      const { installments_paid, ...cleanDataForDb } = data as any;
+      // Separate client-only nested objects to prevent schema mismatch warnings
+      const { client, iphone, console: consoleObj, supplier, ...cleanDataForDb } = data as any;
       const insertData = { ...cleanDataForDb, id } as any;
 
       // Remove any known missing columns to avoid query failures
@@ -1312,7 +1349,12 @@ export const db = {
 
         // Keep local cache in sync query
         const localSales = getLocalData('sales');
-        const localNewItem = { ...newItem, first_installment_date: data.first_installment_date, installments_paid };
+        const localNewItem = { 
+          ...newItem, 
+          first_installment_date: data.first_installment_date, 
+          installments_paid: data.installments_paid || 0,
+          custom_payments: data.custom_payments
+        };
         setLocalData('sales', [...localSales, localNewItem]);
 
         if (data.iphone_id) {
@@ -1422,8 +1464,8 @@ export const db = {
           }
         }
 
-        // Proactively separate client-only properties to prevent any Supabase schema mismatch/retry warnings
-        const { installments_paid, ...cleanDataForDb } = data as any;
+        // Separate client-only nested objects to prevent schema mismatch warnings
+        const { client, iphone, console: consoleObj, supplier, ...cleanDataForDb } = data as any;
 
         // Remove any known missing columns to avoid query failures
         if (missingColumnsByTable['sales']) {

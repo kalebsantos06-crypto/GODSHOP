@@ -2,13 +2,14 @@ export interface iPhone {
   id: string;
   model: string;
   storage: string;
+  ram?: string;
   color: string;
   buy_price: number;
   imei?: string;
   supplier_id: string;
   buy_date: string;
   status: 'disponivel' | 'vendido';
-  condition: 'lacrado' | 'seminovo';
+  condition: 'lacrado_3m' | 'lacrado_6m' | 'lacrado_1ano' | 'lacrado' | 'seminovo_3m' | 'seminovo_6m' | 'seminovo_1ano' | 'seminovo' | string;
 }
 
 export interface Client {
@@ -50,10 +51,11 @@ export interface Console {
   id: string;
   model: string;
   version: string;
+  ram?: string;
   buy_price: number;
   buy_date: string;
   status: 'disponivel' | 'vendido';
-  condition: 'lacrado' | 'seminovo';
+  condition: 'lacrado_3m' | 'lacrado_6m' | 'lacrado_1ano' | 'lacrado' | 'seminovo_3m' | 'seminovo_6m' | 'seminovo_1ano' | 'seminovo' | string;
   category?: string;
 }
 
@@ -73,6 +75,7 @@ export interface Sale {
   signed_at?: string;
   signed_ip?: string;
   installments_paid?: number;
+  custom_payments?: string | Record<number, number>;
 }
 
 export interface PriceTableItem {

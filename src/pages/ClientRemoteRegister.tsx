@@ -24,8 +24,10 @@ import {
   RotateCw,
   Shield,
   CreditCard,
-  Sparkles
+  Sparkles,
+  MessageCircle
 } from 'lucide-react';
+import { getSavedStatusTemplate, formatStatusMessage, buildWhatsAppUrl } from '../lib/whatsappUtils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -745,6 +747,21 @@ export default function ClientRemoteRegister() {
               </p>
             </div>
           </div>
+
+          {/* WhatsApp Success Notification Button */}
+          {phone && (
+            <div className="pt-2">
+              <a
+                href={buildWhatsAppUrl(phone, formatStatusMessage(getSavedStatusTemplate('registration'), { clientName: name || 'Cliente' }))}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm py-3.5 px-6 rounded-2xl transition duration-200 shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2.5"
+              >
+                <MessageCircle className="h-5 w-5" />
+                <span>Confirmar Cadastro via WhatsApp</span>
+              </a>
+            </div>
+          )}
 
           {/* Elegant Footer Disclaimer */}
           <div className="space-y-4 pt-2">

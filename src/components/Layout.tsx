@@ -12,26 +12,9 @@ import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
 import { db } from '../services/db';
 import { useQuery } from '@tanstack/react-query';
-import { parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, getCalculatedInstallments, getSaleNotifications, NotificationItem } from '../lib/dateUtils';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 import { formatBRL } from '../lib/formatCurrency';
-
-interface NotificationItem {
-  id: string;
-  clientName: string;
-  clientPhone: string;
-  itemName: string;
-  installmentIndex: number;
-  expectedAmount: number;
-  dueDate: Date;
-  status: 'fully_paid' | 'pending';
-  daysDiff: number;
-  saleId: string;
-  saleData: any;
-  clientData: any;
-  iphoneData: any;
-  consoleData: any;
-}
 
 export default function Layout() {
   const location = useLocation();
@@ -88,176 +71,14 @@ export default function Layout() {
     enabled: isAuthenticated
   });
 
-  // Installment helpers
-  const getInstallmentDate = (sale: any, index: number) => {
-    const baseDate = sale.first_installment_date ? parseLocalDate(sale.first_installment_date) : parseLocalDate(sale.sale_date);
-    const intervalMultiplier = sale.first_installment_date ? (index - 1) : index;
-    if (sale.installment_frequency === 'Semanal') {
-      return addDays(baseDate, intervalMultiplier * 7);
-    } else if (sale.installment_frequency === 'Quinzenal') {
-      return addDays(baseDate, intervalMultiplier * 15);
-    } else {
-      return addMonths(baseDate, intervalMultiplier);
-    }
-  };
-
-  const getCalculatedInstallments = (
-    sale: any,
-    customPayments: { [key: number]: number }
-  ) => {
-    if (!sale) return [];
-    const totalAmount = sale.sell_price - (sale.down_payment || 0);
-    const baseInstCount = sale.installments || 1;
-
-    const list: {
-      index: number;
-      expectedAmount: number;
-      paidAmount: number;
-      dueDate: Date;
-      status: 'fully_paid' | 'pending';
-    }[] = [];
-    
-    let totalPaid = 0;
-    const paidIndices: number[] = [];
-    const unpaidIndices: number[] = [];
-
-    for (let i = 1; i <= baseInstCount; i++) {
-      const p = customPayments[i] || 0;
-      if (p > 0.005) {
-        totalPaid += p;
-        paidIndices.push(i);
-      } else {
-        unpaidIndices.push(i);
-      }
-    }
-
-    let remainingUnpaid = totalAmount - totalPaid;
-    let extraIndex = baseInstCount + 1;
-    while (true) {
-      const p = customPayments[extraIndex] || 0;
-      if (p > 0.005) {
-        totalPaid += p;
-        remainingUnpaid = totalAmount - totalPaid;
-        paidIndices.push(extraIndex);
-        extraIndex++;
-      } else {
-        break;
-      }
-    }
-
-    if (remainingUnpaid > 0.01 && unpaidIndices.length === 0) {
-      unpaidIndices.push(extraIndex);
-    }
-
-    const allIndices = Array.from(new Set([...paidIndices, ...unpaidIndices])).sort((a, b) => a - b);
-
-    if (unpaidIndices.length > 0) {
-      const expectedPerUnpaid = Number((remainingUnpaid / unpaidIndices.length).toFixed(2));
-      const totalPaidExpected = paidIndices.reduce((sum, idx) => sum + (customPayments[idx] || 0), 0);
-      const countExceptLast = unpaidIndices.length - 1;
-      const sumExceptLast = countExceptLast * expectedPerUnpaid;
-      const lastUnpaidIndex = unpaidIndices[unpaidIndices.length - 1];
-      const lastExpected = Number((totalAmount - totalPaidExpected - sumExceptLast).toFixed(2));
-      
-      const expectedMap: { [key: number]: number } = {};
-      for (const idx of paidIndices) {
-        expectedMap[idx] = customPayments[idx] || 0;
-      }
-      for (let i = 0; i < unpaidIndices.length - 1; i++) {
-        expectedMap[unpaidIndices[i]] = expectedPerUnpaid;
-      }
-      expectedMap[lastUnpaidIndex] = lastExpected;
-
-      for (const idx of allIndices) {
-        const isPaid = paidIndices.includes(idx);
-        const paidVal = customPayments[idx] || 0;
-        const expectedVal = expectedMap[idx];
-
-        list.push({
-          index: idx,
-          expectedAmount: expectedVal,
-          paidAmount: paidVal,
-          dueDate: getInstallmentDate(sale, idx),
-          status: isPaid ? 'fully_paid' : 'pending'
-        });
-      }
-    } else {
-      for (const idx of allIndices) {
-        const paidVal = customPayments[idx] || 0;
-        list.push({
-          index: idx,
-          expectedAmount: paidVal,
-          paidAmount: paidVal,
-          dueDate: getInstallmentDate(sale, idx),
-          status: 'fully_paid'
-        });
-      }
-    }
-
-    return list;
-  };
-
-  // Compile notifications list
-  const notifications: NotificationItem[] = [];
-  
-  if (isAuthenticated && salesList && salesList.length > 0) {
-    const today = startOfDay(new Date());
-    
-    for (const sale of salesList) {
-      if (!sale.installments || sale.installments <= 1) continue;
-      
-      let customPayments: { [key: number]: number } = {};
-      try {
-        const stored = localStorage.getItem(`inst_payments_${sale.id}`);
-        if (stored) {
-          customPayments = JSON.parse(stored);
-        } else {
-          const instAmount = Number(((sale.sell_price - (sale.down_payment || 0)) / sale.installments).toFixed(2));
-          for (let i = 1; i <= sale.installments; i++) {
-            customPayments[i] = i <= (sale.installments_paid || 0) ? instAmount : 0;
-          }
-        }
-      } catch (e) {
-        console.error('Error parsing custom payments:', e);
-      }
-      
-      const calculatedList = getCalculatedInstallments(sale, customPayments);
-      const client = clientsList.find((c: any) => c.id === sale.client_id);
-      const iphone = iphonesList.find((p: any) => p.id === sale.iphone_id);
-      const consoleObj = consolesList.find((p: any) => p.id === sale.console_id);
-      
-      const categoryName = consoleObj ? (consoleObj.category === 'tv' ? 'TV' : (consoleObj.category === 'rice_cooker' ? 'Panela Elétrica' : (consoleObj.category === 'outro' ? 'Eletro' : 'Console'))) : 'Aparelho';
-      const itemName = iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${categoryName} ${consoleObj.model} - ${consoleObj.version}` : 'Aparelho');
-      
-      for (const inst of calculatedList) {
-        if (inst.status === 'pending') {
-          const dueDay = startOfDay(inst.dueDate);
-          const daysDiff = differenceInDays(dueDay, today);
-          
-          notifications.push({
-            id: `${sale.id}_inst_${inst.index}`,
-            clientName: client?.name || 'Cliente Sem Nome',
-            clientPhone: client?.phone ? client.phone.replace(/\D/g, '') : '',
-            itemName,
-            installmentIndex: inst.index,
-            expectedAmount: inst.expectedAmount,
-            dueDate: inst.dueDate,
-            status: inst.status,
-            daysDiff,
-            saleId: sale.id,
-            saleData: sale,
-            clientData: client,
-            iphoneData: iphone,
-            consoleData: consoleObj
-          });
-        }
-      }
-    }
-  }
+  // Compile notifications list using unified real-time calculation engine
+  const notifications: NotificationItem[] = isAuthenticated 
+    ? getSaleNotifications(salesList || [], clientsList || [], iphonesList || [], consolesList || []) 
+    : [];
 
   // Filter notifications
-  const recentNotifications = notifications.filter(n => n.daysDiff <= 3).sort((a, b) => a.daysDiff - b.daysDiff);
-  const allNotifications = notifications.sort((a, b) => a.daysDiff - b.daysDiff);
+  const recentNotifications = notifications.filter(n => n.daysDiff <= 3);
+  const allNotifications = notifications;
   const badgeCount = recentNotifications.length;
 
   // Request native phone push permission

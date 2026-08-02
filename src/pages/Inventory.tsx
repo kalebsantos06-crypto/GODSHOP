@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
+import { getConditionLabel } from '../lib/utils';
 
 export default function Inventory() {
   const queryClient = useQueryClient();
@@ -58,6 +59,7 @@ export default function Inventory() {
     const data = {
       model: formData.get('model'),
       storage: formData.get('storage'),
+      ram: formData.get('ram') || '',
       color: formData.get('color'),
       condition: formData.get('condition'),
       buy_price: Number(formData.get('buy_price')),
@@ -100,7 +102,7 @@ export default function Inventory() {
       {(isAdding || editingIphone) && (
         <div className="bg-card border rounded-xl p-6 shadow-sm">
           <h2 className="text-lg font-semibold mb-4">{editingIphone ? 'Editar Aparelho' : 'Novo Aparelho'}</h2>
-          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <form key={editingIphone?.id || 'new-iphone'} onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Modelo</label>
               <input name="model" defaultValue={editingIphone?.model} required className="w-full p-2 border rounded-md" placeholder="Ex: iPhone 13" />
@@ -116,14 +118,42 @@ export default function Inventory() {
               </select>
             </div>
             <div className="space-y-2">
+              <label className="text-sm font-medium">Memória RAM</label>
+              <input 
+                name="ram" 
+                defaultValue={editingIphone?.ram} 
+                className="w-full p-2 border rounded-md" 
+                placeholder="Ex: 6GB, 8GB..." 
+                list="ram-options"
+              />
+              <datalist id="ram-options">
+                <option value="3GB" />
+                <option value="4GB" />
+                <option value="6GB" />
+                <option value="8GB" />
+                <option value="12GB" />
+                <option value="16GB" />
+                <option value="24GB" />
+                <option value="32GB" />
+              </datalist>
+            </div>
+            <div className="space-y-2">
               <label className="text-sm font-medium">Cor</label>
               <input name="color" defaultValue={editingIphone?.color} required className="w-full p-2 border rounded-md" placeholder="Ex: Midnight" />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Condição</label>
-              <select name="condition" defaultValue={editingIphone?.condition || 'seminovo'} required className="w-full p-2 border rounded-md bg-background">
-                <option value="lacrado">Lacrado (1 Ano)</option>
-                <option value="seminovo">Seminovo (6 Meses)</option>
+              <label className="text-sm font-medium">Condição / Garantia</label>
+              <select name="condition" defaultValue={editingIphone?.condition || 'seminovo_6m'} required className="w-full p-2 border rounded-md bg-background">
+                <optgroup label="Lacrado / Novo">
+                  <option value="lacrado_3m">Lacrado (3 Meses de Garantia)</option>
+                  <option value="lacrado_6m">Lacrado (6 Meses de Garantia)</option>
+                  <option value="lacrado_1ano">Lacrado (1 Ano de Garantia)</option>
+                </optgroup>
+                <optgroup label="Seminovo / Usado">
+                  <option value="seminovo_3m">Seminovo (3 Meses de Garantia)</option>
+                  <option value="seminovo_6m">Seminovo (6 Meses de Garantia)</option>
+                  <option value="seminovo_1ano">Seminovo (1 Ano de Garantia)</option>
+                </optgroup>
               </select>
             </div>
             <div className="space-y-2">
@@ -162,6 +192,7 @@ export default function Inventory() {
               <tr>
                 <th className="px-4 py-3 font-medium">Modelo</th>
                 <th className="px-4 py-3 font-medium">Armazenamento</th>
+                <th className="px-4 py-3 font-medium">RAM</th>
                 <th className="px-4 py-3 font-medium">IMEI</th>
                 <th className="px-4 py-3 font-medium">Condição</th>
                 <th className="px-4 py-3 font-medium">Cor</th>
@@ -176,12 +207,13 @@ export default function Inventory() {
                 <tr key={iphone.id} className="hover:bg-muted/50">
                   <td className="px-4 py-3 font-medium">{iphone.model}</td>
                   <td className="px-4 py-3">{iphone.storage}</td>
+                  <td className="px-4 py-3">{iphone.ram || '-'}</td>
                   <td className="px-4 py-3 font-mono text-xs">{iphone.imei || 'N/A'}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${
-                      iphone.condition === 'lacrado' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-700 border border-slate-200'
+                      String(iphone.condition || '').startsWith('lacrado') ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-700 border border-slate-200'
                     }`}>
-                      {iphone.condition === 'lacrado' ? 'Lacrado' : 'Seminovo'}
+                      {getConditionLabel(iphone.condition)}
                     </span>
                   </td>
                   <td className="px-4 py-3">{iphone.color}</td>

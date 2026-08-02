@@ -4,7 +4,7 @@
  */
 
 import { useEffect } from 'react';
-import { HashRouter, Routes, Route, useSearchParams } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/Layout';
@@ -43,6 +43,22 @@ function checkAndRedirectPublicUrls(): boolean {
   const pathname = window.location.pathname;
   const search = window.location.search;
   const hash = window.location.hash;
+
+  // Check if opening a public standalone page
+  const isPublicPage = 
+    hash.includes('cadastro-cliente') || 
+    hash.includes('assinar') || 
+    pathname.includes('cadastro-cliente') || 
+    pathname.includes('assinar') ||
+    search.includes('token') ||
+    search.includes('assinatura');
+
+  if (!isPublicPage) {
+    // Force starting on Dashboard (/#/) whenever page is reloaded or opened fresh
+    if (!hash || hash === '#' || hash !== '#/') {
+      window.location.hash = '#/';
+    }
+  }
 
   if (!hash) {
     const origin = window.location.origin;
@@ -130,6 +146,7 @@ function AppContent() {
             <Route path="guarantee/:id" element={<GuaranteeNote />} />
           </Route>
         </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );
