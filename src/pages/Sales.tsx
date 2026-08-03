@@ -274,6 +274,7 @@ export default function Sales() {
     const iphoneId = formData.get('iphone_id');
     const consoleId = formData.get('console_id');
     const firstInstallmentDate = formData.get('first_installment_date');
+    const cleanFirstDate = firstInstallmentDate && typeof firstInstallmentDate === 'string' && firstInstallmentDate.trim() !== '' ? firstInstallmentDate.toString().trim() : null;
 
     updateMutation.mutate({
       id: editingSale.id,
@@ -287,7 +288,7 @@ export default function Sales() {
         installments: Number(formData.get('installments')) || 1,
         installment_frequency: (formData.get('installment_frequency') as 'Semanal' | 'Quinzenal' | 'Mensal') || 'Mensal',
         sale_date: formData.get('sale_date') ? (formData.get('sale_date') as string) : editingSale.sale_date,
-        first_installment_date: firstInstallmentDate ? (firstInstallmentDate as string) : null,
+        first_installment_date: cleanFirstDate,
       }
     });
   };
@@ -486,7 +487,7 @@ export default function Sales() {
                 <input 
                   name="first_installment_date" 
                   type="date" 
-                  defaultValue={editingSale?.first_installment_date ? format(parseLocalDate(editingSale.first_installment_date), 'yyyy-MM-dd') : ''} 
+                  defaultValue={editingSale?.first_installment_date ? format(parseLocalDate(editingSale.first_installment_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
                   required 
                   className="w-full p-2 border rounded-md bg-background" 
                 />

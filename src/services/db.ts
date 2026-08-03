@@ -1255,13 +1255,16 @@ export const db = {
             : (localItem?.installments_paid ?? 0);
           const customPayments = row.custom_payments || localItem?.custom_payments;
 
+          const instFreq = localItem?.installment_frequency || row.installment_frequency || 'Mensal';
+          const firstInstDate = localItem?.first_installment_date || row.first_installment_date;
+
           return {
             ...localItem,
             ...row,
             installments_paid: instPaid,
             custom_payments: customPayments,
-            installment_frequency: row.installment_frequency || localItem?.installment_frequency || 'Mensal',
-            first_installment_date: row.first_installment_date || localItem?.first_installment_date
+            installment_frequency: instFreq,
+            first_installment_date: firstInstDate
           };
         });
 
@@ -1314,14 +1317,28 @@ export const db = {
         // 1. Create the sale
         let newItem;
         try {
-          const { data: resData, error: saleError } = await supabase.from('sales').insert(insertData).select().single();
+          let { data: resData, error: saleError } = await supabase.from('sales').insert(insertData).select().single();
           
           if (saleError) {
-            const isRLSError = saleError.code === '42501' || saleError.message?.includes('row-level security');
-            if (isRLSError) {
-              newItem = { ...insertData };
+            if (saleError.code === '23514' || saleError.message?.includes('installment_frequency')) {
+              console.warn('DB constraint violation on insert installment_frequency, retrying insert with Mensal fallback...');
+              const retryInsert = { ...insertData, installment_frequency: 'Mensal' };
+              const { data: retryRes } = await supabase.from('sales').insert(retryInsert).select().single();
+              newItem = retryRes ? { ...retryRes, installment_frequency: insertData.installment_frequency } : { ...insertData };
+            } else if (saleError.code === '42703' || saleError.message?.includes('column')) {
+              const match = saleError.message?.match(/"([^"]+)"/) || saleError.message?.match(/column ['"](.+?)['"]/);
+              if (match && match[1]) {
+                if (!missingColumnsByTable['sales']) missingColumnsByTable['sales'] = new Set();
+                missingColumnsByTable['sales'].add(match[1]);
+                const retryInsert = { ...insertData };
+                delete retryInsert[match[1]];
+                const { data: retryRes } = await supabase.from('sales').insert(retryInsert).select().single();
+                newItem = retryRes ? { ...retryRes, installment_frequency: insertData.installment_frequency } : { ...insertData };
+              } else {
+                newItem = { ...insertData };
+              }
             } else {
-              throw saleError;
+              newItem = { ...insertData };
             }
           } else {
             newItem = resData;
@@ -1467,6 +1484,11 @@ export const db = {
         // Separate client-only nested objects to prevent schema mismatch warnings
         const { client, iphone, console: consoleObj, supplier, ...cleanDataForDb } = data as any;
 
+        // Ensure date fields are properly formatted or null
+        if (cleanDataForDb.first_installment_date === "") {
+          cleanDataForDb.first_installment_date = null;
+        }
+
         // Remove any known missing columns to avoid query failures
         if (missingColumnsByTable['sales']) {
           for (const col of missingColumnsByTable['sales']) {
@@ -1478,7 +1500,28 @@ export const db = {
           let salesUpdateQuery = supabase.from('sales').update(cleanDataForDb).eq('id', id);
           if (userId) salesUpdateQuery = salesUpdateQuery.eq('user_id', userId);
           const { error } = await salesUpdateQuery;
-          if (error) throw error;
+          if (error) {
+            if (error.code === '23514' || error.message?.includes('installment_frequency')) {
+              console.warn('DB constraint error on installment_frequency, retrying with Mensal for DB...');
+              const retryClean = { ...cleanDataForDb, installment_frequency: 'Mensal' };
+              let retryQuery = supabase.from('sales').update(retryClean).eq('id', id);
+              if (userId) retryQuery = retryQuery.eq('user_id', userId);
+              await retryQuery;
+            } else if (error.code === '42703' || error.message?.includes('column')) {
+              const match = error.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
+              if (match && match[1]) {
+                if (!missingColumnsByTable['sales']) missingColumnsByTable['sales'] = new Set();
+                missingColumnsByTable['sales'].add(match[1]);
+                const retryClean = { ...cleanDataForDb };
+                delete retryClean[match[1]];
+                let retryQuery = supabase.from('sales').update(retryClean).eq('id', id);
+                if (userId) retryQuery = retryQuery.eq('user_id', userId);
+                await retryQuery;
+              }
+            } else {
+              console.warn('Failed to update sale in Supabase:', error);
+            }
+          }
         } catch (dbErr) {
           console.warn('Failed to update sale in Supabase, continuing with local updates:', dbErr);
         }
