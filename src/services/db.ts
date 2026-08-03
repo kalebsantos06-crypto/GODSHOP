@@ -304,8 +304,24 @@ export const db = {
         const { data, error } = await query.order('model', { ascending: true });
         if (error) throw error;
         tryCacheUserIdFromRows(data);
-        setLocalData('prices', data || []);
-        return data as PriceTableItem[];
+
+        const local = getLocalData('prices');
+        const localMap = new Map(local.map((item: any) => [item.id, item]));
+        const merged = (data || []).map((dbItem: any) => {
+          const localItem = localMap.get(dbItem.id);
+          if (localItem) {
+            return { ...dbItem, ...localItem };
+          }
+          return dbItem;
+        });
+        local.forEach((l: any) => {
+          if (!merged.some((m: any) => m.id === l.id)) {
+            merged.push(l);
+          }
+        });
+
+        setLocalData('prices', merged);
+        return merged as PriceTableItem[];
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -341,7 +357,6 @@ export const db = {
     },
     update: async (id: string, data: Partial<PriceTableItem>) => {
       try {
-        const userId = await getCurrentUserId();
         const updateData = { ...data } as any;
 
         if (missingColumnsByTable['prices']) {
@@ -351,15 +366,11 @@ export const db = {
         }
 
         try {
-          let query = supabase.from('prices').update(updateData).eq('id', id);
-          if (userId) {
-            query = query.eq('user_id', userId);
-          }
-          const { error } = await query;
+          const { error } = await supabase.from('prices').update(updateData).eq('id', id);
           if (error) {
-            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('column');
             if (isColumnError) {
-              const match = error.message?.match(/"([^"]+)"/);
+              const match = error.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
               if (match && match[1]) {
                 if (!missingColumnsByTable['prices']) missingColumnsByTable['prices'] = new Set();
                 missingColumnsByTable['prices'].add(match[1]);
@@ -424,7 +435,7 @@ export const db = {
         const merged = (data || []).map((dbItem: any) => {
           const localItem = localMap.get(dbItem.id);
           if (localItem) {
-            return { ...localItem, ...dbItem, ram: dbItem.ram || localItem.ram || '' };
+            return { ...dbItem, ...localItem, ram: localItem.ram || dbItem.ram || '' };
           }
           return dbItem;
         });
@@ -504,8 +515,9 @@ export const db = {
     },
     update: async (id: string, data: Partial<iPhone>) => {
       try {
-        const userId = await getCurrentUserId();
         const updateData = { ...data } as any;
+        delete updateData.client;
+        delete updateData.supplier;
 
         if (missingColumnsByTable['iphones']) {
           for (const col of missingColumnsByTable['iphones']) {
@@ -514,15 +526,11 @@ export const db = {
         }
 
         try {
-          let query = supabase.from('iphones').update(updateData).eq('id', id);
-          if (userId) {
-            query = query.eq('user_id', userId);
-          }
-          const { error } = await query;
+          const { error } = await supabase.from('iphones').update(updateData).eq('id', id);
           if (error) {
-            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('column');
             if (isColumnError) {
-              const match = error.message?.match(/"([^"]+)"/);
+              const match = error.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
               if (match && match[1]) {
                 if (!missingColumnsByTable['iphones']) missingColumnsByTable['iphones'] = new Set();
                 missingColumnsByTable['iphones'].add(match[1]);
@@ -754,7 +762,6 @@ export const db = {
     },
     update: async (id: string, data: Partial<Client>) => {
       try {
-        const userId = await getCurrentUserId();
         const updateData = { ...data } as any;
 
         if (missingColumnsByTable['clients']) {
@@ -764,11 +771,7 @@ export const db = {
         }
 
         try {
-          let query = supabase.from('clients').update(updateData).eq('id', id);
-          if (userId) {
-            query = query.eq('user_id', userId);
-          }
-          const { error } = await query;
+          const { error } = await supabase.from('clients').update(updateData).eq('id', id);
           if (error) {
             const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
             if (isColumnError) {
@@ -916,7 +919,6 @@ export const db = {
     },
     update: async (id: string, data: Partial<Supplier>) => {
       try {
-        const userId = await getCurrentUserId();
         const updateData = { ...data } as any;
 
         if (missingColumnsByTable['suppliers']) {
@@ -926,11 +928,7 @@ export const db = {
         }
 
         try {
-          let query = supabase.from('suppliers').update(updateData).eq('id', id);
-          if (userId) {
-            query = query.eq('user_id', userId);
-          }
-          const { error } = await query;
+          const { error } = await supabase.from('suppliers').update(updateData).eq('id', id);
           if (error) {
             const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
             if (isColumnError) {
@@ -1017,7 +1015,7 @@ export const db = {
         const merged = (data || []).map((dbItem: any) => {
           const localItem = localMap.get(dbItem.id);
           if (localItem) {
-            return { ...localItem, ...dbItem, ram: dbItem.ram || localItem.ram || '' };
+            return { ...dbItem, ...localItem, ram: localItem.ram || dbItem.ram || '' };
           }
           return dbItem;
         });
