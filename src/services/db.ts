@@ -216,10 +216,14 @@ export const db = {
             if (!error) break;
 
             // Handle specific error: Check Constraint Violation
-            if (error.code === '23514') {
+            if (error.code === '23514' || error.message?.includes('check constraint')) {
               if (table === 'sales' && error.message?.includes('installment_frequency')) {
                 cleanItem.installment_frequency = 'Mensal';
-                // Do not overwrite item.installment_frequency in local cache to preserve user choice locally
+                retryCount++;
+                continue;
+              }
+              if ((table === 'iphones' || table === 'consoles') && cleanItem.condition && cleanItem.condition.includes('_')) {
+                cleanItem.condition = cleanItem.condition.split('_')[0];
                 retryCount++;
                 continue;
               }
@@ -466,9 +470,27 @@ export const db = {
         let { data: newItem, error } = await supabase.from('iphones').insert(insertData).select().single();
         
         if (error) {
+          const isCheckConstraintError = error.code === '23514' || error.message?.includes('check constraint');
           const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('column');
-          if (isColumnError) {
-            const match = error.message?.match(/"([^"]+)"/);
+          
+          if (isCheckConstraintError) {
+             const cleanData = { ...insertData };
+             if (cleanData.condition && cleanData.condition.includes('_')) {
+                 cleanData.condition = cleanData.condition.split('_')[0];
+             } else {
+                 cleanData.condition = 'seminovo';
+             }
+             const { data: retryItem, error: retryError } = await supabase.from('iphones').insert(cleanData).select().single();
+             if (!retryError) {
+               newItem = { ...insertData, ...retryItem, condition: insertData.condition };
+               error = null;
+             } else {
+                error = retryError;
+             }
+          }
+          
+          if (error && isColumnError) {
+            const match = error.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
             if (match && match[1]) {
               if (!missingColumnsByTable['iphones']) missingColumnsByTable['iphones'] = new Set();
               missingColumnsByTable['iphones'].add(match[1]);
@@ -477,10 +499,15 @@ export const db = {
             delete cleanData.user_id;
             if (match && match[1]) delete cleanData[match[1]];
             delete cleanData.ram;
+            
+            // Just in case it also has a condition constraint
+            if (cleanData.condition && cleanData.condition.includes('_')) {
+                 cleanData.condition = cleanData.condition.split('_')[0];
+            }
 
             const { data: retryItem, error: retryError } = await supabase.from('iphones').insert(cleanData).select().single();
             if (!retryError) {
-              newItem = { ...insertData, ...retryItem };
+              newItem = { ...insertData, ...retryItem, condition: insertData.condition };
               error = null;
             } else {
               newItem = { ...insertData };
@@ -526,11 +553,23 @@ export const db = {
         }
 
         try {
+          let currentError = null;
           const { error } = await supabase.from('iphones').update(updateData).eq('id', id);
-          if (error) {
-            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('column');
+          currentError = error;
+          
+          if (currentError) {
+            const isCheckConstraintError = currentError.code === '23514' || currentError.message?.includes('check constraint');
+            if (isCheckConstraintError && updateData.condition && updateData.condition.includes('_')) {
+                updateData.condition = updateData.condition.split('_')[0];
+                const { error: retryError } = await supabase.from('iphones').update(updateData).eq('id', id);
+                currentError = retryError;
+            }
+          }
+          
+          if (currentError) {
+            const isColumnError = currentError.code === '42703' || currentError.message?.includes('user_id') || currentError.message?.includes('coluna') || currentError.message?.includes('column');
             if (isColumnError) {
-              const match = error.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
+              const match = currentError.message?.match(/"([^"]+)"/) || currentError.message?.match(/column ['"](.+?)['"]/);
               if (match && match[1]) {
                 if (!missingColumnsByTable['iphones']) missingColumnsByTable['iphones'] = new Set();
                 missingColumnsByTable['iphones'].add(match[1]);
@@ -1046,9 +1085,27 @@ export const db = {
         let { data: newItem, error } = await supabase.from('consoles').insert(insertData).select().single();
         
         if (error) {
+          const isCheckConstraintError = error.code === '23514' || error.message?.includes('check constraint');
           const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('column');
-          if (isColumnError) {
-            const match = error.message?.match(/"([^"]+)"/);
+          
+          if (isCheckConstraintError) {
+             const cleanData = { ...insertData };
+             if (cleanData.condition && cleanData.condition.includes('_')) {
+                 cleanData.condition = cleanData.condition.split('_')[0];
+             } else {
+                 cleanData.condition = 'seminovo';
+             }
+             const { data: retryItem, error: retryError } = await supabase.from('consoles').insert(cleanData).select().single();
+             if (!retryError) {
+               newItem = { ...insertData, ...retryItem, condition: insertData.condition };
+               error = null;
+             } else {
+                error = retryError;
+             }
+          }
+
+          if (error && isColumnError) {
+            const match = error.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
             if (match && match[1]) {
               if (!missingColumnsByTable['consoles']) missingColumnsByTable['consoles'] = new Set();
               missingColumnsByTable['consoles'].add(match[1]);
@@ -1057,10 +1114,15 @@ export const db = {
             delete cleanData.user_id;
             if (match && match[1]) delete cleanData[match[1]];
             delete cleanData.ram;
+            
+            // Just in case it also has a condition constraint
+            if (cleanData.condition && cleanData.condition.includes('_')) {
+                 cleanData.condition = cleanData.condition.split('_')[0];
+            }
 
             const { data: retryItem, error: retryError } = await supabase.from('consoles').insert(cleanData).select().single();
             if (!retryError) {
-              newItem = { ...insertData, ...retryItem };
+              newItem = { ...insertData, ...retryItem, condition: insertData.condition };
               error = null;
             } else {
               newItem = { ...insertData };
@@ -1105,11 +1167,23 @@ export const db = {
 
         try {
           // Direct update by unique ID
+          let currentError = null;
           const { error } = await supabase.from('consoles').update(updateData).eq('id', id);
-          if (error) {
-            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('category');
+          currentError = error;
+          
+          if (currentError) {
+            const isCheckConstraintError = currentError.code === '23514' || currentError.message?.includes('check constraint');
+            if (isCheckConstraintError && updateData.condition && updateData.condition.includes('_')) {
+                updateData.condition = updateData.condition.split('_')[0];
+                const { error: retryError } = await supabase.from('consoles').update(updateData).eq('id', id);
+                currentError = retryError;
+            }
+          }
+          
+          if (currentError) {
+            const isColumnError = currentError.code === '42703' || currentError.message?.includes('user_id') || currentError.message?.includes('coluna') || currentError.message?.includes('category');
             if (isColumnError) {
-              const match = error.message?.match(/"([^"]+)"/);
+              const match = currentError.message?.match(/"([^"]+)"/);
               if (match && match[1]) {
                 if (!missingColumnsByTable['consoles']) missingColumnsByTable['consoles'] = new Set();
                 missingColumnsByTable['consoles'].add(match[1]);
