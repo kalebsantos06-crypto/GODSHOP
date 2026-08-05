@@ -19,9 +19,9 @@ import { db } from '../services/db';
 import StorageExplorer from '../components/StorageExplorer';
 
 const DEFAULT_TEMPLATES = {
-  days_3_before: "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}. Se precisar do Pix da GODSHOP, estamos à disposição! 🤍",
-  day_of: "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}). Se precisar do Pix da GODSHOP, estamos à disposição! 🤍",
-  overdue: "Olá, {cliente}! 😊 Notamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente. Caso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍"
+  days_3_before: "Olá, {cliente}! 😊 Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\nChave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍",
+  day_of: "Olá, {cliente}! 😊 Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}).\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\nChave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍",
+  overdue: "Olá, {cliente}! 😊 Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nNotamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\nChave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍"
 };
 
 export default function Settings() {
@@ -74,6 +74,10 @@ export default function Settings() {
   const [templateOrderDelivered, setTemplateOrderDelivered] = useState(() => localStorage.getItem('auto_template_order_delivered') || DEFAULT_STATUS_TEMPLATES.order_delivered);
   const [templateGuaranteeSent, setTemplateGuaranteeSent] = useState(() => localStorage.getItem('auto_template_guarantee_sent') || DEFAULT_STATUS_TEMPLATES.guarantee_sent);
   const [templateOrderThankYou, setTemplateOrderThankYou] = useState(() => localStorage.getItem('auto_template_order_thank_you') || DEFAULT_STATUS_TEMPLATES.order_thank_you);
+
+  // Attendant and Pix Configuration
+  const [attendantName, setAttendantName] = useState(() => localStorage.getItem('auto_attendant_name') || 'Karen');
+  const [pixInfo, setPixInfo] = useState(() => localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves');
 
   // Sent logs history
   const [sentLogs, setSentLogs] = useState<{ id: string; clientName: string; itemName: string; installmentIndex: number; sentAt: string; status: 'success' | 'failed'; method: 'webhook' | 'whatsapp_web' }[]>(() => {
@@ -133,6 +137,8 @@ export default function Settings() {
     localStorage.setItem('auto_template_order_delivered', templateOrderDelivered);
     localStorage.setItem('auto_template_guarantee_sent', templateGuaranteeSent);
     localStorage.setItem('auto_template_order_thank_you', templateOrderThankYou);
+    localStorage.setItem('auto_attendant_name', attendantName);
+    localStorage.setItem('auto_pix_info', pixInfo);
     if (isWebhookEnabled && !webhookUrl.trim()) {
       toast.success('Configurações salvas! Nota: Insira a URL do Webhook ou use o modo WhatsApp Web.');
     } else {
@@ -159,7 +165,9 @@ export default function Settings() {
       .replace(/{valor}/g, formatBRL(item.expectedAmount))
       .replace(/{vencimento}/g, formattedDueDate)
       .replace(/{dias_atraso}/g, String(absDays))
-      .replace(/{dias}/g, String(absDays));
+      .replace(/{dias}/g, String(absDays))
+      .replace(/{atendente}/g, attendantName)
+      .replace(/{pix}/g, pixInfo);
 
     // Handle legacy/hardcoded template strings dynamically if daysDiff is 1, 2, or 3
     if (item.daysDiff > 0) {
@@ -927,8 +935,41 @@ export default function Settings() {
           </div>
 
           <div className="grid gap-6 lg:grid-cols-3">
-            {/* 1. CONFIGURAÇÕES & CREDENCIAIS */}
+            {/* 1. CONFIGURAÇÕES GERAIS DE ATENDIMENTO */}
             <div className="bg-card border rounded-xl p-5 space-y-4 shadow-sm h-fit">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+                <Bot className="h-5 w-5 text-emerald-400" />
+                <h3 className="font-bold text-sm text-foreground">Informações de Atendimento</h3>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold text-foreground block mb-1">Nome do Atendente <span className="text-muted-foreground font-normal">(Variável {"{atendente}"})</span></span>
+                <input
+                  type="text"
+                  value={attendantName}
+                  onChange={(e) => setAttendantName(e.target.value)}
+                  className="w-full text-sm px-4 py-2.5 rounded-xl border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  placeholder="Ex: Karen"
+                />
+              </div>
+
+              <div>
+                <span className="text-xs font-bold text-foreground block mb-1">Chave Pix e Nome <span className="text-muted-foreground font-normal">(Variável {"{pix}"})</span></span>
+                <textarea
+                  value={pixInfo}
+                  onChange={(e) => setPixInfo(e.target.value)}
+                  rows={4}
+                  className="w-full text-sm p-3 rounded-xl border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 resize-y"
+                  placeholder={`Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves`}
+                />
+                <p className="text-[10px] text-muted-foreground mt-2">
+                  Esses dados substituirão automaticamente as variáveis <strong>{"{atendente}"}</strong> e <strong>{"{pix}"}</strong> nos modelos de mensagem.
+                </p>
+              </div>
+            </div>
+
+            {/* 2. CONFIGURAÇÕES & CREDENCIAIS */}
+            <div className="bg-card border rounded-xl p-5 space-y-4 shadow-sm h-fit lg:col-span-2">
               <div className="flex items-center gap-2 border-b border-white/5 pb-3">
                 <Bot className="h-5 w-5 text-emerald-400" />
                 <h3 className="font-bold text-sm text-foreground">Canal de Envio (Automação)</h3>

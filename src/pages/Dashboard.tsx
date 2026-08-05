@@ -307,9 +307,9 @@ export default function Dashboard() {
     const webhookToken = localStorage.getItem('auto_webhook_token') || '';
     const isWebhookEnabled = localStorage.getItem('auto_webhook_enabled') === 'true';
 
-    const t3 = localStorage.getItem('auto_template_3_days') || "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}. Se precisar do Pix da GODSHOP, estamos à disposição! 🤍";
-    const t0 = localStorage.getItem('auto_template_day_of') || "Olá, {cliente}! 😊 Passando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}). Se precisar do Pix da GODSHOP, estamos à disposição! 🤍";
-    const tOverdue = localStorage.getItem('auto_template_overdue') || "Olá, {cliente}! 😊 Notamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente. Caso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍";
+    const t3 = localStorage.getItem('auto_template_3_days') || "Olá, {cliente}! 😊 Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\nChave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍";
+    const t0 = localStorage.getItem('auto_template_day_of') || "Olá, {cliente}! 😊 Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}).\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\nChave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍";
+    const tOverdue = localStorage.getItem('auto_template_overdue') || "Olá, {cliente}! 😊 Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nNotamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\nChave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍";
 
     setIsSendingAutomation(true);
     const toastId = toast.loading(`Disparando automação para ${items.length} cobrança(s)...`);
@@ -328,6 +328,9 @@ export default function Dashboard() {
       const formattedDueDate = format(dueDateObj, 'dd/MM/yyyy');
       const absDays = Math.abs(item.daysDiff);
 
+      const attendantName = localStorage.getItem('auto_attendant_name') || 'Karen';
+      const pixInfo = localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves';
+
       let text = tmpl
         .replace(/{cliente}/g, item.clientName)
         .replace(/{aparelho}/g, item.itemName)
@@ -335,7 +338,9 @@ export default function Dashboard() {
         .replace(/{valor}/g, formatBRL(item.expectedAmount))
         .replace(/{vencimento}/g, formattedDueDate)
         .replace(/{dias_atraso}/g, String(absDays))
-        .replace(/{dias}/g, String(absDays));
+        .replace(/{dias}/g, String(absDays))
+        .replace(/{atendente}/g, attendantName)
+        .replace(/{pix}/g, pixInfo);
 
       if (item.daysDiff > 0) {
         if (item.daysDiff === 1) text = text.replace(/em 3 dias|in 3 dias|há 3 dias|em 2 dias/gi, 'amanhã');

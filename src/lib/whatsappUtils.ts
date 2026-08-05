@@ -3,21 +3,21 @@
  */
 
 export const DEFAULT_STATUS_TEMPLATES = {
-  registration: "Prezado(a) {cliente},\n\nÉ um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.\n\n📍 *Status:* Cadastro Realizado e Ativo.\n\nQualquer dúvida, nossa equipe está à total disposição!\n\nAtenciosamente,\n*Equipe GODSHOP* 📱✨",
+  registration: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nÉ um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.\n\n📍 *Status:* Cadastro Realizado e Ativo.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nQualquer dúvida, nossa equipe está à total disposição! 📱✨",
   
-  order_confirmed: "Prezado(a) {cliente},\n\nSeu pedido ({aparelho}) foi confirmado com sucesso em nosso sistema e o pagamento já foi aprovado!\n\n📍 *Status:* Pedido Confirmado e Registrado.\n\nAtenciosamente,\n*Atendimento GODSHOP* 💳✅",
+  order_confirmed: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nSeu pedido ({aparelho}) foi confirmado com sucesso em nosso sistema e o pagamento já foi aprovado!\n\n📍 *Status:* Pedido Confirmado e Registrado.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nQualquer dúvida, estamos à disposição! 💳✅",
   
-  order_preparing: "Prezado(a) {cliente},\n\nSeu pedido ({aparelho}) está em fase de preparação! Nossa equipe técnica está realizando a inspeção detalhada de bateria, câmeras e conectores, além da higienização e embalagem de proteção.\n\n📍 *Status:* Em Separação e Testes de Qualidade.\n\nAtenciosamente,\n*Controle de Qualidade GODSHOP* 📦🔍",
+  order_preparing: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nSeu pedido ({aparelho}) está em fase de preparação! Nossa equipe técnica está realizando a inspeção detalhada de bateria, câmeras e conectores, além da higienização e embalagem de proteção.\n\n📍 *Status:* Em Separação e Testes de Qualidade.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nAtenciosamente, Controle de Qualidade 📦🔍",
   
-  order_ready: "Prezado(a) {cliente},\n\nExcelente notícia! Seu pedido ({aparelho}) foi totalmente conferido, embalado e está PRONTO PARA ENVIO!\n\n📍 *Status:* Embalado e Aguardando Coleta/Despacho.\n\nAtenciosamente,\n*Expedição GODSHOP* 🎁📦",
+  order_ready: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nExcelente notícia! Seu pedido ({aparelho}) foi totalmente conferido, embalado e está PRONTO PARA ENVIO!\n\n📍 *Status:* Embalado e Aguardando Coleta/Despacho.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nAtenciosamente, Expedição 🎁📦",
   
-  order_on_way: "Prezado(a) {cliente},\n\nSeu pedido ({aparelho}) acabou de ser despachado e já está EM ROTA DE ENTREGA para o seu endereço!\n\n📍 *Status:* Em Trânsito / Rota de Entrega. Pedimos a gentileza de manter alguém no local para o recebimento.\n\nÓtimo dia!\n*Logística GODSHOP* 🚚📲",
+  order_on_way: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nSeu pedido ({aparelho}) acabou de ser despachado e já está EM ROTA DE ENTREGA para o seu endereço!\n\n📍 *Status:* Em Trânsito / Rota de Entrega. Pedimos a gentileza de manter alguém no local para o recebimento.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nÓtimo dia! 🚚📲",
   
-  order_delivered: "Prezado(a) {cliente},\n\nConsta em nosso sistema que seu pedido ({aparelho}) foi ENTREGUE com sucesso no seu endereço!\n\n📍 *Status:* Entregue com Sucesso.\n\nQualquer dúvida ou suporte inicial, fale conosco por aqui!\n*GODSHOP Entregas* 🎉📱",
+  order_delivered: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nConsta em nosso sistema que seu pedido ({aparelho}) foi ENTREGUE com sucesso no seu endereço!\n\n📍 *Status:* Entregue com Sucesso.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nQualquer dúvida ou suporte inicial, fale conosco por aqui! 🎉📱",
   
-  guarantee_sent: "Prezado(a) {cliente},\n\nSeu Termo de Garantia Oficial para o dispositivo ({aparelho}) foi devidamente ativado em nosso banco de dados!\n\n📍 *Status:* Garantia Oficial Ativada.\n\nGuarde esta mensagem como comprovante.\n*Suporte & Garantia GODSHOP* 🛡️📋",
+  guarantee_sent: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nSeu Termo de Garantia Oficial para o dispositivo ({aparelho}) foi devidamente ativado em nosso banco de dados!\n\n📍 *Status:* Garantia Oficial Ativada.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nGuarde esta mensagem como comprovante. 🛡️📋",
   
-  order_thank_you: "Prezado(a) {cliente},\n\nMuito obrigado por comprar seu {aparelho} na GODSHOP! É uma honra ter você como nosso cliente.\n\n📍 *Status:* Pedido Concluído com Sucesso.\n\nAproveite seu novo aparelho! Conte sempre com nosso atendimento pós-venda.\n\nAtenciosamente,\n*Equipe GODSHOP* 🤍📱"
+  order_thank_you: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nMuito obrigado por comprar seu {aparelho} na GODSHOP! É uma honra ter você como nosso cliente.\n\n📍 *Status:* Pedido Concluído com Sucesso.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nAproveite seu novo aparelho! Conte sempre com nosso atendimento pós-venda. 🤍📱"
 };
 
 export type WhatsAppStatusType = 
@@ -131,6 +131,9 @@ export function formatStatusMessage(
   const itemName = data.itemName?.trim() || 'produto';
   const storeName = data.storeName?.trim() || 'GODSHOP';
 
+  const attendantName = localStorage.getItem('auto_attendant_name') || 'Karen';
+  const pixInfo = localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves';
+
   return template
     .replace(/\{cliente\}/gi, clientName)
     .replace(/\{aparelho\}/gi, itemName)
@@ -138,7 +141,9 @@ export function formatStatusMessage(
     .replace(/\{produto\}/gi, itemName)
     .replace(/\{loja\}/gi, storeName)
     .replace(/\{valor\}/gi, data.price || '')
-    .replace(/\{vencimento\}/gi, data.dueDate || '');
+    .replace(/\{vencimento\}/gi, data.dueDate || '')
+    .replace(/\{atendente\}/gi, attendantName)
+    .replace(/\{pix\}/gi, pixInfo);
 }
 
 /**

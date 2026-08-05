@@ -151,6 +151,9 @@ export default function Layout() {
       const formattedDueDate = format(dueDateObj, 'dd/MM/yyyy');
       const absDays = Math.abs(item.daysDiff);
 
+      const attendantName = localStorage.getItem('auto_attendant_name') || 'Karen';
+      const pixInfo = localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves';
+
       let text = tmpl
         .replace(/{cliente}/g, item.clientName)
         .replace(/{aparelho}/g, item.itemName)
@@ -158,7 +161,9 @@ export default function Layout() {
         .replace(/{valor}/g, formatBRL(item.expectedAmount))
         .replace(/{vencimento}/g, formattedDueDate)
         .replace(/{dias_atraso}/g, String(absDays))
-        .replace(/{dias}/g, String(absDays));
+        .replace(/{dias}/g, String(absDays))
+        .replace(/{atendente}/g, attendantName)
+        .replace(/{pix}/g, pixInfo);
 
       if (item.daysDiff > 0) {
         if (item.daysDiff === 1) text = text.replace(/em 3 dias|in 3 dias|há 3 dias|em 2 dias/gi, 'amanhã');
