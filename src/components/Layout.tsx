@@ -81,6 +81,9 @@ export default function Layout() {
   const allNotifications = notifications;
   const badgeCount = recentNotifications.length;
 
+  const layoutAttendantName = localStorage.getItem('auto_attendant_name') || 'Karen';
+  const layoutPixInfo = localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves';
+
   // Request native phone push permission
   const requestPushPermission = async () => {
     if (typeof window !== 'undefined') {
@@ -528,9 +531,9 @@ export default function Layout() {
               {activeFloatingNotif.clientPhone ? (
                 <a
                   href={`https://api.whatsapp.com/send?phone=${activeFloatingNotif.clientPhone}&text=${encodeURIComponent(
-                    `Olá, *${activeFloatingNotif.clientName}*! 😊 Passando para lembrar que a *${activeFloatingNotif.installmentIndex}ª Parcela* de *${formatBRL(activeFloatingNotif.expectedAmount)}* referente à compra do *${activeFloatingNotif.itemName}* ` +
+                    `Olá, *${activeFloatingNotif.clientName}*! 😊 Aqui é a *${layoutAttendantName}*, assistente virtual da *GODSHOP*. (Esta é uma mensagem automática)\n\nPassando para lembrar que a *${activeFloatingNotif.installmentIndex}ª Parcela* de *${formatBRL(activeFloatingNotif.expectedAmount)}* referente à compra do *${activeFloatingNotif.itemName}* ` +
                     (activeFloatingNotif.daysDiff === 0 ? "vence *HOJE*!" : activeFloatingNotif.daysDiff === 1 ? "vence *AMANHÃ*!" : activeFloatingNotif.daysDiff === 2 ? "vence em *2 DIAS*!" : activeFloatingNotif.daysDiff === 3 ? "vence em *3 DIAS*!" : activeFloatingNotif.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : activeFloatingNotif.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(typeof activeFloatingNotif.dueDate === 'string' ? parseLocalDate(activeFloatingNotif.dueDate) : activeFloatingNotif.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
-                    ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
+                    `\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n*${layoutPixInfo}*\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -808,9 +811,9 @@ export default function Layout() {
                                 {item.clientPhone ? (
                                   <a
                                     href={`https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(
-                                      `Olá, *${item.clientName}*! 😊 Passando para lembrar que a *${item.installmentIndex}ª Parcela* de *${formatBRL(item.expectedAmount)}* referente à compra do *${item.itemName}* ` +
+                                      `Olá, *${item.clientName}*! 😊 Aqui é a *${layoutAttendantName}*, assistente virtual da *GODSHOP*. (Esta é uma mensagem automática)\n\nPassando para lembrar que a *${item.installmentIndex}ª Parcela* de *${formatBRL(item.expectedAmount)}* referente à compra do *${item.itemName}* ` +
                                       (item.daysDiff === 0 ? "vence *HOJE*!" : item.daysDiff === 1 ? "vence *AMANHÃ*!" : item.daysDiff === 2 ? "vence em *2 DIAS*!" : item.daysDiff === 3 ? "vence em *3 DIAS*!" : item.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : item.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
-                                      ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
+                                      `\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n*${layoutPixInfo}*\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍`
                                     )}`}
                                     target="_blank"
                                     rel="noopener noreferrer"

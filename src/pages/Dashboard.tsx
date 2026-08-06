@@ -568,6 +568,9 @@ export default function Dashboard() {
                         diffClass = 'text-muted-foreground';
                       }
 
+                      const attendantName = localStorage.getItem('auto_attendant_name') || 'Karen';
+                      const pixInfo = localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves';
+
                       return (
                         <div key={inst.id} className="flex items-center justify-between p-2 rounded bg-muted/30 border border-border/50 text-xs">
                           <div className="flex flex-col min-w-0 flex-1 pr-2">
@@ -583,9 +586,9 @@ export default function Dashboard() {
                             {inst.clientPhone ? (
                               <a
                                 href={`https://api.whatsapp.com/send?phone=${inst.clientPhone}&text=${encodeURIComponent(
-                                  `Olá, *${inst.clientName}*! 😊 Passando para lembrar que a *${inst.installmentIndex}ª Parcela* de *${formatBRL(inst.expectedAmount)}* referente à compra do *${inst.itemName}* ` +
+                                  `Olá, *${inst.clientName}*! 😊 Aqui é a *${attendantName}*, assistente virtual da *GODSHOP*. (Esta é uma mensagem automática)\n\nPassando para lembrar que a *${inst.installmentIndex}ª Parcela* de *${formatBRL(inst.expectedAmount)}* referente à compra do *${inst.itemName}* ` +
                                   (inst.daysDiff === 0 ? "vence *HOJE*!" : inst.daysDiff === 1 ? "vence *AMANHÃ*!" : inst.daysDiff === 2 ? "vence em *2 DIAS*!" : inst.daysDiff === 3 ? "vence em *3 DIAS*!" : inst.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(typeof inst.dueDate === 'string' ? parseLocalDate(inst.dueDate) : inst.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
-                                  ` Se precisar do Pix da GODSHOP, estamos à disposição! 🤍`
+                                  `\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n*${pixInfo}*\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍`
                                 )}`}
                                 target="_blank"
                                 rel="noopener noreferrer"

@@ -186,7 +186,10 @@ export default function Sales() {
     const fullyPaidCount = calculatedList.filter(inst => inst.status === 'fully_paid').length;
     const pendingCount = calculatedList.filter(inst => inst.status === 'pending').length;
     
-    let msg = `Olá, *${clientName}*! 📱✨\n\nPassando para confirmar o recebimento do seu pagamento. Seu carnê de parcelas referente à compra do *${itemName}* na *GODSHOP* foi atualizado:\n\n`;
+    const attendantName = localStorage.getItem('auto_attendant_name') || 'Karen';
+    const pixInfo = localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves';
+
+    let msg = `Olá, *${clientName}*! 😊 Aqui é a *${attendantName}*, assistente virtual da *GODSHOP*. (Esta é uma mensagem automática)\n\nPassando para confirmar o recebimento do seu pagamento. Seu carnê de parcelas referente à compra do *${itemName}* foi atualizado:\n\n`;
     
     msg += `📊 *Resumo Financeiro:*\n`;
     const downPayment = sale.down_payment || 0;
@@ -211,9 +214,9 @@ export default function Sales() {
     }
     
     if (remaining > 0.01) {
-      msg += `\n🛍️ *Muito obrigado por comprar na GODSHOP!* Agradecemos imensamente a sua preferência e confiança em nosso trabalho. Se precisar de qualquer suporte, estamos à disposição! 🤍`;
+      msg += `\nNossa chave PIX oficial para pagamentos das próximas parcelas é:\n\n*${pixInfo}*\n\n🛍️ *Muito obrigado por comprar na GODSHOP!* Agradecemos imensamente a sua preferência e confiança em nosso trabalho. Se precisar de qualquer suporte, estamos à disposição! 🤍`;
     } else {
-      msg = `Olá, *${clientName}*! 🎉🥳\n\n*EXCELENTE NOTÍCIA!* Seu carnê de parcelas referente à compra do *${itemName}* foi *TOTALMENTE QUITADO*!\n\n`;
+      msg = `Olá, *${clientName}*! 🎉🥳 Aqui é a *${attendantName}*, assistente virtual da *GODSHOP*. (Esta é uma mensagem automática)\n\n*EXCELENTE NOTÍCIA!* Seu carnê de parcelas referente à compra do *${itemName}* foi *TOTALMENTE QUITADO*!\n\n`;
       if (downPayment > 0) {
         msg += `💰 *Valor do Aparelho:* ${formatBRL(sale.sell_price)}\n`;
         msg += `💵 *Valor de Entrada Pago:* ${formatBRL(downPayment)}\n`;
