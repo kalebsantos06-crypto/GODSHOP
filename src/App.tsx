@@ -100,19 +100,49 @@ function AppContent() {
     };
   }, []);
 
+  // Multi-device Cloud Sync: 100% automated background synchronization across all devices
   useEffect(() => {
-    if (isAuthenticated && user) {
-      // Trigger background sync when user logs in or app starts authenticated
-      db.syncAll().then(res => {
-        if (res.stats && res.stats.synced > 0) {
-          console.log(`Auto-sync background: ${res.stats.synced} items synced.`);
-          // Invalidate queries to refresh UI with synced data
+    let isSubscribed = true;
+
+    const performSync = async () => {
+      try {
+        // 1. Pull latest cloud data so new devices get all saved items immediately
+        const pullRes = await db.pullFromCloud();
+        if (pullRes.success && pullRes.hasChanged && isSubscribed) {
           queryClient.invalidateQueries();
         }
-      }).catch(err => {
-        console.warn('Auto-sync background silent fail (likely already in sync or offline):', err.message);
-      });
-    }
+
+        // 2. Push any local items to cloud so they are never lost
+        await db.pushToCloud();
+      } catch (err: any) {
+        console.warn('[App Auto Sync] Warning:', err?.message || err);
+      }
+    };
+
+    // Initial sync on app boot
+    performSync();
+
+    // Automatic polling interval: syncs every 6 seconds in background
+    const interval = setInterval(() => {
+      performSync();
+    }, 6000);
+
+    // Sync immediately when user switches tabs or unlocks their phone
+    const handleFocus = () => {
+      performSync();
+    };
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        performSync();
+      }
+    });
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [isAuthenticated, user]);
 
   if (assinarId) {

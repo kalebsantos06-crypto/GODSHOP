@@ -4,9 +4,142 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { format } from "date-fns";
+import { getSaleNotifications, parseLocalDate } from "./src/lib/dateUtils";
 
 const app = express();
 const PORT = 3000;
+
+// Helper to query Supabase from server
+async function supabaseQuery(table: string, userId: string) {
+  let supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+  if (supabaseUrl.endsWith('/rest/v1/')) {
+    supabaseUrl = supabaseUrl.slice(0, -9);
+  } else if (supabaseUrl.endsWith('/rest/v1')) {
+    supabaseUrl = supabaseUrl.slice(0, -8);
+  }
+  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+  
+  if (!supabaseUrl || !supabaseAnonKey) return [];
+
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/${table}?user_id=eq.${userId}&select=*`, {
+      headers: {
+        'apikey': supabaseAnonKey,
+        'Authorization': `Bearer ${supabaseAnonKey}`
+      }
+    });
+    if (response.ok) {
+      return await response.json();
+    }
+    console.error(`[Supabase Query] Error ${response.status} on table ${table}`);
+  } catch (err) {
+    console.error(`[Supabase Query] Exception querying ${table}:`, err);
+  }
+  return [];
+}
+
+const DEFAULT_TEMPLATES = {
+  days_3_before: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsiderar. Caso precise de ajuda, estamos à disposição! 🤍",
+  day_of: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}).\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsiderar. Caso precise de ajuda, estamos à disposição! 🤍",
+  overdue: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nNotamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍"
+};
+
+async function runAutomationTask() {
+  const now = new Date();
+  console.log(`[Automation] Initiating daily check at ${now.toLocaleString('pt-BR')}`);
+  
+  const allSettings = readPublicSettings();
+  const userIds = Object.keys(allSettings);
+
+  for (const userId of userIds) {
+    const userSettings = allSettings[userId];
+    
+    if (userSettings.isFullAutoEnabled && userSettings.isWebhookEnabled && userSettings.webhookUrl) {
+      console.log(`[Automation] Processing background notifications for user: ${userId}`);
+      
+      try {
+        const sales = await supabaseQuery('sales', userId);
+        const clients = await supabaseQuery('clients', userId);
+        const iphones = await supabaseQuery('iphones', userId);
+        const consoles = await supabaseQuery('consoles', userId);
+
+        const notifications = getSaleNotifications(sales, clients, iphones, consoles);
+        // Only notify for today (0) or slightly overdue (-1) or precisely 3 days before (3)
+        const toNotify = notifications.filter(n => n.daysDiff === 0 || n.daysDiff === 3 || n.daysDiff === -1);
+
+        if (toNotify.length === 0) {
+          console.log(`[Automation] No pending notifications for user ${userId} today.`);
+          continue;
+        }
+
+        console.log(`[Automation] Found ${toNotify.length} messages to send for user ${userId}.`);
+
+        for (const item of toNotify) {
+          if (!item.clientPhone) continue;
+
+          let template = userSettings.templateDayOf || DEFAULT_TEMPLATES.day_of;
+          if (item.daysDiff === 3) template = userSettings.template3Days || DEFAULT_TEMPLATES.days_3_before;
+          if (item.daysDiff === -1) template = userSettings.templateOverdue || DEFAULT_TEMPLATES.overdue;
+
+          const dueDateObj = typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate;
+          const formattedDueDate = format(dueDateObj, 'dd/MM/yyyy');
+          const amount = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.expectedAmount);
+
+          const message = template
+            .replace(/{cliente}/g, item.clientName)
+            .replace(/{aparelho}/g, item.itemName)
+            .replace(/{parcela}/g, String(item.installmentIndex))
+            .replace(/{valor}/g, amount)
+            .replace(/{vencimento}/g, formattedDueDate)
+            .replace(/{atendente}/g, userSettings.attendantName || 'Karen')
+            .replace(/{pix}/g, userSettings.pixInfo || 'Chave Pix: 13036942637');
+
+          try {
+            const res = await fetch(userSettings.webhookUrl.trim(), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(userSettings.webhookToken ? { 'Authorization': `Bearer ${userSettings.webhookToken}` } : {})
+              },
+              body: JSON.stringify({
+                phone: item.clientPhone,
+                message,
+                clientName: item.clientName,
+                itemName: item.itemName,
+                installmentIndex: item.installmentIndex,
+                expectedAmount: item.expectedAmount,
+                dueDate: format(dueDateObj, 'yyyy-MM-dd'),
+                automationType: 'background_auto'
+              })
+            });
+
+            if (res.ok) {
+              console.log(`[Automation] Message sent successfully to ${item.clientName} for user ${userId}`);
+            } else {
+              console.error(`[Automation] Webhook failed for ${item.clientName} (User: ${userId}): Status ${res.status}`);
+            }
+          } catch (sendErr) {
+            console.error(`[Automation] Network error sending webhook for ${item.clientName} (User: ${userId})`);
+          }
+          
+          // Small delay between messages to avoid rate limits
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      } catch (err) {
+        console.error(`[Automation] Critical error processing user ${userId}:`, err);
+      }
+    }
+  }
+  console.log(`[Automation] Finished all tasks.`);
+}
+
+// Set interval to run once a day (every 24 hours)
+// We use a shorter interval check (e.g., every 6 hours) but logic inside could check last run time
+setInterval(runAutomationTask, 12 * 60 * 60 * 1000); // Every 12 hours
+
+// Run once on startup after 30 seconds
+setTimeout(runAutomationTask, 30 * 1000);
 
 app.use(express.json({ limit: "15mb" }));
 
@@ -17,6 +150,7 @@ const CLIENTS_FILE = path.join(DATA_DIR, "public_clients.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "public_settings.json");
 const TOKENS_FILE = path.join(DATA_DIR, "public_tokens.json");
 const USERS_FILE = path.join(DATA_DIR, "public_users.json");
+const CLOUD_DB_FILE = path.join(DATA_DIR, "cloud_database.json");
 
 try {
   if (!fs.existsSync(DATA_DIR)) {
@@ -33,6 +167,19 @@ try {
   }
   if (!fs.existsSync(TOKENS_FILE)) {
     fs.writeFileSync(TOKENS_FILE, JSON.stringify({}), "utf8");
+  }
+  if (!fs.existsSync(CLOUD_DB_FILE)) {
+    const initialCloudDb = {
+      suppliers: [],
+      clients: [],
+      iphones: [],
+      consoles: [],
+      prices: [],
+      sales: [],
+      custom_payments: {},
+      updated_at: new Date().toISOString()
+    };
+    fs.writeFileSync(CLOUD_DB_FILE, JSON.stringify(initialCloudDb, null, 2), "utf8");
   }
   if (!fs.existsSync(USERS_FILE)) {
     const defaultUsers = [
@@ -52,6 +199,46 @@ try {
   console.warn("[Vercel FS Warning] Initializing local files in fallback mode:", fsErr);
 }
 
+const readCloudDb = (): any => {
+  try {
+    if (!fs.existsSync(CLOUD_DB_FILE)) {
+      return {
+        suppliers: [],
+        clients: [],
+        iphones: [],
+        consoles: [],
+        prices: [],
+        sales: [],
+        custom_payments: {},
+        updated_at: new Date().toISOString()
+      };
+    }
+    const content = fs.readFileSync(CLOUD_DB_FILE, "utf8");
+    return JSON.parse(content || "{}");
+  } catch (err) {
+    console.error("Error reading cloud db file:", err);
+    return {
+      suppliers: [],
+      clients: [],
+      iphones: [],
+      consoles: [],
+      prices: [],
+      sales: [],
+      custom_payments: {},
+      updated_at: new Date().toISOString()
+    };
+  }
+};
+
+const writeCloudDb = (data: any) => {
+  try {
+    data.updated_at = new Date().toISOString();
+    fs.writeFileSync(CLOUD_DB_FILE, JSON.stringify(data, null, 2), "utf8");
+  } catch (err) {
+    console.error("Error writing cloud db file:", err);
+  }
+};
+
 const readPublicUsers = (): any[] => {
   try {
     if (!fs.existsSync(USERS_FILE)) return [];
@@ -70,6 +257,144 @@ const writePublicUsers = (data: any[]) => {
     console.error("Error writing public users file:", err);
   }
 };
+
+// --- CLOUD DATABASE & MULTI-DEVICE PERSISTENCE API ---
+
+// 1. Fetch entire cloud database (all tables)
+app.get("/api/cloud-db", (req, res) => {
+  const db = readCloudDb();
+  res.json({ success: true, data: db });
+});
+
+// 2. Fetch stats on cloud database
+app.get("/api/cloud-db/stats", (req, res) => {
+  const db = readCloudDb();
+  res.json({
+    success: true,
+    stats: {
+      iphones: (db.iphones || []).length,
+      consoles: (db.consoles || []).length,
+      clients: (db.clients || []).length,
+      suppliers: (db.suppliers || []).length,
+      sales: (db.sales || []).length,
+      prices: (db.prices || []).length,
+      custom_payments: Object.keys(db.custom_payments || {}).length,
+      updated_at: db.updated_at
+    }
+  });
+});
+
+// 3. Bidirectional batch sync & push from any device to cloud
+app.post("/api/cloud-db/push", (req, res) => {
+  const incoming = req.body.data || {};
+  const current = readCloudDb();
+
+  const tables = ['suppliers', 'clients', 'iphones', 'consoles', 'prices', 'sales'];
+  
+  for (const table of tables) {
+    if (Array.isArray(incoming[table])) {
+      const existingList = Array.isArray(current[table]) ? current[table] : [];
+      const itemMap = new Map<string, any>();
+      
+      // Load current cloud items first
+      for (const item of existingList) {
+        if (item && item.id) {
+          itemMap.set(item.id, item);
+        }
+      }
+      
+      // Merge incoming items from this device
+      for (const item of incoming[table]) {
+        if (item && item.id) {
+          const existingItem = itemMap.get(item.id);
+          itemMap.set(item.id, { ...(existingItem || {}), ...item });
+        }
+      }
+      
+      current[table] = Array.from(itemMap.values());
+    }
+  }
+
+  // Merge custom payments dictionary
+  if (incoming.custom_payments && typeof incoming.custom_payments === 'object') {
+    current.custom_payments = {
+      ...(current.custom_payments || {}),
+      ...incoming.custom_payments
+    };
+  }
+
+  writeCloudDb(current);
+  console.log(`[Cloud DB Sync] Synced from device: ${current.iphones.length} iphones, ${current.clients.length} clients, ${current.sales.length} sales.`);
+
+  res.json({
+    success: true,
+    message: "Banco de dados sincronizado na nuvem com sucesso!",
+    data: current
+  });
+});
+
+// 4. Get specific table
+app.get("/api/cloud-db/:table", (req, res) => {
+  const { table } = req.params;
+  const db = readCloudDb();
+  const list = db[table] || [];
+  res.json({ success: true, data: list });
+});
+
+// 5. Upsert item in specific table
+app.post("/api/cloud-db/:table", (req, res) => {
+  const { table } = req.params;
+  const item = req.body;
+  if (!item || !item.id) {
+    return res.status(400).json({ error: "Item com ID é obrigatório" });
+  }
+
+  const db = readCloudDb();
+  if (!Array.isArray(db[table])) {
+    db[table] = [];
+  }
+
+  const existingIdx = db[table].findIndex((i: any) => i.id === item.id);
+  if (existingIdx >= 0) {
+    db[table][existingIdx] = { ...db[table][existingIdx], ...item };
+  } else {
+    db[table].push(item);
+  }
+
+  writeCloudDb(db);
+  res.json({ success: true, data: item });
+});
+
+// 6. Update item in specific table
+app.put("/api/cloud-db/:table/:id", (req, res) => {
+  const { table, id } = req.params;
+  const updates = req.body;
+  const db = readCloudDb();
+  if (!Array.isArray(db[table])) {
+    db[table] = [];
+  }
+
+  const existingIdx = db[table].findIndex((i: any) => i.id === id);
+  if (existingIdx >= 0) {
+    db[table][existingIdx] = { ...db[table][existingIdx], ...updates };
+  } else {
+    db[table].push({ id, ...updates });
+  }
+
+  writeCloudDb(db);
+  res.json({ success: true, data: db[table][existingIdx] || { id, ...updates } });
+});
+
+// 7. Delete item from specific table
+app.delete("/api/cloud-db/:table/:id", (req, res) => {
+  const { table, id } = req.params;
+  const db = readCloudDb();
+  if (Array.isArray(db[table])) {
+    db[table] = db[table].filter((i: any) => i.id !== id);
+    writeCloudDb(db);
+  }
+  res.json({ success: true, message: "Item removido da nuvem com sucesso" });
+});
 
 // API route to return the public container URL based on request headers
 app.get("/api/app-url", (req, res) => {

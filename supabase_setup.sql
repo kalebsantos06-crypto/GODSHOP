@@ -1,4 +1,10 @@
--- HABILITAR EXTENSÃO DE UUID (Necessário para geração automática de IDs)
+-- ==============================================================================
+-- SCRIPT DE IMPLANTAÇÃO & ESTRUTURA COMPLETA DO BANCO DE DADOS (SUPABASE / POSTGRESQL)
+-- ==============================================================================
+-- Execute este script no SQL Editor do seu painel Supabase (https://supabase.com/dashboard).
+-- Este script é idempotente (pode ser executado várias vezes sem apagar seus dados existentes).
+
+-- 0. HABILITAR EXTENSÃO DE UUID
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ==========================================
@@ -12,15 +18,19 @@ CREATE TABLE IF NOT EXISTS suppliers (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS contact TEXT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para Fornecedores
 DROP POLICY IF EXISTS "Permitir acesso total ao próprio usuário" ON suppliers;
 CREATE POLICY "Permitir acesso total ao próprio usuário" ON suppliers
   FOR ALL TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
 
 -- ==========================================
 -- 2. TABELA DE CLIENTES (clients)
@@ -53,15 +63,37 @@ CREATE TABLE IF NOT EXISTS clients (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS cpf TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS birth_date TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS street TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS number TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS neighborhood TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS complement TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS city TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS state TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS documento_url TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS assinatura_base64 TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS token_cadastro TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS token_utilizado BOOLEAN DEFAULT FALSE;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS token_expira_em TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS security_uuid TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS security_ip TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS security_browser TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS security_os TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS security_device TEXT;
+
 ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para Clientes
 DROP POLICY IF EXISTS "Permitir acesso total ao próprio usuário" ON clients;
 CREATE POLICY "Permitir acesso total ao próprio usuário" ON clients
   FOR ALL TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
 
 -- ==========================================
 -- 3. TABELA DE IPHONES (iphones)
@@ -74,22 +106,30 @@ CREATE TABLE IF NOT EXISTS iphones (
   color TEXT NOT NULL,
   buy_price DECIMAL(10, 2) NOT NULL,
   imei TEXT,
+  battery_health INTEGER,
   supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL,
   buy_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  status TEXT DEFAULT 'disponivel' CHECK (status IN ('disponivel', 'vendido')),
-  condition TEXT DEFAULT 'seminovo' CHECK (condition IN ('lacrado', 'seminovo')),
+  status TEXT DEFAULT 'disponivel',
+  condition TEXT DEFAULT 'seminovo',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
+ALTER TABLE iphones ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE iphones ADD COLUMN IF NOT EXISTS imei TEXT;
+ALTER TABLE iphones ADD COLUMN IF NOT EXISTS battery_health INTEGER;
+ALTER TABLE iphones ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL;
+ALTER TABLE iphones ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'disponivel';
+ALTER TABLE iphones ADD COLUMN IF NOT EXISTS condition TEXT DEFAULT 'seminovo';
+ALTER TABLE iphones ADD COLUMN IF NOT EXISTS buy_date TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 ALTER TABLE iphones ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para iPhones
 DROP POLICY IF EXISTS "Permitir acesso total ao próprio usuário" ON iphones;
 CREATE POLICY "Permitir acesso total ao próprio usuário" ON iphones
   FOR ALL TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
 
 -- ==========================================
 -- 4. TABELA DE CONSOLES (consoles)
@@ -100,21 +140,27 @@ CREATE TABLE IF NOT EXISTS consoles (
   model TEXT NOT NULL,
   version TEXT NOT NULL,
   buy_price DECIMAL(10, 2) NOT NULL,
+  supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL,
   buy_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  status TEXT DEFAULT 'disponivel' CHECK (status IN ('disponivel', 'vendido')),
-  condition TEXT DEFAULT 'seminovo' CHECK (condition IN ('lacrado', 'seminovo')),
+  status TEXT DEFAULT 'disponivel',
+  condition TEXT DEFAULT 'seminovo',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
+ALTER TABLE consoles ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE consoles ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL;
+ALTER TABLE consoles ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'disponivel';
+ALTER TABLE consoles ADD COLUMN IF NOT EXISTS condition TEXT DEFAULT 'seminovo';
+ALTER TABLE consoles ADD COLUMN IF NOT EXISTS buy_date TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 ALTER TABLE consoles ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para Consoles
 DROP POLICY IF EXISTS "Permitir acesso total ao próprio usuário" ON consoles;
 CREATE POLICY "Permitir acesso total ao próprio usuário" ON consoles
   FOR ALL TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
 
 -- ==========================================
 -- 5. TABELA DE VENDAS (sales)
@@ -130,23 +176,38 @@ CREATE TABLE IF NOT EXISTS sales (
   payment_method TEXT NOT NULL,
   sale_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   installments INTEGER DEFAULT 1,
-  installment_frequency TEXT DEFAULT 'Mensal' CHECK (installment_frequency IN ('Semanal', 'Quinzenal', 'Mensal')),
+  installments_paid INTEGER DEFAULT 0,
+  installment_frequency TEXT DEFAULT 'Mensal',
   first_installment_date TIMESTAMP WITH TIME ZONE,
+  custom_payments TEXT,
   signature_data TEXT,
   signed_at TIMESTAMP WITH TIME ZONE,
   signed_ip TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS iphone_id UUID REFERENCES iphones(id) ON DELETE SET NULL;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS console_id UUID REFERENCES consoles(id) ON DELETE SET NULL;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS client_id UUID REFERENCES clients(id) ON DELETE SET NULL;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS down_payment DECIMAL(10, 2) DEFAULT 0;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS installments INTEGER DEFAULT 1;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS installments_paid INTEGER DEFAULT 0;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS installment_frequency TEXT DEFAULT 'Mensal';
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS first_installment_date TIMESTAMP WITH TIME ZONE;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS custom_payments TEXT;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS signature_data TEXT;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS signed_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS signed_ip TEXT;
+
 ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para Vendas
 DROP POLICY IF EXISTS "Permitir acesso total ao próprio usuário" ON sales;
 CREATE POLICY "Permitir acesso total ao próprio usuário" ON sales
   FOR ALL TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
 
 -- ==========================================
 -- 6. TABELA DE PREÇOS (prices)
@@ -154,7 +215,7 @@ CREATE POLICY "Permitir acesso total ao próprio usuário" ON sales
 CREATE TABLE IF NOT EXISTS prices (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  category TEXT NOT NULL DEFAULT 'iphone' CHECK (category IN ('iphone', 'console')),
+  category TEXT NOT NULL DEFAULT 'iphone',
   model TEXT NOT NULL,
   version TEXT,
   storage TEXT NOT NULL,
@@ -165,15 +226,21 @@ CREATE TABLE IF NOT EXISTS prices (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
+ALTER TABLE prices ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE prices ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'iphone';
+ALTER TABLE prices ADD COLUMN IF NOT EXISTS version TEXT;
+ALTER TABLE prices ADD COLUMN IF NOT EXISTS color TEXT;
+ALTER TABLE prices ADD COLUMN IF NOT EXISTS condition TEXT;
+ALTER TABLE prices ADD COLUMN IF NOT EXISTS price_usd DECIMAL(10, 2);
+
 ALTER TABLE prices ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para Tabela de Preços
 DROP POLICY IF EXISTS "Permitir acesso total ao próprio usuário" ON prices;
 CREATE POLICY "Permitir acesso total ao próprio usuário" ON prices
   FOR ALL TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
 
 -- ==========================================
 -- 7. TABELA DE ASSINATURAS PÚBLICAS (public_sales)
@@ -194,10 +261,8 @@ CREATE TABLE IF NOT EXISTS public_sales (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
 ALTER TABLE public_sales ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para Assinaturas Públicas (público total para leitura/gravação anônima)
 DROP POLICY IF EXISTS "Permitir leitura pública" ON public_sales;
 CREATE POLICY "Permitir leitura pública" ON public_sales
   FOR SELECT USING (true);
@@ -242,10 +307,8 @@ CREATE TABLE IF NOT EXISTS public_clients (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
 ALTER TABLE public_clients ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para Clientes Públicos (gravação e leitura anônimas para o fluxo público de cadastro)
 DROP POLICY IF EXISTS "Permitir leitura de clientes públicos" ON public_clients;
 CREATE POLICY "Permitir leitura de clientes públicos" ON public_clients
   FOR SELECT USING (true);
@@ -271,10 +334,8 @@ CREATE TABLE IF NOT EXISTS public_tokens (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Ativar RLS
 ALTER TABLE public_tokens ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS para Tokens Públicos (validação e uso anônimo no link)
 DROP POLICY IF EXISTS "Permitir leitura de tokens públicos" ON public_tokens;
 CREATE POLICY "Permitir leitura de tokens públicos" ON public_tokens
   FOR SELECT USING (true);
@@ -286,4 +347,5 @@ CREATE POLICY "Permitir inserção de tokens públicos" ON public_tokens
 DROP POLICY IF EXISTS "Permitir atualização de tokens públicos" ON public_tokens;
 CREATE POLICY "Permitir atualização de tokens públicos" ON public_tokens
   FOR UPDATE USING (true);
+
 

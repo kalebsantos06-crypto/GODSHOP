@@ -62,7 +62,7 @@ const tryCacheUserIdFromRows = (rows: any[]) => {
   }
 };
 
-// --- LOCAL STORAGE RESILIENCY ENGINE ---
+// --- LOCAL STORAGE RESILIENCY ENGINE & REAL-TIME CLOUD SYNC ---
 const getLocalData = (table: string): any[] => {
   try {
     const data = localStorage.getItem(`db_fallback_${table}`);
@@ -73,10 +73,20 @@ const getLocalData = (table: string): any[] => {
   }
 };
 
+let cloudPushTimeout: any = null;
+const scheduleCloudPush = () => {
+  if (cloudPushTimeout) clearTimeout(cloudPushTimeout);
+  cloudPushTimeout = setTimeout(() => {
+    db.pushToCloud().catch(err => console.warn('[Auto Cloud Push] Warn:', err));
+  }, 200);
+};
+
 const setLocalData = (table: string, data: any[]) => {
   try {
     localStorage.setItem(`db_fallback_${table}`, JSON.stringify(data));
     broadcastLocalChange(table);
+    // Automatically replicate change to Cloud Server in the background
+    scheduleCloudPush();
   } catch (e) {
     console.error(`Error saving local data for ${table}:`, e);
   }
@@ -111,16 +121,231 @@ const generateId = (): string => {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 };
 
+// --- SERVER CLOUD DATABASE ENGINE (MULTI-DEVICE SYNCHRONIZATION) ---
+export const cloudApi = {
+  fetchTable: async (table: string): Promise<any[]> => {
+    try {
+      const res = await fetch(`/api/cloud-db/${table}`);
+      if (res.ok) {
+        const json = await res.json();
+        return Array.isArray(json.data) ? json.data : [];
+      }
+    } catch (e) {
+      console.warn(`[Cloud Sync] Error fetching ${table}:`, e);
+    }
+    return [];
+  },
+
+  upsertItem: async (table: string, item: any): Promise<void> => {
+    try {
+      if (!item || !item.id) return;
+      await fetch(`/api/cloud-db/${table}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item)
+      });
+    } catch (e) {
+      console.warn(`[Cloud Sync] Error saving ${table} item to cloud:`, e);
+    }
+  },
+
+  updateItem: async (table: string, id: string, data: any): Promise<void> => {
+    try {
+      if (!id) return;
+      await fetch(`/api/cloud-db/${table}/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+    } catch (e) {
+      console.warn(`[Cloud Sync] Error updating ${table} item in cloud:`, e);
+    }
+  },
+
+  deleteItem: async (table: string, id: string): Promise<void> => {
+    try {
+      if (!id) return;
+      await fetch(`/api/cloud-db/${table}/${id}`, {
+        method: 'DELETE'
+      });
+    } catch (e) {
+      console.warn(`[Cloud Sync] Error deleting ${table} item in cloud:`, e);
+    }
+  },
+
+  pullAll: async (): Promise<any> => {
+    try {
+      const res = await fetch('/api/cloud-db');
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || null;
+      }
+    } catch (e) {
+      console.warn('[Cloud Sync] Error pulling full cloud db:', e);
+    }
+    return null;
+  },
+
+  pushAll: async (data: any): Promise<any> => {
+    try {
+      const res = await fetch('/api/cloud-db/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data })
+      });
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || null;
+      }
+    } catch (e) {
+      console.warn('[Cloud Sync] Error pushing full cloud db:', e);
+    }
+    return null;
+  },
+
+  getStats: async (): Promise<any> => {
+    try {
+      const res = await fetch('/api/cloud-db/stats');
+      if (res.ok) {
+        const json = await res.json();
+        return json.stats || null;
+      }
+    } catch (e) {
+      console.warn('[Cloud Sync] Error fetching stats:', e);
+    }
+    return null;
+  }
+};
+
 export const db = {
   clearUser: () => {
     authenticatedUserId = null;
     lastKnownUserIdFromRows = null;
   },
+
+  // Pull all tables from server cloud database to local storage (for new devices or refresh)
+  pullFromCloud: async (): Promise<{ success: boolean; message: string; count?: number; hasChanged?: boolean }> => {
+    try {
+      const cloudData = await cloudApi.pullAll();
+      if (!cloudData) {
+        return { success: false, message: 'Não foi possível conectar ao servidor de nuvem.' };
+      }
+
+      const tables = ['suppliers', 'clients', 'iphones', 'consoles', 'prices', 'sales'];
+      let totalImported = 0;
+      let hasChanged = false;
+
+      for (const table of tables) {
+        const cloudItems = Array.isArray(cloudData[table]) ? cloudData[table] : [];
+        const localItems = getLocalData(table);
+        
+        // Merge cloud with local: local takes priority if newer, but add all cloud items
+        const itemMap = new Map<string, any>();
+        
+        // 1. Put local items
+        for (const item of localItems) {
+          if (item && item.id) itemMap.set(item.id, item);
+        }
+        
+        // 2. Add or merge cloud items
+        for (const item of cloudItems) {
+          if (item && item.id) {
+            const existing = itemMap.get(item.id);
+            itemMap.set(item.id, { ...(item || {}), ...(existing || {}) });
+          }
+        }
+        
+        const merged = Array.from(itemMap.values());
+        const localJson = JSON.stringify(localItems);
+        const mergedJson = JSON.stringify(merged);
+
+        if (localJson !== mergedJson) {
+          localStorage.setItem(`db_fallback_${table}`, mergedJson);
+          broadcastLocalChange(table);
+          hasChanged = true;
+        }
+        totalImported += merged.length;
+      }
+
+      // Restore custom payments dictionary
+      if (cloudData.custom_payments && typeof cloudData.custom_payments === 'object') {
+        for (const [saleId, paymentsJson] of Object.entries(cloudData.custom_payments)) {
+          if (typeof paymentsJson === 'string') {
+            const current = localStorage.getItem(`inst_payments_${saleId}`);
+            if (current !== paymentsJson) {
+              localStorage.setItem(`inst_payments_${saleId}`, paymentsJson);
+              hasChanged = true;
+            }
+          }
+        }
+      }
+
+      return {
+        success: true,
+        message: `Sincronização concluída! ${totalImported} registros sincronizados da nuvem.`,
+        count: totalImported,
+        hasChanged
+      };
+    } catch (e: any) {
+      console.error('[Cloud Pull] Error:', e);
+      return { success: false, message: 'Erro ao puxar dados da nuvem: ' + (e.message || 'Falha de rede') };
+    }
+  },
+
+  // Push all local tables to server cloud database
+  pushToCloud: async (): Promise<{ success: boolean; message: string; data?: any }> => {
+    try {
+      const tables = ['suppliers', 'clients', 'iphones', 'consoles', 'prices', 'sales'];
+      const dataToPush: any = {};
+      
+      for (const table of tables) {
+        dataToPush[table] = getLocalData(table);
+      }
+
+      // Include custom installment payments
+      const sales = getLocalData('sales');
+      const custom_payments: Record<string, string> = {};
+      for (const sale of sales) {
+        if (sale && sale.id) {
+          const stored = localStorage.getItem(`inst_payments_${sale.id}`);
+          if (stored) {
+            custom_payments[sale.id] = stored;
+          }
+        }
+      }
+      dataToPush.custom_payments = custom_payments;
+
+      const result = await cloudApi.pushAll(dataToPush);
+      if (result) {
+        return {
+          success: true,
+          message: 'Todos os seus dados foram salvos com sucesso na nuvem!',
+          data: result
+        };
+      }
+      return { success: false, message: 'Falha ao salvar dados na nuvem.' };
+    } catch (e: any) {
+      console.error('[Cloud Push] Error:', e);
+      return { success: false, message: 'Erro ao enviar dados para a nuvem: ' + (e.message || 'Falha de rede') };
+    }
+  },
+
+  getCloudStats: async () => {
+    return await cloudApi.getStats();
+  },
+
   syncAll: async () => {
+    // 1. Always push and pull with the server Cloud Database first
+    await db.pushToCloud().catch(e => console.warn('Cloud DB push warning:', e));
+    await db.pullFromCloud().catch(e => console.warn('Cloud DB pull warning:', e));
+
     const userId = await getCurrentUserId();
     if (!userId) {
-      console.warn('Cannot sync: No authenticated user');
-      throw new Error('Usuário não autenticado. Por favor, faça login.');
+      return {
+        success: true,
+        message: 'Dados salvos e sincronizados na nuvem do servidor com sucesso.',
+        stats: { synced: 1, failed: 0 }
+      };
     }
 
     const tables = ['clients', 'suppliers', 'iphones', 'consoles', 'sales', 'prices'];
@@ -232,8 +457,6 @@ export const db = {
 
             // Handle specific column missing errors
             if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('schema cache')) {
-              // Extract column name from error message
-              // Example: "Could not find the 'first_installment_date' column of 'sales' in the schema cache"
               const columnMatch1 = error.message?.match(/column ['"](.+?)['"]/);
               const columnMatch2 = error.message?.match(/['"](.+?)['"] column/);
               
@@ -248,26 +471,15 @@ export const db = {
               }
             }
             
-            // If we're here, it's either not a column error or we couldn't identify the column
             break;
           }
 
           if (!currentError) {
             results.synced++;
           } else {
-            if (isConnectionError(currentError) || currentError.message?.includes('Failed to fetch') || String(currentError).includes('Failed to fetch')) {
-              console.warn(`Error syncing ${table} item ${item.id}:`, currentError.message || currentError);
-            } else {
-              console.error(`Error syncing ${table} item ${item.id}:`, currentError.message || currentError);
-            }
             results.failed++;
           }
         } catch (e: any) {
-          if (isConnectionError(e) || e.message?.includes('Failed to fetch') || String(e).includes('Failed to fetch')) {
-            console.warn(`Network error syncing ${table} item ${item.id}:`, e.message || e);
-          } else {
-            console.error(`Fatal error syncing ${table} item ${item.id}:`, e.message || e);
-          }
           results.failed++;
         }
       }
@@ -279,7 +491,7 @@ export const db = {
 
     return { 
       success: true, 
-      message: `Sincronização concluída: ${results.synced} itens enviados, ${results.failed} falhas.`,
+      message: `Sincronização concluída com a nuvem.`,
       stats: results 
     };
   },

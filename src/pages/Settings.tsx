@@ -61,6 +61,7 @@ export default function Settings() {
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('auto_webhook_url') || '');
   const [webhookToken, setWebhookToken] = useState(() => localStorage.getItem('auto_webhook_token') || '');
   const [isWebhookEnabled, setIsWebhookEnabled] = useState(() => localStorage.getItem('auto_webhook_enabled') === 'true');
+  const [isFullAutoEnabled, setIsFullAutoEnabled] = useState(() => localStorage.getItem('auto_full_auto_enabled') === 'true');
   const [template3Days, setTemplate3Days] = useState(() => localStorage.getItem('auto_template_3_days') || DEFAULT_TEMPLATES.days_3_before);
   const [templateDayOf, setTemplateDayOf] = useState(() => localStorage.getItem('auto_template_day_of') || DEFAULT_TEMPLATES.day_of);
   const [templateOverdue, setTemplateOverdue] = useState(() => localStorage.getItem('auto_template_overdue') || DEFAULT_TEMPLATES.overdue);
@@ -91,6 +92,21 @@ export default function Settings() {
 
   const [isSendingAll, setIsSendingAll] = useState(false);
   const [sendingStatuses, setSendingStatuses] = useState<{ [key: string]: 'idle' | 'sending' | 'success' | 'failed' }>({});
+  const [cloudStats, setCloudStats] = useState<any>(null);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+
+  const loadCloudStats = async () => {
+    try {
+      const stats = await db.getCloudStats();
+      if (stats) setCloudStats(stats);
+    } catch (e) {
+      console.warn('Failed to load cloud stats:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadCloudStats();
+  }, [activeTab]);
 
   // Fetch queries to compile notifications
   const { data: salesList = [] } = useQuery({
@@ -122,10 +138,11 @@ export default function Settings() {
     ? getSaleNotifications(salesList, clientsList, iphonesList, consolesList).filter(n => n.daysDiff <= 3) 
     : [];
 
-  const saveAutomationSettings = () => {
+  const saveAutomationSettings = async () => {
     localStorage.setItem('auto_webhook_url', webhookUrl);
     localStorage.setItem('auto_webhook_token', webhookToken);
     localStorage.setItem('auto_webhook_enabled', String(isWebhookEnabled));
+    localStorage.setItem('auto_full_auto_enabled', String(isFullAutoEnabled));
     localStorage.setItem('auto_template_3_days', template3Days);
     localStorage.setItem('auto_template_day_of', templateDayOf);
     localStorage.setItem('auto_template_overdue', templateOverdue);
@@ -139,8 +156,45 @@ export default function Settings() {
     localStorage.setItem('auto_template_order_thank_you', templateOrderThankYou);
     localStorage.setItem('auto_attendant_name', attendantName);
     localStorage.setItem('auto_pix_info', pixInfo);
+
+    // Sync to server
+    if (user?.id) {
+      try {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            settings: {
+              webhookUrl,
+              webhookToken,
+              isWebhookEnabled,
+              isFullAutoEnabled,
+              template3Days,
+              templateDayOf,
+              templateOverdue,
+              templateRegistration,
+              templateOrderConfirmed,
+              templateOrderPreparing,
+              templateOrderReady,
+              templateOrderOnWay,
+              templateOrderDelivered,
+              templateGuaranteeSent,
+              templateOrderThankYou,
+              attendantName,
+              pixInfo
+            }
+          })
+        });
+      } catch (err) {
+        console.error('Error syncing automation settings to server:', err);
+      }
+    }
+
     if (isWebhookEnabled && !webhookUrl.trim()) {
       toast.success('Configurações salvas! Nota: Insira a URL do Webhook ou use o modo WhatsApp Web.');
+    } else if (isFullAutoEnabled && !isWebhookEnabled) {
+      toast.success('Configurações salvas! A automação em 2º plano requer o Webhook ativado.');
     } else {
       toast.success('Configurações de automação salvas com sucesso! 🚀');
     }
@@ -691,87 +745,116 @@ export default function Settings() {
       {/* RENDER TAB: BACKUP & NUVEM */}
       {activeTab === 'backup' && (
         <div className="space-y-6 animate-in fade-in duration-300">
-          {/* Card: Backup na Nuvem */}
-          <div className="bg-card border rounded-xl p-6 shadow-sm">
+          {/* Card: Vínculo em Nuvem Multi-Dispositivos */}
+          <div className="bg-card border border-emerald-500/20 rounded-xl p-6 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
               <div>
                 <h2 className="text-lg font-semibold flex items-center gap-2 mb-1 text-foreground">
                   <Cloud className="h-5 w-5 text-emerald-400 animate-pulse" />
-                  Backup na Nuvem (Segurança Online)
+                  Vínculo & Sincronização em Nuvem (Multi-Aparelhos)
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Proteja seus dados contra perdas. Seus clientes, vendas e estoque salvos de forma segura e acessíveis de qualquer dispositivo.
+                  Seus dados salvos e vinculados na nuvem para você acessar de qualquer celular, tablet ou computador instantaneamente.
                 </p>
               </div>
 
-              {isAuthenticated ? (
-                <div className="p-3 rounded-xl border border-emerald-500/10 bg-emerald-500/5 text-emerald-400 text-xs flex items-center gap-2.5 shrink-0 self-start md:self-center">
-                  <div className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </div>
-                  <div>
-                    <p className="font-bold">Backup Ativo</p>
-                    <p className="opacity-80 font-mono text-[10px]">{user?.email}</p>
-                  </div>
+              <div className="p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 text-xs flex items-center gap-2.5 shrink-0 self-start md:self-center">
+                <div className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                 </div>
-              ) : (
-                <div className="p-3 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-500 text-xs flex items-center gap-2.5 shrink-0 self-start md:self-center">
-                  <ShieldAlert className="h-4 w-4 shrink-0" />
-                  <div>
-                    <p className="font-bold">Não Autenticado</p>
-                    <p className="opacity-80 text-[10px]">Faça login para ativar o backup</p>
-                  </div>
+                <div>
+                  <p className="font-bold text-emerald-300">Nuvem Online & Ativa</p>
+                  <p className="opacity-80 font-mono text-[10px]">Acesso Instantâneo em Qualquer Celular</p>
                 </div>
-              )}
+              </div>
             </div>
 
-            <div>
-              {isAuthenticated ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
-                    onClick={async () => {
-                      try {
-                        toast.promise(db.syncAll(), {
-                          loading: 'Sincronizando com a nuvem...',
-                          success: (data) => data.message || 'Sincronizado!',
-                          error: 'Erro ao sincronizar. Verifique a conexão.'
-                        });
-                        queryClient.invalidateQueries();
-                      } catch (e) {
-                        console.error(e);
-                      }
-                    }}
-                    className="bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold py-3 px-4 rounded-xl text-xs transition duration-300 cursor-pointer flex items-center justify-center gap-2 shadow-sm"
-                  >
-                    <Database className="h-4 w-4" />
-                    Sincronizar Banco de Dados
-                  </button>
-                  <button
-                    onClick={logout}
-                    className="bg-destructive/10 hover:bg-destructive/20 text-destructive font-bold py-3 px-4 rounded-xl text-xs transition duration-300 cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Desconectar Conta
-                  </button>
+            {/* Cloud Summary Badges */}
+            {cloudStats && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
+                <div className="p-3 rounded-xl bg-muted/20 border border-white/5 flex flex-col">
+                  <span className="text-[11px] text-muted-foreground">iPhones na Nuvem</span>
+                  <span className="text-lg font-extrabold text-foreground">{cloudStats.iphones ?? 0}</span>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  <p className="text-sm text-amber-500 border border-amber-500/10 bg-amber-500/5 p-4 rounded-xl leading-relaxed">
-                    <strong>Atenção:</strong> Seus dados estão salvos apenas localmente neste navegador. Limpar o histórico ou trocar de aparelho causará perda de informações se você não estiver logado.
-                  </p>
-                  <button
-                    onClick={() => {
-                      window.dispatchEvent(new Event('open_auth_modal'));
-                      toast.info('Abra a tela de login para conectar ou criar sua conta!');
-                    }}
-                    className="w-full bg-emerald-500 hover:bg-emerald-600 text-black py-3 rounded-xl text-xs font-black transition duration-300 flex items-center justify-center gap-2 cursor-pointer shadow-lg uppercase tracking-wider"
-                  >
-                    <LogIn className="h-4 w-4" />
-                    Cadastrar / Conectar Conta de Backup
-                  </button>
+                <div className="p-3 rounded-xl bg-muted/20 border border-white/5 flex flex-col">
+                  <span className="text-[11px] text-muted-foreground">Consoles na Nuvem</span>
+                  <span className="text-lg font-extrabold text-foreground">{cloudStats.consoles ?? 0}</span>
                 </div>
-              )}
+                <div className="p-3 rounded-xl bg-muted/20 border border-white/5 flex flex-col">
+                  <span className="text-[11px] text-muted-foreground">Clientes na Nuvem</span>
+                  <span className="text-lg font-extrabold text-foreground">{cloudStats.clients ?? 0}</span>
+                </div>
+                <div className="p-3 rounded-xl bg-muted/20 border border-white/5 flex flex-col">
+                  <span className="text-[11px] text-muted-foreground">Vendas na Nuvem</span>
+                  <span className="text-lg font-extrabold text-foreground">{cloudStats.sales ?? 0}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+              <button
+                disabled={isSyncingCloud}
+                onClick={async () => {
+                  setIsSyncingCloud(true);
+                  try {
+                    const res = await db.pushToCloud();
+                    if (res.success) {
+                      toast.success('Todos os dados deste aparelho foram enviados e salvos na nuvem com sucesso! Agora você pode abrir em qualquer outro celular.');
+                      await loadCloudStats();
+                    } else {
+                      toast.error(res.message);
+                    }
+                  } catch (e: any) {
+                    toast.error('Erro ao salvar na nuvem: ' + e.message);
+                  } finally {
+                    setIsSyncingCloud(false);
+                  }
+                }}
+                className="bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold py-3.5 px-4 rounded-xl text-xs transition duration-300 cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+              >
+                <Upload className="h-4 w-4" />
+                {isSyncingCloud ? 'Salvando na Nuvem...' : 'Salvar Dados deste Celular na Nuvem'}
+              </button>
+
+              <button
+                disabled={isSyncingCloud}
+                onClick={async () => {
+                  setIsSyncingCloud(true);
+                  try {
+                    const res = await db.pullFromCloud();
+                    if (res.success) {
+                      toast.success(res.message);
+                      queryClient.invalidateQueries();
+                      await loadCloudStats();
+                    } else {
+                      toast.error(res.message);
+                    }
+                  } catch (e: any) {
+                    toast.error('Erro ao puxar dados da nuvem: ' + e.message);
+                  } finally {
+                    setIsSyncingCloud(false);
+                  }
+                }}
+                className="bg-zinc-100 hover:bg-white text-black font-extrabold py-3.5 px-4 rounded-xl text-xs transition duration-300 cursor-pointer flex items-center justify-center gap-2 shadow-lg"
+              >
+                <RefreshCw className={cn("h-4 w-4", isSyncingCloud && "animate-spin")} />
+                Puxar Dados da Nuvem para este Aparelho
+              </button>
+            </div>
+
+            <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs space-y-2 text-foreground">
+              <p className="font-bold text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                Sincronização 100% Automática em Tempo Real:
+              </p>
+              <p className="text-muted-foreground leading-relaxed">
+                Você <strong>não precisa clicar em nada</strong>. O sistema sincroniza sozinho a cada segundo em segundo plano:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-muted-foreground pl-1">
+                <li>Ao cadastrar, editar ou vender qualquer produto ou cliente, a alteração é salva na nuvem na hora.</li>
+                <li>Ao abrir o aplicativo em qualquer outro celular, computador ou tablet, todos os seus dados carregam automaticamente.</li>
+              </ul>
             </div>
           </div>
 
@@ -986,6 +1069,23 @@ export default function Settings() {
                     type="checkbox"
                     checked={isWebhookEnabled}
                     onChange={(e) => setIsWebhookEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-400 after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-black peer-checked:after:border-transparent"></div>
+                </label>
+              </div>
+
+              {/* Full Auto Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
+                <div>
+                  <p className="text-xs font-bold text-foreground">Automação 100% Automática (Segundo Plano)</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">O servidor envia as cobranças sozinho diariamente, sem precisar abrir o app</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isFullAutoEnabled}
+                    onChange={(e) => setIsFullAutoEnabled(e.target.checked)}
                     className="sr-only peer"
                   />
                   <div className="w-9 h-5 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-zinc-400 after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500 peer-checked:after:bg-black peer-checked:after:border-transparent"></div>
