@@ -3,7 +3,7 @@ import { copyToClipboard } from '../utils/url';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
-import { Plus, FileText, Filter, Edit2, Trash2, CheckCircle2, Clock, CreditCard, Calendar, DollarSign, MessageSquare, Copy, Check, ExternalLink, RefreshCw } from 'lucide-react';
+import { Plus, FileText, Filter, Edit2, Trash2, CheckCircle2, Clock, CreditCard, Calendar, DollarSign, MessageSquare, Copy, Check, ExternalLink, RefreshCw, FileCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, isWithinInterval, startOfDay, endOfDay, addDays, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -12,6 +12,7 @@ import { broadcastLocalChange } from '../services/realtime';
 import { Link } from 'react-router-dom';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
 import WhatsAppStatusModal from '../components/WhatsAppStatusModal';
+import QuitacaoModal from '../components/QuitacaoModal';
 import { WhatsAppStatusType } from '../lib/whatsappUtils';
 import { Console } from '../types';
 import { cn } from '../lib/utils';
@@ -31,6 +32,10 @@ export default function Sales() {
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [statusClientData, setStatusClientData] = useState<{ name: string; phone: string; itemName?: string } | null>(null);
   const [statusDefaultType, setStatusDefaultType] = useState<WhatsAppStatusType>('order_preparing');
+  
+  // Quitação Modal States
+  const [quitacaoModalOpen, setQuitacaoModalOpen] = useState(false);
+  const [quitacaoData, setQuitacaoData] = useState<{ sale: any; client: any; iphone?: any; consoleObj?: any } | null>(null);
   
   // Installment Management States
   const [selectedSaleForInstallments, setSelectedSaleForInstallments] = useState<any>(null);
@@ -317,14 +322,7 @@ export default function Sales() {
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             Vendas
             <button 
-              onClick={() => {
-                queryClient.invalidateQueries({ queryKey: ['sales'] });
-                toast.promise(db.sales.list(), {
-                  loading: 'Sincronizando assinaturas...',
-                  success: 'Sincronização concluída!',
-                  error: 'Erro ao sincronizar.'
-                });
-              }}
+              onClick={handleSyncSignatures}
               className="p-1 hover:bg-muted rounded-full transition-colors"
               title="Sincronizar assinaturas agora"
             >
@@ -559,18 +557,33 @@ export default function Sales() {
 
                 // Installments and Payments calculation
                 const isInstallmentSale = sale.installments && sale.installments > 1;
-                const storedPaymentsStr = localStorage.getItem(`inst_payments_${sale.id}`);
                 let customPayments: Record<number, number> = {};
                 let hasCustomPayments = false;
                 
-                if (storedPaymentsStr) {
+                if (sale.custom_payments) {
                   try {
-                    customPayments = JSON.parse(storedPaymentsStr) as Record<number, number>;
-                    hasCustomPayments = true;
+                    customPayments = (typeof sale.custom_payments === 'string' 
+                      ? JSON.parse(sale.custom_payments) 
+                      : sale.custom_payments) as Record<number, number>;
+                    hasCustomPayments = Object.keys(customPayments).length > 0;
                   } catch (e) {
                     window.console.error(e);
                   }
-                } else if (isInstallmentSale) {
+                }
+                
+                if (!hasCustomPayments) {
+                  const storedPaymentsStr = localStorage.getItem(`inst_payments_${sale.id}`);
+                  if (storedPaymentsStr) {
+                    try {
+                      customPayments = JSON.parse(storedPaymentsStr) as Record<number, number>;
+                      hasCustomPayments = true;
+                    } catch (e) {
+                      window.console.error(e);
+                    }
+                  }
+                }
+                
+                if (!hasCustomPayments && isInstallmentSale) {
                   const totalAmount = sale.sell_price - (sale.down_payment || 0);
                   const totalInst = sale.installments || 1;
                   const installmentValue = totalAmount / totalInst;
@@ -713,6 +726,22 @@ export default function Sales() {
                           <MessageSquare className="h-4 w-4" />
                           <span className="hidden sm:inline">Status</span>
                         </button>
+                        <button
+                          onClick={() => {
+                            setQuitacaoData({
+                              sale,
+                              client,
+                              iphone: iphones.find(i => i.id === sale.iphone_id),
+                              consoleObj: consoles.find(c => c.id === sale.console_id)
+                            });
+                            setQuitacaoModalOpen(true);
+                          }}
+                          className="bg-purple-600/10 text-purple-600 hover:bg-purple-600 hover:text-white transition-all p-1.5 rounded-lg text-xs flex items-center gap-1 font-bold cursor-pointer"
+                          title="Gerar / Enviar Comprovante de Quitação Integral"
+                        >
+                          <FileCheck className="h-4 w-4" />
+                          <span className="hidden sm:inline">Quitação</span>
+                        </button>
                         {sale.installments && sale.installments > 1 && (
                           <button 
                             onClick={() => handleOpenInstallmentsModal(sale)}
@@ -810,12 +839,30 @@ export default function Sales() {
                     Cliente: <strong className="text-white">{clientName}</strong> • {itemName}
                   </p>
                 </div>
-                <button 
-                  onClick={() => setSelectedSaleForInstallments(null)} 
-                  className="text-emerald-200 hover:text-white transition-colors text-xl font-semibold bg-emerald-900/40 p-1.5 rounded-full"
-                >
-                  &times;
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setQuitacaoData({
+                        sale,
+                        client,
+                        iphone,
+                        consoleObj
+                      });
+                      setQuitacaoModalOpen(true);
+                    }}
+                    className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all shadow border border-emerald-500/40"
+                    title="Emitir Comprovante de Quitação Integral"
+                  >
+                    <FileCheck className="h-4 w-4 text-emerald-200" />
+                    <span>Termo de Quitação</span>
+                  </button>
+                  <button 
+                    onClick={() => setSelectedSaleForInstallments(null)} 
+                    className="text-emerald-200 hover:text-white transition-colors text-xl font-semibold bg-emerald-900/40 p-1.5 rounded-full"
+                  >
+                    &times;
+                  </button>
+                </div>
               </div>
 
               {/* Body */}
@@ -859,15 +906,37 @@ export default function Sales() {
 
                   {/* Lançamento e Distribuição Rápida de Pagamento */}
                   <div className="bg-emerald-50/50 dark:bg-emerald-950/20 p-4 rounded-xl border border-emerald-100 dark:border-emerald-900/50 space-y-3">
-                    <div className="flex flex-col gap-1">
-                      <h5 className="font-bold text-xs text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
-                        <DollarSign className="h-3.5 w-3.5 text-emerald-600" />
-                        Lançar e Distribuir Pagamento Rápido
-                      </h5>
-                      <p className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80">
-                        Digite um valor recebido. O sistema irá preencher automaticamente as parcelas de forma inteligente.
-                      </p>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex flex-col gap-0.5">
+                        <h5 className="font-bold text-xs text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <DollarSign className="h-3.5 w-3.5 text-emerald-600" />
+                          Lançar e Distribuir Pagamento Rápido
+                        </h5>
+                        <p className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80">
+                          Digite um valor recebido. O sistema irá preencher automaticamente as parcelas de forma inteligente.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const calculated = getCalculatedInstallments(sale, customInstallmentPayments);
+                          const maxIdx = calculated.length > 0 ? Math.max(...calculated.map(i => i.index)) : totalInst;
+                          const nextIdx = maxIdx + 1;
+                          setCustomInstallmentPayments(prev => ({
+                            ...prev,
+                            [nextIdx]: 0
+                          }));
+                          toast.success(`Parcela ${nextIdx} adicionada ao carnê com sucesso!`);
+                        }}
+                        className="bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 font-bold text-xs px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shrink-0 shadow-sm active:scale-95 self-start sm:self-auto"
+                        title="Adicionar mais uma parcela ao carnê"
+                      >
+                        <Plus className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        <span>Adicionar Parcela</span>
+                      </button>
                     </div>
+
                     <div className="flex gap-2">
                       <div className="relative flex-1">
                         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-emerald-700 dark:text-emerald-400">R$</span>
@@ -917,10 +986,11 @@ export default function Sales() {
                           setQuickPaymentVal('');
                           toast.success(`R$ ${amount.toFixed(2)} distribuído com sucesso!`);
                         }}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0 shadow-sm active:scale-95"
                       >
                         Distribuir
                       </button>
+
                       <button
                         type="button"
                         onClick={() => {
@@ -936,7 +1006,27 @@ export default function Sales() {
                   </div>
 
                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                    <h4 className="font-bold text-xs text-muted-foreground mb-2 uppercase tracking-wider">Cronograma e Valores Pagos</h4>
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="font-bold text-xs text-muted-foreground uppercase tracking-wider">Cronograma e Valores Pagos</h4>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const calculated = getCalculatedInstallments(sale, customInstallmentPayments);
+                          const maxIdx = calculated.length > 0 ? Math.max(...calculated.map(i => i.index)) : totalInst;
+                          const nextIdx = maxIdx + 1;
+                          setCustomInstallmentPayments(prev => ({
+                            ...prev,
+                            [nextIdx]: 0
+                          }));
+                          toast.success(`Parcela ${nextIdx} adicionada ao carnê!`);
+                        }}
+                        className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                        title="Adicionar parcela extra"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Adicionar Parcela</span>
+                      </button>
+                    </div>
                     {(() => {
                       const calculatedList = getCalculatedInstallments(sale, customInstallmentPayments);
                       return calculatedList.map((inst) => {
@@ -972,11 +1062,29 @@ export default function Sales() {
                                 className="rounded text-emerald-600 focus:ring-emerald-500 border-muted h-4 w-4 cursor-pointer"
                               />
                               <div className="flex flex-col">
-                                <span className="font-semibold text-xs">
-                                  {inst.index}ª Parcela {inst.index > totalInst && (
-                                    <span className="text-[9px] text-amber-600 font-bold bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900 ml-1">
-                                      Ajuste
+                                <span className="font-semibold text-xs flex items-center gap-1.5">
+                                  {inst.index}ª Parcela 
+                                  {inst.index > totalInst && (
+                                    <span className="text-[9px] text-amber-600 font-bold bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900">
+                                      Adicionada
                                     </span>
+                                  )}
+                                  {inst.index > totalInst && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCustomInstallmentPayments(prev => {
+                                          const next = { ...prev };
+                                          delete next[inst.index];
+                                          return next;
+                                        });
+                                        toast.info(`Parcela ${inst.index} removida.`);
+                                      }}
+                                      className="p-0.5 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 rounded transition-colors"
+                                      title={`Remover ${inst.index}ª parcela`}
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
                                   )}
                                 </span>
                                 <span className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -1105,6 +1213,19 @@ export default function Sales() {
         clientPhone={statusClientData?.phone || ''}
         itemName={statusClientData?.itemName || ''}
         defaultStatusType={statusDefaultType}
+      />
+
+      {/* MODAL DE QUITAÇÃO INTEGRAL */}
+      <QuitacaoModal
+        isOpen={quitacaoModalOpen}
+        onClose={() => {
+          setQuitacaoModalOpen(false);
+          setQuitacaoData(null);
+        }}
+        sale={quitacaoData?.sale}
+        client={quitacaoData?.client}
+        iphone={quitacaoData?.iphone}
+        consoleObj={quitacaoData?.consoleObj}
       />
     </div>
   );

@@ -143,6 +143,27 @@ setTimeout(runAutomationTask, 30 * 1000);
 
 app.use(express.json({ limit: "15mb" }));
 
+// Serve static assets from public folder
+const PUBLIC_DIR = path.join(process.cwd(), "public");
+if (fs.existsSync(PUBLIC_DIR)) {
+  app.use(express.static(PUBLIC_DIR));
+}
+
+// Explicit manifest.json endpoint with correct MIME type
+app.get("/manifest.json", (req, res) => {
+  const manifestPath = path.join(process.cwd(), "public", "manifest.json");
+  if (fs.existsSync(manifestPath)) {
+    res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
+    return res.sendFile(manifestPath);
+  }
+  const distManifestPath = path.join(process.cwd(), "dist", "manifest.json");
+  if (fs.existsSync(distManifestPath)) {
+    res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
+    return res.sendFile(distManifestPath);
+  }
+  res.status(404).json({ error: "Manifest not found" });
+});
+
 // Configure public sales file-system database
 const DATA_DIR = process.env.VERCEL ? path.join("/tmp", "data") : path.join(process.cwd(), "data");
 const SALES_FILE = path.join(DATA_DIR, "public_sales.json");
@@ -152,21 +173,27 @@ const TOKENS_FILE = path.join(DATA_DIR, "public_tokens.json");
 const USERS_FILE = path.join(DATA_DIR, "public_users.json");
 const CLOUD_DB_FILE = path.join(DATA_DIR, "cloud_database.json");
 
+const atomicWriteFileSync = (filePath: string, data: any) => {
+  const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2)}`;
+  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf8");
+  fs.renameSync(tempPath, filePath);
+};
+
 try {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   if (!fs.existsSync(SALES_FILE)) {
-    fs.writeFileSync(SALES_FILE, JSON.stringify({}), "utf8");
+    atomicWriteFileSync(SALES_FILE, {});
   }
   if (!fs.existsSync(CLIENTS_FILE)) {
-    fs.writeFileSync(CLIENTS_FILE, JSON.stringify({}), "utf8");
+    atomicWriteFileSync(CLIENTS_FILE, {});
   }
   if (!fs.existsSync(SETTINGS_FILE)) {
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({}), "utf8");
+    atomicWriteFileSync(SETTINGS_FILE, {});
   }
   if (!fs.existsSync(TOKENS_FILE)) {
-    fs.writeFileSync(TOKENS_FILE, JSON.stringify({}), "utf8");
+    atomicWriteFileSync(TOKENS_FILE, {});
   }
   if (!fs.existsSync(CLOUD_DB_FILE)) {
     const initialCloudDb = {
@@ -176,10 +203,23 @@ try {
       consoles: [],
       prices: [],
       sales: [],
+      purchases: [],
+      products: [],
+      product_units: [],
+      fiscal_documents: [],
+      fiscal_configs: [],
+      gifts: [],
+      gift_purchases: [],
+      gift_dispatches: [],
+      accessory_sales: [],
+      product_photos: [],
+      users: [],
+      store_settings: {},
       custom_payments: {},
+      deleted_ids: {},
       updated_at: new Date().toISOString()
     };
-    fs.writeFileSync(CLOUD_DB_FILE, JSON.stringify(initialCloudDb, null, 2), "utf8");
+    atomicWriteFileSync(CLOUD_DB_FILE, initialCloudDb);
   }
   if (!fs.existsSync(USERS_FILE)) {
     const defaultUsers = [
@@ -193,11 +233,94 @@ try {
         created_at: new Date().toISOString()
       }
     ];
-    fs.writeFileSync(USERS_FILE, JSON.stringify(defaultUsers, null, 2), "utf8");
+    atomicWriteFileSync(USERS_FILE, defaultUsers);
   }
 } catch (fsErr) {
   console.warn("[Vercel FS Warning] Initializing local files in fallback mode:", fsErr);
 }
+
+const sanitizeJsonString = (str: string): string => {
+  if (!str || typeof str !== "string") return str;
+  let result = "";
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    const code = str.charCodeAt(i);
+
+    if (!inString) {
+      if (char === '"') {
+        inString = true;
+        result += char;
+      } else {
+        if (code < 32 && char !== "\n" && char !== "\r" && char !== "\t") {
+          // ignore non-printable outside string literals
+        } else {
+          result += char;
+        }
+      }
+    } else {
+      if (escape) {
+        escape = false;
+        if (char === '"' || char === "\\" || char === "/" || char === "b" || char === "f" || char === "n" || char === "r" || char === "t") {
+          result += char;
+        } else if (char === "u") {
+          const next4 = str.substring(i + 1, i + 5);
+          if (/^[0-9a-fA-F]{4}$/.test(next4)) {
+            result += char;
+          } else {
+            result += "\\u";
+          }
+        } else {
+          result += "\\" + char;
+        }
+      } else {
+        if (char === "\\") {
+          escape = true;
+          result += "\\";
+        } else if (char === '"') {
+          inString = false;
+          result += '"';
+        } else if (code < 32) {
+          if (char === "\n") result += "\\n";
+          else if (char === "\r") result += "\\r";
+          else if (char === "\t") result += "\\t";
+          else if (char === "\b") result += "\\b";
+          else if (char === "\f") result += "\\f";
+          else {
+            result += "\\u" + code.toString(16).padStart(4, "0");
+          }
+        } else {
+          result += char;
+        }
+      }
+    }
+  }
+
+  return result;
+};
+
+const safeJsonParse = <T = any>(raw: string | undefined | null, defaultValue: T): T => {
+  if (!raw || typeof raw !== "string") return defaultValue;
+  try {
+    return JSON.parse(raw);
+  } catch (e1) {
+    try {
+      const sanitized = sanitizeJsonString(raw);
+      return JSON.parse(sanitized);
+    } catch (e2) {
+      try {
+        let fallback = raw.replace(/\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, "\\\\");
+        fallback = sanitizeJsonString(fallback);
+        return JSON.parse(fallback);
+      } catch (e3) {
+        console.error("Safe JSON parse error:", (e1 as Error)?.message);
+        return defaultValue;
+      }
+    }
+  }
+};
 
 const readCloudDb = (): any => {
   try {
@@ -209,12 +332,48 @@ const readCloudDb = (): any => {
         consoles: [],
         prices: [],
         sales: [],
+        purchases: [],
+        products: [],
+        product_units: [],
+        fiscal_documents: [],
+        fiscal_configs: [],
+        gifts: [],
+        gift_purchases: [],
+        gift_dispatches: [],
+        accessory_sales: [],
+        product_photos: [],
+        users: [],
+        store_settings: {},
         custom_payments: {},
+        deleted_ids: {},
         updated_at: new Date().toISOString()
       };
     }
     const content = fs.readFileSync(CLOUD_DB_FILE, "utf8");
-    return JSON.parse(content || "{}");
+    const parsed = safeJsonParse<any>(content, {});
+    return {
+      suppliers: parsed.suppliers || [],
+      clients: parsed.clients || [],
+      iphones: parsed.iphones || [],
+      consoles: parsed.consoles || [],
+      prices: parsed.prices || [],
+      sales: parsed.sales || [],
+      purchases: parsed.purchases || [],
+      products: parsed.products || [],
+      product_units: parsed.product_units || [],
+      fiscal_documents: parsed.fiscal_documents || [],
+      fiscal_configs: parsed.fiscal_configs || [],
+      gifts: parsed.gifts || [],
+      gift_purchases: parsed.gift_purchases || [],
+      gift_dispatches: parsed.gift_dispatches || [],
+      accessory_sales: parsed.accessory_sales || [],
+      product_photos: parsed.product_photos || [],
+      users: parsed.users || [],
+      store_settings: parsed.store_settings || {},
+      custom_payments: parsed.custom_payments || {},
+      deleted_ids: parsed.deleted_ids || {},
+      updated_at: parsed.updated_at || new Date().toISOString()
+    };
   } catch (err) {
     console.error("Error reading cloud db file:", err);
     return {
@@ -224,7 +383,20 @@ const readCloudDb = (): any => {
       consoles: [],
       prices: [],
       sales: [],
+      purchases: [],
+      products: [],
+      product_units: [],
+      fiscal_documents: [],
+      fiscal_configs: [],
+      gifts: [],
+      gift_purchases: [],
+      gift_dispatches: [],
+      accessory_sales: [],
+      product_photos: [],
+      users: [],
+      store_settings: {},
       custom_payments: {},
+      deleted_ids: {},
       updated_at: new Date().toISOString()
     };
   }
@@ -233,7 +405,7 @@ const readCloudDb = (): any => {
 const writeCloudDb = (data: any) => {
   try {
     data.updated_at = new Date().toISOString();
-    fs.writeFileSync(CLOUD_DB_FILE, JSON.stringify(data, null, 2), "utf8");
+    atomicWriteFileSync(CLOUD_DB_FILE, data);
   } catch (err) {
     console.error("Error writing cloud db file:", err);
   }
@@ -243,7 +415,7 @@ const readPublicUsers = (): any[] => {
   try {
     if (!fs.existsSync(USERS_FILE)) return [];
     const content = fs.readFileSync(USERS_FILE, "utf8");
-    return JSON.parse(content || "[]");
+    return safeJsonParse(content, []);
   } catch (err) {
     console.error("Error reading public users file:", err);
     return [];
@@ -252,7 +424,7 @@ const readPublicUsers = (): any[] => {
 
 const writePublicUsers = (data: any[]) => {
   try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2), "utf8");
+    atomicWriteFileSync(USERS_FILE, data);
   } catch (err) {
     console.error("Error writing public users file:", err);
   }
@@ -260,15 +432,35 @@ const writePublicUsers = (data: any[]) => {
 
 // --- CLOUD DATABASE & MULTI-DEVICE PERSISTENCE API ---
 
+const ALL_CLOUD_TABLES = [
+  'suppliers', 'clients', 'iphones', 'consoles', 'prices', 'sales',
+  'purchases', 'products', 'product_units', 'fiscal_documents', 'fiscal_configs',
+  'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'users'
+];
+
+// Helper to filter out deleted items
+const filterDeletedItems = (db: any) => {
+  if (!db) return db;
+  const deletedIdsMap = db.deleted_ids || {};
+
+  for (const table of ALL_CLOUD_TABLES) {
+    if (Array.isArray(db[table]) && Array.isArray(deletedIdsMap[table]) && deletedIdsMap[table].length > 0) {
+      const deletedSet = new Set<string>(deletedIdsMap[table]);
+      db[table] = db[table].filter((i: any) => i && i.id && !deletedSet.has(i.id));
+    }
+  }
+  return db;
+};
+
 // 1. Fetch entire cloud database (all tables)
 app.get("/api/cloud-db", (req, res) => {
-  const db = readCloudDb();
+  const db = filterDeletedItems(readCloudDb());
   res.json({ success: true, data: db });
 });
 
 // 2. Fetch stats on cloud database
 app.get("/api/cloud-db/stats", (req, res) => {
-  const db = readCloudDb();
+  const db = filterDeletedItems(readCloudDb());
   res.json({
     success: true,
     stats: {
@@ -278,7 +470,17 @@ app.get("/api/cloud-db/stats", (req, res) => {
       suppliers: (db.suppliers || []).length,
       sales: (db.sales || []).length,
       prices: (db.prices || []).length,
+      purchases: (db.purchases || []).length,
+      products: (db.products || []).length,
+      product_units: (db.product_units || []).length,
+      fiscal_documents: (db.fiscal_documents || []).length,
+      gifts: (db.gifts || []).length,
+      gift_purchases: (db.gift_purchases || []).length,
+      gift_dispatches: (db.gift_dispatches || []).length,
+      accessory_sales: (db.accessory_sales || []).length,
+      product_photos: (db.product_photos || []).length,
       custom_payments: Object.keys(db.custom_payments || {}).length,
+      has_settings: Boolean(db.store_settings && Object.keys(db.store_settings).length > 0),
       updated_at: db.updated_at
     }
   });
@@ -288,55 +490,144 @@ app.get("/api/cloud-db/stats", (req, res) => {
 app.post("/api/cloud-db/push", (req, res) => {
   const incoming = req.body.data || {};
   const current = readCloudDb();
+  if (!current.deleted_ids) current.deleted_ids = {};
 
-  const tables = ['suppliers', 'clients', 'iphones', 'consoles', 'prices', 'sales'];
-  
-  for (const table of tables) {
+  // Merge incoming deleted_ids from device
+  if (incoming.deleted_ids && typeof incoming.deleted_ids === 'object') {
+    for (const table of ALL_CLOUD_TABLES) {
+      if (Array.isArray(incoming.deleted_ids[table])) {
+        const existingDeleted = new Set<string>(current.deleted_ids[table] || []);
+        for (const id of incoming.deleted_ids[table]) {
+          if (id) existingDeleted.add(id);
+        }
+        current.deleted_ids[table] = Array.from(existingDeleted);
+      }
+    }
+  }
+
+  for (const table of ALL_CLOUD_TABLES) {
+    const deletedSet = new Set<string>(current.deleted_ids[table] || []);
+
     if (Array.isArray(incoming[table])) {
       const existingList = Array.isArray(current[table]) ? current[table] : [];
       const itemMap = new Map<string, any>();
       
-      // Load current cloud items first
+      // Load current cloud items first (if not deleted)
       for (const item of existingList) {
-        if (item && item.id) {
+        if (item && item.id && !deletedSet.has(item.id)) {
           itemMap.set(item.id, item);
         }
       }
       
-      // Merge incoming items from this device
+      // Merge incoming items from this device (if not deleted) with timestamp & sales progress preservation
       for (const item of incoming[table]) {
-        if (item && item.id) {
+        if (item && item.id && !deletedSet.has(item.id)) {
           const existingItem = itemMap.get(item.id);
-          itemMap.set(item.id, { ...(existingItem || {}), ...item });
+          if (!existingItem) {
+            itemMap.set(item.id, item);
+          } else {
+            const existingTime = new Date(existingItem.updated_at || existingItem.created_at || 0).getTime();
+            const incomingTime = new Date(item.updated_at || item.created_at || 0).getTime();
+
+            // Newer timestamp takes priority
+            let merged = incomingTime >= existingTime
+              ? { ...existingItem, ...item }
+              : { ...item, ...existingItem };
+
+            // For sales: protect payment progress and installments paid count
+            if (table === 'sales') {
+              const exPaid = Number(existingItem.installments_paid) || 0;
+              const inPaid = Number(item.installments_paid) || 0;
+              if (incomingTime >= existingTime) {
+                merged.installments_paid = item.installments_paid !== undefined ? item.installments_paid : exPaid;
+              } else {
+                merged.installments_paid = Math.max(exPaid, inPaid);
+              }
+
+              // Merge custom payments map
+              try {
+                const exCust = typeof existingItem.custom_payments === 'string' ? safeJsonParse(existingItem.custom_payments, {}) : (existingItem.custom_payments || {});
+                const inCust = typeof item.custom_payments === 'string' ? safeJsonParse(item.custom_payments, {}) : (item.custom_payments || {});
+                const mergedCust = { ...exCust, ...inCust };
+                if (Object.keys(mergedCust).length > 0) {
+                  merged.custom_payments = JSON.stringify(mergedCust);
+                }
+              } catch (e) {}
+
+              // Preserve digital signature if either has it
+              if (existingItem.signature_data && !item.signature_data) {
+                merged.signature_data = existingItem.signature_data;
+                merged.signed_at = existingItem.signed_at;
+                merged.signed_ip = existingItem.signed_ip;
+              } else if (item.signature_data) {
+                merged.signature_data = item.signature_data;
+                merged.signed_at = item.signed_at;
+                merged.signed_ip = item.signed_ip;
+              }
+            }
+
+            // For stock items: if marked 'vendido' on either side recently, stay 'vendido'
+            if (table === 'iphones' || table === 'consoles') {
+              if (item.status === 'vendido' || existingItem.status === 'vendido') {
+                if (incomingTime > existingTime && item.status === 'disponivel') {
+                  merged.status = 'disponivel';
+                } else {
+                  merged.status = 'vendido';
+                }
+              }
+            }
+
+            itemMap.set(item.id, merged);
+          }
         }
       }
       
       current[table] = Array.from(itemMap.values());
+    } else if (Array.isArray(current[table]) && deletedSet.size > 0) {
+      current[table] = current[table].filter((i: any) => i && i.id && !deletedSet.has(i.id));
     }
   }
 
   // Merge custom payments dictionary
   if (incoming.custom_payments && typeof incoming.custom_payments === 'object') {
-    current.custom_payments = {
-      ...(current.custom_payments || {}),
-      ...incoming.custom_payments
+    if (!current.custom_payments) current.custom_payments = {};
+    for (const [saleId, val] of Object.entries(incoming.custom_payments)) {
+      if (typeof val === 'string' && val.trim()) {
+        try {
+          const incomingObj = safeJsonParse(val, {});
+          const currentVal = current.custom_payments[saleId];
+          const currentObj = currentVal ? safeJsonParse(currentVal, {}) : {};
+          const mergedObj = { ...currentObj, ...incomingObj };
+          current.custom_payments[saleId] = JSON.stringify(mergedObj);
+        } catch (e) {
+          current.custom_payments[saleId] = val as string;
+        }
+      }
+    }
+  }
+
+  // Merge store settings
+  if (incoming.store_settings && typeof incoming.store_settings === 'object') {
+    current.store_settings = {
+      ...(current.store_settings || {}),
+      ...incoming.store_settings
     };
   }
 
   writeCloudDb(current);
-  console.log(`[Cloud DB Sync] Synced from device: ${current.iphones.length} iphones, ${current.clients.length} clients, ${current.sales.length} sales.`);
+  console.log(`[Cloud DB Sync] Synced from device: ${current.iphones.length} iphones, ${current.clients.length} clients, ${current.sales.length} sales, ${current.prices.length} prices.`);
 
   res.json({
     success: true,
     message: "Banco de dados sincronizado na nuvem com sucesso!",
-    data: current
+    data: filterDeletedItems(current)
   });
 });
 
 // 4. Get specific table
 app.get("/api/cloud-db/:table", (req, res) => {
   const { table } = req.params;
-  const db = readCloudDb();
+  const db = filterDeletedItems(readCloudDb());
   const list = db[table] || [];
   res.json({ success: true, data: list });
 });
@@ -352,6 +643,10 @@ app.post("/api/cloud-db/:table", (req, res) => {
   const db = readCloudDb();
   if (!Array.isArray(db[table])) {
     db[table] = [];
+  }
+  if (!db.deleted_ids) db.deleted_ids = {};
+  if (Array.isArray(db.deleted_ids[table])) {
+    db.deleted_ids[table] = db.deleted_ids[table].filter((id: string) => id !== item.id);
   }
 
   const existingIdx = db[table].findIndex((i: any) => i.id === item.id);
@@ -373,6 +668,10 @@ app.put("/api/cloud-db/:table/:id", (req, res) => {
   if (!Array.isArray(db[table])) {
     db[table] = [];
   }
+  if (!db.deleted_ids) db.deleted_ids = {};
+  if (Array.isArray(db.deleted_ids[table])) {
+    db.deleted_ids[table] = db.deleted_ids[table].filter((delId: string) => delId !== id);
+  }
 
   const existingIdx = db[table].findIndex((i: any) => i.id === id);
   if (existingIdx >= 0) {
@@ -389,10 +688,18 @@ app.put("/api/cloud-db/:table/:id", (req, res) => {
 app.delete("/api/cloud-db/:table/:id", (req, res) => {
   const { table, id } = req.params;
   const db = readCloudDb();
+  
+  if (!db.deleted_ids) db.deleted_ids = {};
+  if (!Array.isArray(db.deleted_ids[table])) db.deleted_ids[table] = [];
+  if (!db.deleted_ids[table].includes(id)) {
+    db.deleted_ids[table].push(id);
+  }
+
   if (Array.isArray(db[table])) {
     db[table] = db[table].filter((i: any) => i.id !== id);
-    writeCloudDb(db);
   }
+
+  writeCloudDb(db);
   res.json({ success: true, message: "Item removido da nuvem com sucesso" });
 });
 
@@ -466,8 +773,8 @@ app.get("/api/dailytip", async (req, res) => {
       }
     });
 
-    // Try a few times or different model aliases to handle temporary 503s gracefully
-    const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+    // Robust list of Gemini models according to Google GenAI standards
+    const modelsToTry = ["gemini-3.7-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash", "gemini-3.1-pro-preview"];
     let lastMessage = "";
 
     for (const modelName of modelsToTry) {
@@ -483,7 +790,7 @@ app.get("/api/dailytip", async (req, res) => {
         }
       } catch (err: any) {
         lastMessage = err?.message || String(err);
-        console.log(`[Gemini Info] Model ${modelName} is busy. Trying next option...`);
+        // Fallback to next model
       }
     }
 
@@ -504,7 +811,7 @@ const readPublicSales = (): Record<string, any> => {
   try {
     if (!fs.existsSync(SALES_FILE)) return {};
     const content = fs.readFileSync(SALES_FILE, "utf8");
-    return JSON.parse(content || "{}");
+    return safeJsonParse(content, {});
   } catch (err) {
     console.error("Error reading public sales file:", err);
     return {};
@@ -513,7 +820,7 @@ const readPublicSales = (): Record<string, any> => {
 
 const writePublicSales = (data: Record<string, any>) => {
   try {
-    fs.writeFileSync(SALES_FILE, JSON.stringify(data, null, 2), "utf8");
+    atomicWriteFileSync(SALES_FILE, data);
   } catch (err) {
     console.error("Error writing public sales file:", err);
   }
@@ -549,8 +856,76 @@ app.post("/api/public-sales", (req, res) => {
 
 async function fetchSaleData(id: string) {
   const sales = readPublicSales();
-  const data = sales[id];
-  if (data) return data;
+  let data = sales[id];
+  if (data) {
+    const sigInfo = data.signatureInfo || data.sale_data?.signatureInfo || {};
+    data.signature_data = data.signature_data || data.sale?.signature_data || data.sale_data?.signature_data || sigInfo.signature_data;
+    data.signed_at = data.signed_at || data.sale?.signed_at || data.sale_data?.signed_at || sigInfo.signed_at;
+    data.signed_ip = data.signed_ip || data.sale?.signed_ip || data.sale_data?.signed_ip || sigInfo.signed_ip;
+    data.client_name = data.client_name || data.client?.name || data.sale?.client_name || sigInfo.client_name;
+  }
+
+  // Check cloud_database.json sales table if data or data.signature_data is missing
+  try {
+    const cloudDb = readCloudDb();
+    if (cloudDb && Array.isArray(cloudDb.sales)) {
+      const foundSale = cloudDb.sales.find((s: any) => s.id === id);
+      if (foundSale) {
+        const client = Array.isArray(cloudDb.clients) ? cloudDb.clients.find((c: any) => c.id === foundSale.client_id) : null;
+        const iphone = Array.isArray(cloudDb.iphones) ? cloudDb.iphones.find((i: any) => i.id === foundSale.iphone_id) : null;
+        const consoleItem = Array.isArray(cloudDb.consoles) ? cloudDb.consoles.find((c: any) => c.id === foundSale.console_id) : null;
+
+        if (!data) {
+          data = {
+            id: foundSale.id,
+            sale: foundSale,
+            client: client || { name: foundSale.client_name },
+            product: iphone || consoleItem,
+            signature_data: foundSale.signature_data,
+            signed_at: foundSale.signed_at,
+            signed_ip: foundSale.signed_ip,
+            client_name: foundSale.client_name || client?.name,
+            witness1_name: foundSale.witness1_name,
+            witness1_cpf: foundSale.witness1_cpf,
+            witness1_signature: foundSale.witness1_signature,
+            witness2_name: foundSale.witness2_name,
+            witness2_cpf: foundSale.witness2_cpf,
+            witness2_signature: foundSale.witness2_signature
+          };
+        } else {
+          data.sale = data.sale || foundSale;
+          data.client = data.client || client || { name: foundSale.client_name };
+          data.product = data.product || iphone || consoleItem;
+          if (foundSale.signature_data && (!data.signature_data || foundSale.signature_data.length >= (data.signature_data.length || 0))) {
+            data.signature_data = foundSale.signature_data;
+          }
+          if (data.signature_data && data.sale) {
+            data.sale.signature_data = data.signature_data;
+          }
+          if (foundSale.signed_at) {
+            data.signed_at = foundSale.signed_at;
+            if (data.sale) data.sale.signed_at = foundSale.signed_at;
+          }
+          if (foundSale.signed_ip) {
+            data.signed_ip = foundSale.signed_ip;
+            if (data.sale) data.sale.signed_ip = foundSale.signed_ip;
+          }
+          if (foundSale.client_name || client?.name) {
+            data.client_name = foundSale.client_name || client?.name;
+            if (data.sale) data.sale.client_name = data.client_name;
+          }
+        }
+        sales[id] = data;
+        writePublicSales(sales);
+      }
+    }
+  } catch (cloudErr) {
+    console.error(`[fetchSaleData] cloud db error:`, cloudErr);
+  }
+
+  if (data && data.signature_data) {
+    return data;
+  }
 
   try {
     let supabaseUrl = process.env.VITE_SUPABASE_URL || '';
@@ -732,6 +1107,32 @@ app.post("/api/public-sales/:id/sign", async (req, res) => {
   sales[id] = data;
   writePublicSales(sales);
 
+  // Also update cloud_database.json sales table
+  try {
+    const cloudDb = readCloudDb();
+    if (cloudDb && Array.isArray(cloudDb.sales)) {
+      const saleIndex = cloudDb.sales.findIndex((s: any) => s.id === id);
+      if (saleIndex !== -1) {
+        cloudDb.sales[saleIndex] = {
+          ...cloudDb.sales[saleIndex],
+          signature_data: data.signature_data,
+          signed_at: data.signed_at,
+          signed_ip: data.signed_ip,
+          client_name: data.client_name,
+          witness1_name: data.witness1_name,
+          witness1_cpf: data.witness1_cpf,
+          witness1_signature: data.witness1_signature,
+          witness2_name: data.witness2_name,
+          witness2_cpf: data.witness2_cpf,
+          witness2_signature: data.witness2_signature
+        };
+        writeCloudDb(cloudDb);
+      }
+    }
+  } catch (err) {
+    console.warn("Could not sync signature to cloud_database.json:", err);
+  }
+
   // Also try to update Supabase directly
   if (supabaseUrl && supabaseAnonKey) {
     try {
@@ -823,9 +1224,9 @@ app.post("/api/process-warranty", async (req, res) => {
     }
     Se não encontrar algo, use null. Responda APENAS o JSON.`;
 
-    // Try models in order - using valid platform aliases
-    const models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-pro"];
-    let lastErr = null;
+    // Try models in order - using valid official platform aliases
+    const models = ["gemini-3.7-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash", "gemini-3.1-pro-preview"];
+    let lastErr: any = null;
 
     for (const modelName of models) {
       try {
@@ -860,22 +1261,175 @@ app.post("/api/process-warranty", async (req, res) => {
         }
       } catch (err: any) {
         lastErr = err;
-        console.warn(`Model ${modelName} failed:`, err.message);
-        // Continue to next model on quota or model not found errors
-        if (err.message?.includes('429') || err.message?.includes('quota') || err.message?.includes('404') || err.message?.includes('503')) continue;
+        console.warn(`[OCR Receipt] Model ${modelName} failed:`, err?.message || err);
+        // Continue to next model on quota, not found, or temporary error
         continue;
       }
     }
 
-    throw lastErr || new Error("Falha ao processar com IA");
+    throw lastErr || new Error("Falha ao processar comprovante com IA");
 
   } catch (error: any) {
     console.error("Gemini processing error:", error);
-    const isQuota = error.message?.includes('429') || error.message?.includes('quota');
+    const errMsg = String(error?.message || error || "");
+    const isQuota = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('exhausted');
     res.status(isQuota ? 429 : 500).json({ 
       error: isQuota 
-        ? "Limite diário da IA atingido. Tente novamente mais tarde ou insira os dados manualmente." 
-        : `Erro no servidor: ${error.message}`
+        ? "Limite de requisições da IA atingido temporariamente. Aguarde alguns instantes e tente novamente, ou insira os dados manualmente." 
+        : `Erro ao processar com IA: ${errMsg}`
+    });
+  }
+});
+
+// --- PRICE TABLE IA PROCESSING API ---
+app.post("/api/process-price-table", async (req, res) => {
+  const { fileData, mimeType } = req.body;
+
+  if (!fileData) {
+    return res.status(400).json({ error: "Arquivo de imagem ou PDF é obrigatório" });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY || "";
+  if (!apiKey) {
+    return res.status(500).json({ error: "GEMINI_API_KEY não configurada no servidor" });
+  }
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+
+    const systemInstruction = `Você é um leitor e extrator especialista de tabelas e listas de preços de eletrônicos (iPhones, celulares, consoles, games).
+    Analise minuciosamente a imagem ou documento PDF enviado.
+    Extraia TODOS os produtos e preços listados na tabela ou imagem.
+    
+    COMO IDENTIFICAR E EXTRAIR PREÇOS:
+    - O preço pode estar em formato numérico como "2950", "2.950", "2.950,00", "2950,00", "R$ 3.200", "3.2k", "$ 550", "US$ 600", "U$ 450", ou ao lado do modelo como "11 64GB - 1450" ou em colunas como "VALOR", "PREÇO", "PIX", "À VISTA", "DINHEIRO", "VALOR PIX".
+    - Se houver mais de uma coluna de preço (ex: PIX vs CARTÃO vs PRAZO), priorize o preço À VISTA / PIX / DINHEIRO.
+    - Se o preço estiver em Reais (BRL), retorne no campo 'price' como número decimal positivo (ex: 2950.00).
+    - Se o preço for em Dólar (USD / $ / U$), preencha 'price_usd' com o valor em dólar (ex: 550.00) E também estime o 'price' em BRL (ex: 550 * 5.5 = 3025.00).
+    - Se encontrar apenas o preço em BRL, preencha 'price' e calcule 'price_usd' dividindo por 5.5.
+    - NUNCA retorne o preço como 0 se houver qualquer número ou indicação de valor associado ao aparelho.
+    
+    CAMPOS OBRIGATÓRIOS PARA CADA ITEM:
+    - category: 'iphone' (para celulares, smartphones, iPads, Apple Watch) ou 'console' (para PS5, PS4, Xbox, Nintendo Switch, etc.)
+    - model: Nome do modelo (ex: "iPhone 15", "iPhone 13", "PlayStation 5", "Nintendo Switch")
+    - version: Versão ou subtipo se houver (ex: "Pro Max", "Plus", "Slim", "OLED", "Digital")
+    - storage: Capacidade de armazenamento (ex: "128GB", "256GB", "64GB", "512GB", "1TB")
+    - color: Cor se mencionada (ex: "Preto", "Titânio Natural", "Branco", "Azul")
+    - condition: "Novo Lacrado" (se mencionar lacrado, novo, cpo) ou "Seminovo Grade A" (se seminovo, usado, vitrine)
+    - price: Preço em Reais (BRL) como número positivo (ex: 2850.00).
+    - price_usd: Preço em Dólar (USD) como número positivo se aplicável (ex: 520.00).`;
+
+    const contents = {
+      parts: [
+        { inlineData: { data: fileData, mimeType } },
+        { text: "Analise esta imagem/PDF com muita atenção e extraia todos os itens e preços da tabela, preenchendo todos os valores com precisão." }
+      ]
+    };
+
+    const models = ["gemini-3.7-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash", "gemini-3.1-pro-preview"];
+    let lastErr: any = null;
+
+    for (const modelName of models) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                items: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      category: { type: "STRING" },
+                      model: { type: "STRING" },
+                      version: { type: "STRING" },
+                      storage: { type: "STRING" },
+                      color: { type: "STRING" },
+                      condition: { type: "STRING" },
+                      price: { type: "NUMBER" },
+                      price_usd: { type: "NUMBER" }
+                    },
+                    required: ["category", "model"]
+                  }
+                }
+              },
+              required: ["items"]
+            }
+          }
+        });
+
+        if (response.text) {
+          let text = response.text.trim();
+          if (text.startsWith('```')) {
+            text = text.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+          }
+          const extracted = JSON.parse(text);
+          if (extracted && Array.isArray(extracted.items)) {
+            // Normalize prices so that no item ever has missing or zero prices if convertible
+            extracted.items = extracted.items.map((item: any) => {
+              let priceNum = typeof item.price === 'number' ? item.price : parseFloat(String(item.price || '').replace(/[^\d.,]/g, '').replace(',', '.'));
+              let priceUsdNum = typeof item.price_usd === 'number' ? item.price_usd : parseFloat(String(item.price_usd || '').replace(/[^\d.,]/g, '').replace(',', '.'));
+              
+              if (isNaN(priceNum) || priceNum <= 0) {
+                if (!isNaN(priceUsdNum) && priceUsdNum > 0) {
+                  priceNum = Number((priceUsdNum * 5.5).toFixed(2));
+                } else {
+                  priceNum = 0;
+                }
+              }
+
+              if (isNaN(priceUsdNum) || priceUsdNum <= 0) {
+                if (priceNum > 0) {
+                  priceUsdNum = Number((priceNum / 5.5).toFixed(2));
+                } else {
+                  priceUsdNum = 0;
+                }
+              }
+
+              return {
+                ...item,
+                category: item.category === 'console' ? 'console' : 'iphone',
+                model: item.model || 'Aparelho',
+                version: item.version || '',
+                storage: item.storage || '',
+                color: item.color || '',
+                condition: item.condition || 'Seminovo Grade A',
+                price: priceNum,
+                price_usd: priceUsdNum
+              };
+            });
+            return res.json(extracted);
+          }
+        }
+      } catch (err: any) {
+        lastErr = err;
+        console.warn(`[Price Table IA] Model ${modelName} failed:`, err?.message || err);
+        continue;
+      }
+    }
+
+    throw lastErr || new Error("Falha ao analisar a tabela de preços com IA");
+
+  } catch (error: any) {
+    console.error("Gemini Price Table processing error:", error);
+    const errMsg = String(error?.message || error || "");
+    const isQuota = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('exhausted');
+    res.status(isQuota ? 429 : 500).json({ 
+      error: isQuota 
+        ? "Limite de requisições da IA atingido temporariamente. Aguarde alguns instantes e tente novamente, ou insira os dados manualmente." 
+        : `Erro ao analisar com IA: ${errMsg}`
     });
   }
 });
@@ -886,7 +1440,7 @@ const readPublicClients = (): Record<string, any[]> => {
   try {
     if (!fs.existsSync(CLIENTS_FILE)) return {};
     const content = fs.readFileSync(CLIENTS_FILE, "utf8");
-    return JSON.parse(content || "{}");
+    return safeJsonParse(content, {});
   } catch (err) {
     console.error("Error reading public clients file:", err);
     return {};
@@ -895,7 +1449,7 @@ const readPublicClients = (): Record<string, any[]> => {
 
 const writePublicClients = (data: Record<string, any[]>) => {
   try {
-    fs.writeFileSync(CLIENTS_FILE, JSON.stringify(data, null, 2), "utf8");
+    atomicWriteFileSync(CLIENTS_FILE, data);
   } catch (err) {
     console.error("Error writing public clients file:", err);
   }
@@ -905,7 +1459,7 @@ const readPublicTokens = (): Record<string, any> => {
   try {
     if (!fs.existsSync(TOKENS_FILE)) return {};
     const content = fs.readFileSync(TOKENS_FILE, "utf8");
-    return JSON.parse(content || "{}");
+    return safeJsonParse(content, {});
   } catch (err) {
     console.error("Error reading public tokens file:", err);
     return {};
@@ -914,7 +1468,7 @@ const readPublicTokens = (): Record<string, any> => {
 
 const writePublicTokens = (data: Record<string, any>) => {
   try {
-    fs.writeFileSync(TOKENS_FILE, JSON.stringify(data, null, 2), "utf8");
+    atomicWriteFileSync(TOKENS_FILE, data);
   } catch (err) {
     console.error("Error writing public tokens file:", err);
   }
@@ -1408,7 +1962,7 @@ const readPublicSettings = (): Record<string, any> => {
   try {
     if (!fs.existsSync(SETTINGS_FILE)) return {};
     const content = fs.readFileSync(SETTINGS_FILE, "utf8");
-    return JSON.parse(content || "{}");
+    return safeJsonParse(content, {});
   } catch (err) {
     console.error("Error reading public settings file:", err);
     return {};
@@ -1417,7 +1971,7 @@ const readPublicSettings = (): Record<string, any> => {
 
 const writePublicSettings = (data: Record<string, any>) => {
   try {
-    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), "utf8");
+    atomicWriteFileSync(SETTINGS_FILE, data);
   } catch (err) {
     console.error("Error writing public settings file:", err);
   }
@@ -1463,31 +2017,10 @@ async function startServer() {
   console.log("NODE_ENV is:", process.env.NODE_ENV);
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "custom",
+      server: { middlewareMode: true, hmr: false },
+      appType: "spa",
     });
     app.use(vite.middlewares);
-
-    // Fallback route to serve index.html in development mode (SPA routing)
-    app.get("*", async (req, res, next) => {
-      if (req.url.startsWith("/api/")) {
-        return next();
-      }
-      try {
-        const url = req.originalUrl;
-        const templatePath = path.resolve(process.cwd(), "index.html");
-        if (fs.existsSync(templatePath)) {
-          let template = fs.readFileSync(templatePath, "utf-8");
-          template = await vite.transformIndexHtml(url, template);
-          template = await injectMetaTags(template, url);
-          res.status(200).set({ "Content-Type": "text/html" }).end(template);
-        } else {
-          next();
-        }
-      } catch (e) {
-        next(e);
-      }
-    });
   } else {
     let distPath = path.join(process.cwd(), "dist");
     
@@ -1518,8 +2051,16 @@ async function startServer() {
   }
 
   if (!process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
+    const server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://0.0.0.0:${PORT}`);
+    });
+
+    server.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use. Another instance may be running.`);
+      } else {
+        console.error('Server error:', err);
+      }
     });
   }
 }

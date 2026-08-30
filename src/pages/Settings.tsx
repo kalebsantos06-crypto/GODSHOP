@@ -68,6 +68,7 @@ export default function Settings() {
 
   // Status notification templates (8 Sequential Shipping Steps)
   const [templateRegistration, setTemplateRegistration] = useState(() => localStorage.getItem('auto_template_registration') || DEFAULT_STATUS_TEMPLATES.registration);
+  const [templateClientRemoteConfirm, setTemplateClientRemoteConfirm] = useState(() => localStorage.getItem('auto_template_client_remote_confirmation') || DEFAULT_STATUS_TEMPLATES.client_remote_confirmation);
   const [templateOrderConfirmed, setTemplateOrderConfirmed] = useState(() => localStorage.getItem('auto_template_order_confirmed') || DEFAULT_STATUS_TEMPLATES.order_confirmed);
   const [templateOrderPreparing, setTemplateOrderPreparing] = useState(() => localStorage.getItem('auto_template_order_preparing') || DEFAULT_STATUS_TEMPLATES.order_preparing);
   const [templateOrderReady, setTemplateOrderReady] = useState(() => localStorage.getItem('auto_template_order_ready') || DEFAULT_STATUS_TEMPLATES.order_ready);
@@ -76,8 +77,9 @@ export default function Settings() {
   const [templateGuaranteeSent, setTemplateGuaranteeSent] = useState(() => localStorage.getItem('auto_template_guarantee_sent') || DEFAULT_STATUS_TEMPLATES.guarantee_sent);
   const [templateOrderThankYou, setTemplateOrderThankYou] = useState(() => localStorage.getItem('auto_template_order_thank_you') || DEFAULT_STATUS_TEMPLATES.order_thank_you);
 
-  // Attendant and Pix Configuration
+  // Attendant, Store Phone and Pix Configuration
   const [attendantName, setAttendantName] = useState(() => localStorage.getItem('auto_attendant_name') || 'Karen');
+  const [storePhone, setStorePhone] = useState(() => localStorage.getItem('auto_store_phone') || '5532999634583');
   const [pixInfo, setPixInfo] = useState(() => localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves');
 
   // Sent logs history
@@ -147,6 +149,7 @@ export default function Settings() {
     localStorage.setItem('auto_template_day_of', templateDayOf);
     localStorage.setItem('auto_template_overdue', templateOverdue);
     localStorage.setItem('auto_template_registration', templateRegistration);
+    localStorage.setItem('auto_template_client_remote_confirmation', templateClientRemoteConfirm);
     localStorage.setItem('auto_template_order_confirmed', templateOrderConfirmed);
     localStorage.setItem('auto_template_order_preparing', templateOrderPreparing);
     localStorage.setItem('auto_template_order_ready', templateOrderReady);
@@ -155,6 +158,7 @@ export default function Settings() {
     localStorage.setItem('auto_template_guarantee_sent', templateGuaranteeSent);
     localStorage.setItem('auto_template_order_thank_you', templateOrderThankYou);
     localStorage.setItem('auto_attendant_name', attendantName);
+    localStorage.setItem('auto_store_phone', storePhone);
     localStorage.setItem('auto_pix_info', pixInfo);
 
     // Sync to server
@@ -174,6 +178,7 @@ export default function Settings() {
               templateDayOf,
               templateOverdue,
               templateRegistration,
+              templateClientRemoteConfirm,
               templateOrderConfirmed,
               templateOrderPreparing,
               templateOrderReady,
@@ -182,6 +187,7 @@ export default function Settings() {
               templateGuaranteeSent,
               templateOrderThankYou,
               attendantName,
+              storePhone,
               pixInfo
             }
           })
@@ -393,8 +399,72 @@ export default function Settings() {
   };
 
   useEffect(() => {
-    setBgPreview(localStorage.getItem('app_background') || '/background.jpg');
-    setLogoPreview(localStorage.getItem('app_logo') || null);
+    const loadServerAndLocalSettings = async () => {
+      // Local first
+      setBgPreview(localStorage.getItem('app_background') || '/background.jpg');
+      setLogoPreview(localStorage.getItem('app_logo') || null);
+
+      try {
+        const queryParams = user?.id ? `?userId=${user.id}` : '';
+        const res = await fetch(`/api/settings${queryParams}`);
+        if (res.ok) {
+          const s = await res.json();
+          if (s.app_background) {
+            setBgPreview(s.app_background);
+            localStorage.setItem('app_background', s.app_background);
+          }
+          if (s.app_logo !== undefined) {
+            setLogoPreview(s.app_logo);
+            if (s.app_logo) localStorage.setItem('app_logo', s.app_logo);
+            else localStorage.removeItem('app_logo');
+          }
+          if (s.app_theme) {
+            setCurrentTheme(s.app_theme);
+            localStorage.setItem('app_theme', s.app_theme);
+          }
+          if (s.attendantName) {
+            setAttendantName(s.attendantName);
+            localStorage.setItem('auto_attendant_name', s.attendantName);
+          }
+          if (s.pixInfo) {
+            setPixInfo(s.pixInfo);
+            localStorage.setItem('auto_pix_info', s.pixInfo);
+          }
+          if (s.webhookUrl !== undefined) {
+            setWebhookUrl(s.webhookUrl);
+            localStorage.setItem('auto_webhook_url', s.webhookUrl);
+          }
+          if (s.webhookToken !== undefined) {
+            setWebhookToken(s.webhookToken);
+            localStorage.setItem('auto_webhook_token', s.webhookToken);
+          }
+          if (s.isWebhookEnabled !== undefined) {
+            setIsWebhookEnabled(s.isWebhookEnabled);
+            localStorage.setItem('auto_webhook_enabled', String(s.isWebhookEnabled));
+          }
+          if (s.isFullAutoEnabled !== undefined) {
+            setIsFullAutoEnabled(s.isFullAutoEnabled);
+            localStorage.setItem('auto_full_auto_enabled', String(s.isFullAutoEnabled));
+          }
+          if (s.template3Days) {
+            setTemplate3Days(s.template3Days);
+            localStorage.setItem('auto_template_3_days', s.template3Days);
+          }
+          if (s.templateDayOf) {
+            setTemplateDayOf(s.templateDayOf);
+            localStorage.setItem('auto_template_day_of', s.templateDayOf);
+          }
+          if (s.templateOverdue) {
+            setTemplateOverdue(s.templateOverdue);
+            localStorage.setItem('auto_template_overdue', s.templateOverdue);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load settings from server:', err);
+      }
+    };
+
+    loadServerAndLocalSettings();
 
     const syncTheme = () => {
       const saved = localStorage.getItem('app_theme') as 'light' | 'dark';
@@ -402,12 +472,26 @@ export default function Settings() {
     };
     window.addEventListener('theme_changed', syncTheme);
     return () => window.removeEventListener('theme_changed', syncTheme);
-  }, []);
+  }, [user?.id]);
 
-  const handleThemeChange = (theme: 'light' | 'dark') => {
+  const handleThemeChange = async (theme: 'light' | 'dark') => {
     setCurrentTheme(theme);
     localStorage.setItem('app_theme', theme);
     window.dispatchEvent(new Event('theme_changed'));
+    if (user?.id) {
+      try {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            settings: { app_theme: theme }
+          })
+        });
+      } catch (e) {
+        console.warn(e);
+      }
+    }
     toast.success(`Tema ${theme === 'dark' ? 'Escuro' : 'Claro'} ativado! ⚡`);
   };
 
@@ -421,7 +505,11 @@ export default function Settings() {
       a.download = `backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`;
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
+      try {
+        if (a && a.parentNode) {
+          a.parentNode.removeChild(a);
+        }
+      } catch (e) {}
       URL.revokeObjectURL(url);
       toast.success('Cópia de segurança exportada com sucesso!');
     } catch (err: any) {
@@ -751,10 +839,10 @@ export default function Settings() {
               <div>
                 <h2 className="text-lg font-semibold flex items-center gap-2 mb-1 text-foreground">
                   <Cloud className="h-5 w-5 text-emerald-400 animate-pulse" />
-                  Vínculo & Sincronização em Nuvem (Multi-Aparelhos)
+                  Sincronização em Nuvem (PC, Notebook e Celular)
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Seus dados salvos e vinculados na nuvem para você acessar de qualquer celular, tablet ou computador instantaneamente.
+                  Todos os seus dados (estoque de iPhones, consoles, clientes, vendas, parcelas, carnês, mimos e preferências) ficam sincronizados em tempo real entre todos os seus dispositivos.
                 </p>
               </div>
 
@@ -765,7 +853,7 @@ export default function Settings() {
                 </div>
                 <div>
                   <p className="font-bold text-emerald-300">Nuvem Online & Ativa</p>
-                  <p className="opacity-80 font-mono text-[10px]">Acesso Instantâneo em Qualquer Celular</p>
+                  <p className="opacity-80 font-mono text-[10px]">Sincronização Automática PC / Celular</p>
                 </div>
               </div>
             </div>
@@ -800,7 +888,7 @@ export default function Settings() {
                   try {
                     const res = await db.pushToCloud();
                     if (res.success) {
-                      toast.success('Todos os dados deste aparelho foram enviados e salvos na nuvem com sucesso! Agora você pode abrir em qualquer outro celular.');
+                      toast.success('Todos os dados deste dispositivo foram enviados e salvos na nuvem com sucesso! Acesse de qualquer PC, notebook ou celular.');
                       await loadCloudStats();
                     } else {
                       toast.error(res.message);
@@ -814,7 +902,7 @@ export default function Settings() {
                 className="bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold py-3.5 px-4 rounded-xl text-xs transition duration-300 cursor-pointer flex items-center justify-center gap-2 shadow-lg"
               >
                 <Upload className="h-4 w-4" />
-                {isSyncingCloud ? 'Salvando na Nuvem...' : 'Salvar Dados deste Celular na Nuvem'}
+                {isSyncingCloud ? 'Sincronizando com a Nuvem...' : 'Salvar Dados deste Aparelho na Nuvem'}
               </button>
 
               <button
@@ -839,21 +927,19 @@ export default function Settings() {
                 className="bg-zinc-100 hover:bg-white text-black font-extrabold py-3.5 px-4 rounded-xl text-xs transition duration-300 cursor-pointer flex items-center justify-center gap-2 shadow-lg"
               >
                 <RefreshCw className={cn("h-4 w-4", isSyncingCloud && "animate-spin")} />
-                Puxar Dados da Nuvem para este Aparelho
+                Puxar Dados Mais Recentes da Nuvem
               </button>
             </div>
 
             <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs space-y-2 text-foreground">
               <p className="font-bold text-emerald-400 flex items-center gap-1.5">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                Sincronização 100% Automática em Tempo Real:
+                Como funciona a sincronização entre PC, Notebook e Celular:
               </p>
-              <p className="text-muted-foreground leading-relaxed">
-                Você <strong>não precisa clicar em nada</strong>. O sistema sincroniza sozinho a cada segundo em segundo plano:
-              </p>
-              <ul className="list-disc list-inside space-y-1 text-muted-foreground pl-1">
-                <li>Ao cadastrar, editar ou vender qualquer produto ou cliente, a alteração é salva na nuvem na hora.</li>
-                <li>Ao abrir o aplicativo em qualquer outro celular, computador ou tablet, todos os seus dados carregam automaticamente.</li>
+              <ul className="list-disc list-inside space-y-1.5 text-muted-foreground pl-1 leading-relaxed">
+                <li><strong>Automático e Contínuo:</strong> Toda vez que você cadastra um produto, efetua uma venda ou altera um cliente no computador, a alteração é enviada imediatamente para a nuvem.</li>
+                <li><strong>Acesso em Qualquer Lugar:</strong> Ao abrir o sistema no seu celular ou notebook, todos os dados são carregados automaticamente sem precisar exportar ou importar arquivos manuais.</li>
+                <li><strong>Trabalho em Equipe e Concorrência:</strong> O sistema mescla os registros com segurança, garantindo que novos itens e atualizações fiquem preservados.</li>
               </ul>
             </div>
           </div>
@@ -1037,6 +1123,18 @@ export default function Settings() {
               </div>
 
               <div>
+                <span className="text-xs font-bold text-foreground block mb-1">WhatsApp / Telefone da Loja <span className="text-muted-foreground font-normal">(Recebimento de Cadastros)</span></span>
+                <input
+                  type="text"
+                  value={storePhone}
+                  onChange={(e) => setStorePhone(e.target.value)}
+                  className="w-full text-sm px-4 py-2.5 rounded-xl border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 font-mono"
+                  placeholder="Ex: 5532999634583"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Número para onde o cliente enviará a confirmação ao preencher o link externo.</p>
+              </div>
+
+              <div>
                 <span className="text-xs font-bold text-foreground block mb-1">Chave Pix e Nome <span className="text-muted-foreground font-normal">(Variável {"{pix}"})</span></span>
                 <textarea
                   value={pixInfo}
@@ -1167,14 +1265,26 @@ export default function Settings() {
                 </div>
 
                 <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">✨ Etapa 1: Boas-Vindas & Cadastro Concluído</span>
+                  <span className="text-xs font-bold text-foreground block mb-1">✨ Etapa 1: Boas-Vindas & Cadastro Concluído (Enviado pelo Atendente ao Cliente)</span>
                   <textarea
                     rows={2}
                     value={templateRegistration}
                     onChange={(e) => setTemplateRegistration(e.target.value)}
                     className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Prezado(a) {cliente}... Cadastro realizado..."
+                    placeholder="Olá, {cliente}! Aqui é a {atendente}... Confirmamos seu cadastro..."
                   />
+                </div>
+
+                <div>
+                  <span className="text-xs font-bold text-emerald-400 block mb-1">📱 Confirmação Enviada pelo Cliente (Botão WhatsApp no Link Externo de Cadastro)</span>
+                  <textarea
+                    rows={2}
+                    value={templateClientRemoteConfirm}
+                    onChange={(e) => setTemplateClientRemoteConfirm(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-emerald-500/30 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal text-emerald-200"
+                    placeholder="Olá! Acabei de concluir meu cadastro na GODSHOP... {cliente}..."
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Suporta as tags: <code>{'{cliente}'}</code>, <code>{'{cpf}'}</code>, <code>{'{telefone}'}</code>, <code>{'{cidade}'}</code>, <code>{'{uf}'}</code></p>
                 </div>
 
                 <div>

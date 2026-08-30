@@ -19,10 +19,36 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): Partial<State> {
+    const errorStr = String(error?.message || error || '');
+    const isDomNodeError = 
+      error?.name === 'NotFoundError' ||
+      errorStr.includes('removeChild') || 
+      errorStr.includes('insertBefore') || 
+      errorStr.includes('not a child') ||
+      errorStr.includes('NotFoundError');
+
+    // If it is a benign DOM mutation error caused by browser extensions or translation, suppress crash
+    if (isDomNodeError) {
+      console.warn('Recovered from benign DOM node removal error:', error);
+      return { hasError: false, error: null };
+    }
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    const errorStr = String(error?.message || error || '');
+    const isDomNodeError = 
+      error?.name === 'NotFoundError' ||
+      errorStr.includes('removeChild') || 
+      errorStr.includes('insertBefore') || 
+      errorStr.includes('not a child') ||
+      errorStr.includes('NotFoundError');
+
+    if (isDomNodeError) {
+      console.warn('Ignored DOM child removal exception:', error);
+      this.setState({ hasError: false, error: null });
+      return;
+    }
     console.error('Unhandled React Error:', error, errorInfo);
     this.setState({ errorInfo });
   }

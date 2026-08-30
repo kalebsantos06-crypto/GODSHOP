@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getBaseUrl, copyToClipboard } from '../utils/url';
 import { db } from '../services/db';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -29,38 +29,33 @@ export default function Dashboard() {
         const data = await response.json();
         return data.tip || 'Mantenha seu estoque sempre atualizado e foque no atendimento personalizado para fidelizar seus clientes!';
       } catch (error) {
-        console.log('Dica do dia (local): carregando dica padrão integrada.');
         return 'A inovação é o segredo do sucesso. Esteja sempre atento às novidades do mundo mobile e games!';
       }
     },
-    refetchOnWindowFocus: true,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 1000 * 60 * 10, // 10 minutes
   });
 
   const { data: iphones = [], isLoading: isLoadingIphones, refetch: refetchIphones } = useQuery({
     queryKey: ['iphones'],
     queryFn: () => db.iphones.list(),
-    refetchOnMount: 'always',
-    staleTime: 0,
+    staleTime: 1000 * 60 * 3,
   });
 
   const { data: consoles = [], isLoading: isLoadingConsoles, refetch: refetchConsoles } = useQuery({
     queryKey: ['consoles'],
     queryFn: () => db.consoles.list(),
-    refetchOnMount: 'always',
-    staleTime: 0,
+    staleTime: 1000 * 60 * 3,
   });
 
   const { data: sales = [], isLoading: isLoadingSales, refetch: refetchSales } = useQuery({
     queryKey: ['sales'],
     queryFn: () => db.sales.list(),
-    refetchOnMount: 'always',
-    staleTime: 0,
-    // Polling: Refetch every 15 seconds if there are pending signatures
+    staleTime: 1000 * 60 * 3,
+    // Polling: Refetch every 30 seconds if there are pending signatures
     refetchInterval: (query) => {
       const salesData = query.state.data as any[];
       if (salesData && salesData.some(s => !s.signature_data && !s.signed_at)) {
-        return 15000;
+        return 30000;
       }
       return false;
     }
@@ -69,8 +64,19 @@ export default function Dashboard() {
   const { data: clients = [], isLoading: isLoadingClients, refetch: refetchClients } = useQuery({
     queryKey: ['clients'],
     queryFn: () => db.clients.list(),
-    refetchOnMount: 'always',
-    staleTime: 0,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const { data: giftPurchases = [], refetch: refetchGiftPurchases } = useQuery({
+    queryKey: ['gift_purchases'],
+    queryFn: () => db.gift_purchases.list(),
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const { data: accessorySales = [], refetch: refetchAccessorySales } = useQuery({
+    queryKey: ['accessory_sales'],
+    queryFn: () => db.accessory_sales.list(),
+    staleTime: 1000 * 60 * 5,
   });
 
   const handleRefreshAll = () => {
@@ -78,213 +84,247 @@ export default function Dashboard() {
     refetchConsoles();
     refetchSales();
     refetchClients();
+    refetchGiftPurchases();
+    refetchAccessorySales();
     refetchTip();
     toast.success('Dados atualizados!');
   };
 
-  const availableIphones = iphones.filter(p => p.status === 'disponivel');
-  const availableConsoles = consoles.filter(p => p.status === 'disponivel');
+  const availableIphones = useMemo(() => iphones.filter(p => p.status === 'disponivel'), [iphones]);
+  const availableConsoles = useMemo(() => consoles.filter(p => p.status === 'disponivel'), [consoles]);
   const availableCount = availableIphones.length + availableConsoles.length;
   
   const soldCount = sales.length;
   
-  // Calculate profit
-  const totalProfit = sales.reduce((sum, sale) => {
-    let buyPrice = 0;
-    if (sale.iphone_id) {
-      const iphone = iphones.find(i => i.id === sale.iphone_id);
-      if (iphone) buyPrice = iphone.buy_price;
-    } else if (sale.console_id) {
-      const consoleItem = consoles.find(c => c.id === sale.console_id);
-      if (consoleItem) buyPrice = consoleItem.buy_price;
-    }
-    return sum + (sale.sell_price - buyPrice);
-  }, 0);
-
-  // Calculate revenue (Faturamento)
-  const totalRevenue = sales.reduce((sum, sale) => sum + sale.sell_price, 0);
-
-  // Calculate stock cost (Investimento)
-  const totalStockCost = availableIphones.reduce((sum, i) => sum + i.buy_price, 0) +
-                         availableConsoles.reduce((sum, c) => sum + c.buy_price, 0);
-
-  // Detailed Financial Calculations
-  const totalReceived = sales.reduce((sum, sale) => {
-    const downPayment = sale.down_payment || 0;
-    const totalAmount = sale.sell_price - downPayment;
-    
-    if (sale.installments && sale.installments > 1) {
-      // Check localStorage for custom payments (same logic as in Sales.tsx)
-      const storedPaymentsStr = localStorage.getItem(`inst_payments_${sale.id}`);
-      if (storedPaymentsStr) {
-        try {
-          const customPayments = JSON.parse(storedPaymentsStr) as Record<number, number>;
-          const totalPaidFromCustom = Object.values(customPayments).reduce<number>((sum, val) => sum + (Number(val) || 0), 0);
-          return sum + downPayment + totalPaidFromCustom;
-        } catch (e) {
-          // Fallback if JSON is invalid
-        }
-      }
-      
-      const totalInstallments = sale.installments || 1;
-      const installmentsPaid = sale.installments_paid || 0;
-      const installmentValue = totalAmount / totalInstallments;
-      return sum + downPayment + (installmentsPaid * installmentValue);
-    }
-    
-    // For 1 installment, we assume it's fully paid (cash/pix/card)
-    return sum + sale.sell_price;
-  }, 0);
-
-  const totalRemainingBalance = totalRevenue - totalReceived;
-  
-  const signedSales = sales.filter(s => s.signature_data || s.signed_at).length;
-  const pendingSales = sales.length - signedSales;
-  const signatureRate = sales.length ? (signedSales / sales.length) * 100 : 0;
-
-  const totalBuyPriceOfSoldItems = sales.reduce((sum, sale) => {
-    let buyPrice = 0;
-    if (sale.iphone_id) {
-      const iphone = iphones.find(i => i.id === sale.iphone_id);
-      if (iphone) buyPrice = iphone.buy_price;
-    } else if (sale.console_id) {
-      const consoleItem = consoles.find(c => c.id === sale.console_id);
-      if (consoleItem) buyPrice = consoleItem.buy_price;
-    }
-    return sum + buyPrice;
-  }, 0);
-
-  // Previews
-  const profitPreview = sales.slice(0, 3).map(sale => {
-    let label = 'Venda';
-    let buyPrice = 0;
-    if (sale.iphone_id) {
-      const item = iphones.find(i => i.id === sale.iphone_id);
-      label = item ? `${item.model} ${item.storage}` : 'iPhone';
-      buyPrice = item?.buy_price || 0;
-    } else if (sale.console_id) {
-      const item = consoles.find(c => c.id === sale.console_id);
-      label = item ? `${item.model} ${item.version}` : 'Console';
-      buyPrice = item?.buy_price || 0;
-    }
-    const client = clients.find(c => c.id === sale.client_id);
-    const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
-    return {
-      label: clientDisplay,
-      value: formatBRL(sale.sell_price - buyPrice),
-      sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
-    };
-  });
-
-  const revenuePreview = sales.slice(0, 3).map(sale => {
-    let label = 'Venda';
-    if (sale.iphone_id) {
-      const item = iphones.find(i => i.id === sale.iphone_id);
-      label = item ? `${item.model} ${item.storage}` : 'iPhone';
-    } else if (sale.console_id) {
-      const item = consoles.find(c => c.id === sale.console_id);
-      label = item ? `${item.model} ${item.version}` : 'Console';
-    }
-    const client = clients.find(c => c.id === sale.client_id);
-    const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
-    return {
-      label: clientDisplay,
-      value: formatBRL(sale.sell_price),
-      sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
-    };
-  });
-
-  const stockCostPreview = [...availableIphones, ...availableConsoles]
-    .sort((a, b) => b.buy_price - a.buy_price)
-    .slice(0, 3)
-    .map(item => ({
-      label: item.model,
-      value: formatBRL(item.buy_price),
-      sublabel: 'storage' in item ? item.storage : item.version
-    }));
-
-  const salesPreview = sales.slice(0, 3).map(sale => {
-    let label = 'Venda';
-    if (sale.iphone_id) {
-      const item = iphones.find(i => i.id === sale.iphone_id);
-      label = item ? `${item.model}` : 'iPhone';
-    } else if (sale.console_id) {
-      const item = consoles.find(c => c.id === sale.console_id);
-      label = item ? `${item.model}` : 'Console';
-    }
-    const client = clients.find(c => c.id === sale.client_id);
-    const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
-    return {
-      label: clientDisplay,
-      value: formatBRL(sale.sell_price),
-      sublabel: sale.payment_method
-    };
-  });
-
-  const stockPreview = [...availableIphones, ...availableConsoles]
-    .sort((a, b) => new Date(b.buy_date).getTime() - new Date(a.buy_date).getTime())
-    .slice(0, 3)
-    .map(item => ({
-      label: item.model,
-      value: 'Disponível',
-      sublabel: 'storage' in item ? item.storage : item.version
-    }));
-
-  const avgProfitPreview = Array.from(new Set([...iphones, ...consoles].map(i => i.model)))
-    .map(model => {
-      const modelSales = sales.filter(s => {
-        const item = s.iphone_id ? iphones.find(i => i.id === s.iphone_id) : consoles.find(c => c.id === s.console_id);
-        return item?.model === model;
-      });
-      if (modelSales.length === 0) return null;
-      const profit = modelSales.reduce((sum, s) => {
-        const item = s.iphone_id ? iphones.find(i => i.id === s.iphone_id) : consoles.find(c => c.id === s.console_id);
-        return sum + (s.sell_price - (item?.buy_price || 0));
-      }, 0);
-      return { model, avg: profit / modelSales.length };
-    })
-    .filter(Boolean)
-    .sort((a, b) => (b?.avg || 0) - (a?.avg || 0))
-    .slice(0, 3)
-    .map(item => ({
-      label: item!.model,
-      value: formatBRL(item!.avg),
-      sublabel: 'Média por modelo'
-    }));
-
-  // Monthly profit data for last 6 months
-  const now = new Date();
-  const months = eachMonthOfInterval({
-    start: subMonths(startOfMonth(now), 5),
-    end: startOfMonth(now),
-  });
-
-  const monthlyData = months.map(month => {
-    const monthStart = startOfMonth(month);
-    const monthEnd = endOfMonth(month);
-    const monthSales = sales.filter(s => {
-      const d = new Date(s.sale_date);
-      return d >= monthStart && d <= monthEnd;
-    });
-    const profit = monthSales.reduce((sum, sale) => {
+  // Calculate profit with memoization
+  const totalProfit = useMemo(() => {
+    return sales.reduce((sum, sale) => {
       let buyPrice = 0;
       if (sale.iphone_id) {
-        const item = iphones.find(i => i.id === sale.iphone_id);
-        if (item) buyPrice = item.buy_price;
+        const iphone = iphones.find(i => i.id === sale.iphone_id);
+        if (iphone) buyPrice = iphone.buy_price;
       } else if (sale.console_id) {
-        const item = consoles.find(c => c.id === sale.console_id);
-        if (item) buyPrice = item.buy_price;
+        const consoleItem = consoles.find(c => c.id === sale.console_id);
+        if (consoleItem) buyPrice = consoleItem.buy_price;
       }
       return sum + (sale.sell_price - buyPrice);
     }, 0);
-    return {
-      name: format(month, 'MMM', { locale: ptBR }),
-      lucro: profit,
-    };
-  });
+  }, [sales, iphones, consoles]);
+
+  // Calculate revenue (Faturamento)
+  const totalRevenue = useMemo(() => sales.reduce((sum, sale) => sum + sale.sell_price, 0), [sales]);
+
+  // Calculate stock cost (Investimento)
+  const totalStockCost = useMemo(() => {
+    return availableIphones.reduce((sum, i) => sum + i.buy_price, 0) +
+           availableConsoles.reduce((sum, c) => sum + c.buy_price, 0);
+  }, [availableIphones, availableConsoles]);
+
+  // Detailed Financial Calculations
+  const totalReceived = useMemo(() => {
+    return sales.reduce((sum, sale) => {
+      const downPayment = sale.down_payment || 0;
+      const totalAmount = sale.sell_price - downPayment;
+      
+      if (sale.installments && sale.installments > 1) {
+        let customPayments: Record<number, number> | null = null;
+        if (sale.custom_payments) {
+          try {
+            customPayments = typeof sale.custom_payments === 'string' 
+              ? JSON.parse(sale.custom_payments) 
+              : sale.custom_payments;
+          } catch (e) {}
+        }
+        if (!customPayments) {
+          const storedPaymentsStr = localStorage.getItem(`inst_payments_${sale.id}`);
+          if (storedPaymentsStr) {
+            try {
+              customPayments = JSON.parse(storedPaymentsStr) as Record<number, number>;
+            } catch (e) {}
+          }
+        }
+        if (customPayments && Object.keys(customPayments).length > 0) {
+          const totalPaidFromCustom = Object.values(customPayments).reduce<number>((s, val) => s + (Number(val) || 0), 0);
+          return sum + downPayment + totalPaidFromCustom;
+        }
+        
+        const totalInstallments = sale.installments || 1;
+        const installmentsPaid = sale.installments_paid || 0;
+        const installmentValue = totalAmount / totalInstallments;
+        return sum + downPayment + (installmentsPaid * installmentValue);
+      }
+      
+      return sum + sale.sell_price;
+    }, 0);
+  }, [sales]);
+
+  const totalRemainingBalance = totalRevenue - totalReceived;
+  
+  const signedSales = useMemo(() => sales.filter(s => s.signature_data || s.signed_at).length, [sales]);
+  const pendingSales = sales.length - signedSales;
+  const signatureRate = sales.length ? (signedSales / sales.length) * 100 : 0;
+
+  const totalBuyPriceOfSoldItems = useMemo(() => {
+    return sales.reduce((sum, sale) => {
+      let buyPrice = 0;
+      if (sale.iphone_id) {
+        const iphone = iphones.find(i => i.id === sale.iphone_id);
+        if (iphone) buyPrice = iphone.buy_price;
+      } else if (sale.console_id) {
+        const consoleItem = consoles.find(c => c.id === sale.console_id);
+        if (consoleItem) buyPrice = consoleItem.buy_price;
+      }
+      return sum + buyPrice;
+    }, 0);
+  }, [sales, iphones, consoles]);
+
+  // Previews with memoization
+  const profitPreview = useMemo(() => {
+    return sales.slice(0, 3).map(sale => {
+      let label = 'Venda';
+      let buyPrice = 0;
+      if (sale.iphone_id) {
+        const item = iphones.find(i => i.id === sale.iphone_id);
+        label = item ? `${item.model} ${item.storage}` : 'iPhone';
+        buyPrice = item?.buy_price || 0;
+      } else if (sale.console_id) {
+        const item = consoles.find(c => c.id === sale.console_id);
+        label = item ? `${item.model} ${item.version}` : 'Console';
+        buyPrice = item?.buy_price || 0;
+      }
+      const client = clients.find(c => c.id === sale.client_id);
+      const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
+      return {
+        label: clientDisplay,
+        value: formatBRL(sale.sell_price - buyPrice),
+        sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
+      };
+    });
+  }, [sales, iphones, consoles, clients]);
+
+  const revenuePreview = useMemo(() => {
+    return sales.slice(0, 3).map(sale => {
+      let label = 'Venda';
+      if (sale.iphone_id) {
+        const item = iphones.find(i => i.id === sale.iphone_id);
+        label = item ? `${item.model} ${item.storage}` : 'iPhone';
+      } else if (sale.console_id) {
+        const item = consoles.find(c => c.id === sale.console_id);
+        label = item ? `${item.model} ${item.version}` : 'Console';
+      }
+      const client = clients.find(c => c.id === sale.client_id);
+      const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
+      return {
+        label: clientDisplay,
+        value: formatBRL(sale.sell_price),
+        sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
+      };
+    });
+  }, [sales, iphones, consoles, clients]);
+
+  const stockCostPreview = useMemo(() => {
+    return [...availableIphones, ...availableConsoles]
+      .sort((a, b) => b.buy_price - a.buy_price)
+      .slice(0, 3)
+      .map(item => ({
+        label: item.model,
+        value: formatBRL(item.buy_price),
+        sublabel: 'storage' in item ? item.storage : item.version
+      }));
+  }, [availableIphones, availableConsoles]);
+
+  const salesPreview = useMemo(() => {
+    return sales.slice(0, 3).map(sale => {
+      let label = 'Venda';
+      if (sale.iphone_id) {
+        const item = iphones.find(i => i.id === sale.iphone_id);
+        label = item ? `${item.model}` : 'iPhone';
+      } else if (sale.console_id) {
+        const item = consoles.find(c => c.id === sale.console_id);
+        label = item ? `${item.model}` : 'Console';
+      }
+      const client = clients.find(c => c.id === sale.client_id);
+      const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
+      return {
+        label: clientDisplay,
+        value: formatBRL(sale.sell_price),
+        sublabel: sale.payment_method
+      };
+    });
+  }, [sales, iphones, consoles, clients]);
+
+  const stockPreview = useMemo(() => {
+    return [...availableIphones, ...availableConsoles]
+      .sort((a, b) => new Date(b.buy_date).getTime() - new Date(a.buy_date).getTime())
+      .slice(0, 3)
+      .map(item => ({
+        label: item.model,
+        value: 'Disponível',
+        sublabel: 'storage' in item ? item.storage : item.version
+      }));
+  }, [availableIphones, availableConsoles]);
+
+  const avgProfitPreview = useMemo(() => {
+    return Array.from(new Set([...iphones, ...consoles].map(i => i.model)))
+      .map(model => {
+        const modelSales = sales.filter(s => {
+          const item = s.iphone_id ? iphones.find(i => i.id === s.iphone_id) : consoles.find(c => c.id === s.console_id);
+          return item?.model === model;
+        });
+        if (modelSales.length === 0) return null;
+        const profit = modelSales.reduce((sum, s) => {
+          const item = s.iphone_id ? iphones.find(i => i.id === s.iphone_id) : consoles.find(c => c.id === s.console_id);
+          return sum + (s.sell_price - (item?.buy_price || 0));
+        }, 0);
+        return { model, avg: profit / modelSales.length };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b?.avg || 0) - (a?.avg || 0))
+      .slice(0, 3)
+      .map(item => ({
+        label: item!.model,
+        value: formatBRL(item!.avg),
+        sublabel: 'Média por modelo'
+      }));
+  }, [iphones, consoles, sales]);
+
+  // Monthly profit data for last 6 months (memoized)
+  const monthlyData = useMemo(() => {
+    const now = new Date();
+    const months = eachMonthOfInterval({
+      start: subMonths(startOfMonth(now), 5),
+      end: startOfMonth(now),
+    });
+
+    return months.map(month => {
+      const monthStart = startOfMonth(month);
+      const monthEnd = endOfMonth(month);
+      const monthSales = sales.filter(s => {
+        const d = new Date(s.sale_date);
+        return d >= monthStart && d <= monthEnd;
+      });
+      const profit = monthSales.reduce((sum, sale) => {
+        let buyPrice = 0;
+        if (sale.iphone_id) {
+          const item = iphones.find(i => i.id === sale.iphone_id);
+          if (item) buyPrice = item.buy_price;
+        } else if (sale.console_id) {
+          const item = consoles.find(c => c.id === sale.console_id);
+          if (item) buyPrice = item.buy_price;
+        }
+        return sum + (sale.sell_price - buyPrice);
+      }, 0);
+      return {
+        name: format(month, 'MMM', { locale: ptBR }),
+        lucro: profit,
+      };
+    });
+  }, [sales, iphones, consoles]);
 
   // Real-time calculated notifications across all sales
-  const allNotificationsList = getSaleNotifications(sales || [], clients || [], iphones || [], consoles || []);
+  const allNotificationsList = useMemo(() => {
+    return getSaleNotifications(sales || [], clients || [], iphones || [], consoles || []);
+  }, [sales, clients, iphones, consoles]);
 
   const pendingNotifCount = allNotificationsList.filter(n => n.daysDiff <= 3).length;
 
@@ -490,7 +530,7 @@ export default function Dashboard() {
         </div>
       </div>
       
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-6 gap-4 sm:gap-5">
         <StatCard title="Lucro Total" value={formatBRL(totalProfit)} icon={DollarSign} color="green" preview={profitPreview} />
         <StatCard title="Faturamento Bruto" value={formatBRL(totalRevenue)} icon={Coins} color="primary" preview={revenuePreview} />
         <StatCard title="Vendas Realizadas" value={soldCount} icon={ShoppingCart} color="primary" preview={salesPreview} />

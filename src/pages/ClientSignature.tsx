@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { ShieldCheck, PenTool, RotateCcw, FileText, Smartphone, Calendar, DollarSign, MapPin, User, Check, RefreshCw, X, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
+import SignatureDisplay from '../components/SignatureDisplay';
 
 interface PublicSaleData {
   id: string;
@@ -62,8 +63,31 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
   // Fetch contract data
   const fetchContract = async () => {
     setLoading(true);
+    
+    // 1. Try Express server API first (which unifies local database and Supabase)
     try {
-      // 1. Try reading from Supabase public_sales table first (fully synchronized)
+      const response = await fetch(`/api/public-sales/${id}?t=${Date.now()}`);
+      if (response.ok) {
+        const json = await response.json();
+        if (json) {
+          setData(json);
+          if (json.client?.name || json.client_name) {
+            setFullName(json.client_name || json.client?.name || '');
+          }
+          if (json.witness1_name) setWitness1Name(json.witness1_name);
+          if (json.witness1_cpf) setWitness1Cpf(json.witness1_cpf);
+          if (json.witness2_name) setWitness2Name(json.witness2_name);
+          if (json.witness2_cpf) setWitness2Cpf(json.witness2_cpf);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (err: any) {
+      console.warn('Server API fetchContract failed, trying Supabase fallback:', err);
+    }
+
+    // 2. Fallback reading from Supabase public_sales table directly
+    try {
       const { data: dbData, error: dbErr } = await supabase
         .from('public_sales')
         .select('*')
@@ -71,7 +95,7 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
         .maybeSingle();
 
       if (!dbErr && dbData) {
-        // Handle fallback if columns were stripped and stored in signatureInfo
+        // Handle fallback if columns were stored in signatureInfo
         const sigInfo = dbData.sale_data?.signatureInfo || {};
         
         const mappedData: PublicSaleData = {
@@ -90,42 +114,22 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
         };
 
         setData(mappedData);
-        if (mappedData.client?.name) {
-          setFullName(mappedData.client_name || mappedData.client.name);
+        if (mappedData.client?.name || mappedData.client_name) {
+          setFullName(mappedData.client_name || mappedData.client?.name || '');
         }
         if (mappedData.witness1_name) setWitness1Name(mappedData.witness1_name);
         if (mappedData.witness1_cpf) setWitness1Cpf(mappedData.witness1_cpf);
         if (mappedData.witness2_name) setWitness2Name(mappedData.witness2_name);
         if (mappedData.witness2_cpf) setWitness2Cpf(mappedData.witness2_cpf);
         setLoading(false);
-        return; // Success, skip fallback
-      } else if (dbErr) {
-        console.warn('Supabase fetchContract error, falling back to server API:', dbErr);
+        return;
       }
     } catch (supaErr) {
-      console.warn('Supabase fetchContract exception, falling back to server API:', supaErr);
+      console.warn('Supabase fetchContract exception:', supaErr);
     }
 
-    // 2. Fallback to Express server API
-    try {
-      const response = await fetch(`/api/public-sales/${id}`);
-      if (!response.ok) {
-        throw new Error('Termo de garantia não localizado no portal de assinaturas.');
-      }
-      const json = await response.json();
-      setData(json);
-      if (json.client?.name) {
-        setFullName(json.client_name || json.client.name);
-      }
-      if (json.witness1_name) setWitness1Name(json.witness1_name);
-      if (json.witness1_cpf) setWitness1Cpf(json.witness1_cpf);
-      if (json.witness2_name) setWitness2Name(json.witness2_name);
-      if (json.witness2_cpf) setWitness2Cpf(json.witness2_cpf);
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao carregar o documento.');
-    } finally {
-      setLoading(false);
-    }
+    setError('Termo de garantia não localizado no portal de assinaturas.');
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -144,114 +148,140 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
     };
   }, []);
 
-  // Non-passive touch listeners for mobile canvas drawing on iOS Safari
+  // Non-passive touch listeners & Pointer Events for mobile canvas drawing (prevents screen scroll/movement)
   useEffect(() => {
-    const bindCanvasTouch = (
+    const bindCanvasDrawing = (
       canvas: HTMLCanvasElement | null,
-      onStart: (e: TouchEvent) => void,
-      onMove: (e: TouchEvent) => void,
-      onEnd: () => void
+      isDrawingRef: React.MutableRefObject<boolean>,
+      lastXRef: React.MutableRefObject<number>,
+      lastYRef: React.MutableRefObject<number>,
+      setHasDrawnState: (val: boolean) => void
     ) => {
       if (!canvas) return () => {};
 
-      const handleStart = (e: TouchEvent) => {
+      const getCoords = (e: MouseEvent | Touch | PointerEvent) => {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+      };
+
+      const handlePointerDown = (e: PointerEvent) => {
         e.preventDefault();
-        onStart(e);
+        e.stopPropagation();
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch (_) {}
+        isDrawingRef.current = true;
+        const { x, y } = getCoords(e);
+        lastXRef.current = x;
+        lastYRef.current = y;
       };
 
-      const handleMove = (e: TouchEvent) => {
+      const handlePointerMove = (e: PointerEvent) => {
+        if (!isDrawingRef.current) return;
         e.preventDefault();
-        onMove(e);
+        e.stopPropagation();
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const { x, y } = getCoords(e);
+        ctx.beginPath();
+        ctx.moveTo(lastXRef.current, lastYRef.current);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        lastXRef.current = x;
+        lastYRef.current = y;
+        setHasDrawnState(true);
       };
 
-      const handleEnd = () => {
-        onEnd();
+      const handlePointerUp = (e: PointerEvent) => {
+        if (isDrawingRef.current) {
+          isDrawingRef.current = false;
+          try {
+            canvas.releasePointerCapture(e.pointerId);
+          } catch (_) {}
+        }
       };
 
-      canvas.addEventListener('touchstart', handleStart, { passive: false });
-      canvas.addEventListener('touchmove', handleMove, { passive: false });
-      canvas.addEventListener('touchend', handleEnd);
+      const handleTouchStart = (e: TouchEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.touches.length > 0) {
+          isDrawingRef.current = true;
+          const { x, y } = getCoords(e.touches[0]);
+          lastXRef.current = x;
+          lastYRef.current = y;
+        }
+      };
+
+      const handleTouchMove = (e: TouchEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isDrawingRef.current || e.touches.length === 0) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const { x, y } = getCoords(e.touches[0]);
+        ctx.beginPath();
+        ctx.moveTo(lastXRef.current, lastYRef.current);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        lastXRef.current = x;
+        lastYRef.current = y;
+        setHasDrawnState(true);
+      };
+
+      const handleTouchEnd = (e: TouchEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isDrawingRef.current = false;
+      };
+
+      canvas.addEventListener('pointerdown', handlePointerDown);
+      canvas.addEventListener('pointermove', handlePointerMove);
+      canvas.addEventListener('pointerup', handlePointerUp);
+      canvas.addEventListener('pointercancel', handlePointerUp);
+
+      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+      canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+      canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+      canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
 
       return () => {
-        canvas.removeEventListener('touchstart', handleStart);
-        canvas.removeEventListener('touchmove', handleMove);
-        canvas.removeEventListener('touchend', handleEnd);
+        canvas.removeEventListener('pointerdown', handlePointerDown);
+        canvas.removeEventListener('pointermove', handlePointerMove);
+        canvas.removeEventListener('pointerup', handlePointerUp);
+        canvas.removeEventListener('pointercancel', handlePointerUp);
+
+        canvas.removeEventListener('touchstart', handleTouchStart);
+        canvas.removeEventListener('touchmove', handleTouchMove);
+        canvas.removeEventListener('touchend', handleTouchEnd);
+        canvas.removeEventListener('touchcancel', handleTouchEnd);
       };
     };
 
-    const clean1 = bindCanvasTouch(
+    const clean1 = bindCanvasDrawing(
       canvasRef.current,
-      (e) => {
-        isDrawing.current = true;
-        const { x, y } = getCoordinates(e, canvasRef.current);
-        lastX.current = x;
-        lastY.current = y;
-      },
-      (e) => {
-        if (!isDrawing.current) return;
-        const canvas = canvasRef.current;
-        const ctx = canvas?.getContext('2d');
-        if (!canvas || !ctx) return;
-        const { x, y } = getCoordinates(e, canvas);
-        ctx.beginPath();
-        ctx.moveTo(lastX.current, lastY.current);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-        lastX.current = x;
-        lastY.current = y;
-        setHasDrawn(true);
-      },
-      () => { isDrawing.current = false; }
+      isDrawing,
+      lastX,
+      lastY,
+      setHasDrawn
     );
 
-    const clean2 = bindCanvasTouch(
+    const clean2 = bindCanvasDrawing(
       witness1CanvasRef.current,
-      (e) => {
-        isDrawingWitness1.current = true;
-        const { x, y } = getCoordinates(e, witness1CanvasRef.current);
-        lastXWitness1.current = x;
-        lastYWitness1.current = y;
-      },
-      (e) => {
-        if (!isDrawingWitness1.current) return;
-        const canvas = witness1CanvasRef.current;
-        const ctx = canvas?.getContext('2d');
-        if (!canvas || !ctx) return;
-        const { x, y } = getCoordinates(e, canvas);
-        ctx.beginPath();
-        ctx.moveTo(lastXWitness1.current, lastYWitness1.current);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-        lastXWitness1.current = x;
-        lastYWitness1.current = y;
-        setHasDrawnWitness1(true);
-      },
-      () => { isDrawingWitness1.current = false; }
+      isDrawingWitness1,
+      lastXWitness1,
+      lastYWitness1,
+      setHasDrawnWitness1
     );
 
-    const clean3 = bindCanvasTouch(
+    const clean3 = bindCanvasDrawing(
       witness2CanvasRef.current,
-      (e) => {
-        isDrawingWitness2.current = true;
-        const { x, y } = getCoordinates(e, witness2CanvasRef.current);
-        lastXWitness2.current = x;
-        lastYWitness2.current = y;
-      },
-      (e) => {
-        if (!isDrawingWitness2.current) return;
-        const canvas = witness2CanvasRef.current;
-        const ctx = canvas?.getContext('2d');
-        if (!canvas || !ctx) return;
-        const { x, y } = getCoordinates(e, canvas);
-        ctx.beginPath();
-        ctx.moveTo(lastXWitness2.current, lastYWitness2.current);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-        lastXWitness2.current = x;
-        lastYWitness2.current = y;
-        setHasDrawnWitness2(true);
-      },
-      () => { isDrawingWitness2.current = false; }
+      isDrawingWitness2,
+      lastXWitness2,
+      lastYWitness2,
+      setHasDrawnWitness2
     );
 
     return () => {
@@ -342,128 +372,27 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
     };
   };
 
-  // CLIENT CANVAS
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    isDrawing.current = true;
-    const { x, y } = getCoordinates(e, canvasRef.current);
-    lastX.current = x;
-    lastY.current = y;
-  };
-
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing.current) return;
-    e.preventDefault();
-
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-
-    const { x, y } = getCoordinates(e, canvas);
-
-    ctx.beginPath();
-    ctx.moveTo(lastX.current, lastY.current);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-
-    lastX.current = x;
-    lastY.current = y;
-    setHasDrawn(true);
-  };
-
-  const stopDrawing = () => {
-    isDrawing.current = false;
-  };
-
+  // Clear canvas functions
   const clearCanvas = () => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasDrawn(false);
-  };
-
-  // WITNESS 1 CANVAS
-  const startDrawingWitness1 = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    isDrawingWitness1.current = true;
-    const { x, y } = getCoordinates(e, witness1CanvasRef.current);
-    lastXWitness1.current = x;
-    lastYWitness1.current = y;
-  };
-
-  const drawWitness1 = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawingWitness1.current) return;
-    e.preventDefault();
-
-    const canvas = witness1CanvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-
-    const { x, y } = getCoordinates(e, canvas);
-
-    ctx.beginPath();
-    ctx.moveTo(lastXWitness1.current, lastYWitness1.current);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-
-    lastXWitness1.current = x;
-    lastYWitness1.current = y;
-    setHasDrawnWitness1(true);
-  };
-
-  const stopDrawingWitness1 = () => {
-    isDrawingWitness1.current = false;
   };
 
   const clearCanvasWitness1 = () => {
     const canvas = witness1CanvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasDrawnWitness1(false);
-  };
-
-  // WITNESS 2 CANVAS
-  const startDrawingWitness2 = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    isDrawingWitness2.current = true;
-    const { x, y } = getCoordinates(e, witness2CanvasRef.current);
-    lastXWitness2.current = x;
-    lastYWitness2.current = y;
-  };
-
-  const drawWitness2 = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawingWitness2.current) return;
-    e.preventDefault();
-
-    const canvas = witness2CanvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-
-    const { x, y } = getCoordinates(e, canvas);
-
-    ctx.beginPath();
-    ctx.moveTo(lastXWitness2.current, lastYWitness2.current);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-
-    lastXWitness2.current = x;
-    lastYWitness2.current = y;
-    setHasDrawnWitness2(true);
-  };
-
-  const stopDrawingWitness2 = () => {
-    isDrawingWitness2.current = false;
   };
 
   const clearCanvasWitness2 = () => {
     const canvas = witness2CanvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasDrawnWitness2(false);
   };
@@ -841,8 +770,9 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
                     <div className="flex flex-col items-center p-4 bg-white border rounded-xl shadow-sm">
                       <span className="text-[10px] uppercase font-bold text-slate-500 mb-2">Comprador</span>
                       {data.signature_data && (
-                        <img 
-                          src={data.signature_data} 
+                        <SignatureDisplay 
+                          signatureData={data.signature_data} 
+                          signerName={data.client_name || client?.name}
                           alt="Assinatura do Cliente" 
                           className="max-h-20 object-contain"
                         />
@@ -854,10 +784,12 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
                     {data.witness1_signature ? (
                       <div className="flex flex-col items-center p-4 bg-white border rounded-xl shadow-sm">
                         <span className="text-[10px] uppercase font-bold text-slate-500 mb-2">Testemunha 1</span>
-                        <img 
-                          src={data.witness1_signature} 
+                        <SignatureDisplay 
+                          signatureData={data.witness1_signature} 
+                          signerName={data.witness1_name}
                           alt="Assinatura da Testemunha 1" 
                           className="max-h-20 object-contain"
+                          fallbackClassName="text-sm text-blue-900 -rotate-2 font-bold"
                         />
                         <p className="text-xs font-semibold text-slate-800 mt-2 text-center truncate w-full">{data.witness1_name}</p>
                         {data.witness1_cpf && <p className="text-[10px] text-slate-400">CPF: {data.witness1_cpf}</p>}
@@ -872,10 +804,12 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
                     {data.witness2_signature ? (
                       <div className="flex flex-col items-center p-4 bg-white border rounded-xl shadow-sm">
                         <span className="text-[10px] uppercase font-bold text-slate-500 mb-2">Testemunha 2</span>
-                        <img 
-                          src={data.witness2_signature} 
+                        <SignatureDisplay 
+                          signatureData={data.witness2_signature} 
+                          signerName={data.witness2_name}
                           alt="Assinatura da Testemunha 2" 
                           className="max-h-20 object-contain"
+                          fallbackClassName="text-sm text-blue-900 -rotate-2 font-bold"
                         />
                         <p className="text-xs font-semibold text-slate-800 mt-2 text-center truncate w-full">{data.witness2_name}</p>
                         {data.witness2_cpf && <p className="text-[10px] text-slate-400">CPF: {data.witness2_cpf}</p>}
@@ -931,17 +865,11 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
                         </button>
                       </div>
 
-                      <div className="border-2 border-slate-300 rounded-xl overflow-hidden bg-slate-50 shadow-inner h-32 relative touch-none">
+                      <div className="border-2 border-slate-300 rounded-xl overflow-hidden bg-slate-50 shadow-inner h-32 relative touch-none select-none" style={{ touchAction: 'none' }}>
                         <canvas 
                           ref={canvasRef}
-                          onMouseDown={startDrawing}
-                          onMouseMove={draw}
-                          onMouseUp={stopDrawing}
-                          onMouseLeave={stopDrawing}
-                          onTouchStart={startDrawing}
-                          onTouchMove={draw}
-                          onTouchEnd={stopDrawing}
-                          className="absolute inset-0 w-full h-full cursor-crosshair bg-transparent"
+                          style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                          className="absolute inset-0 w-full h-full cursor-crosshair bg-transparent touch-none select-none"
                         />
                         {!hasDrawn && (
                           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-slate-400 text-xs select-none">
@@ -993,17 +921,11 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
                         </button>
                       </div>
 
-                      <div className="border-2 border-slate-300 rounded-xl overflow-hidden bg-slate-50 shadow-inner h-32 relative touch-none">
+                      <div className="border-2 border-slate-300 rounded-xl overflow-hidden bg-slate-50 shadow-inner h-32 relative touch-none select-none" style={{ touchAction: 'none' }}>
                         <canvas 
                           ref={witness1CanvasRef}
-                          onMouseDown={startDrawingWitness1}
-                          onMouseMove={drawWitness1}
-                          onMouseUp={stopDrawingWitness1}
-                          onMouseLeave={stopDrawingWitness1}
-                          onTouchStart={startDrawingWitness1}
-                          onTouchMove={drawWitness1}
-                          onTouchEnd={stopDrawingWitness1}
-                          className="absolute inset-0 w-full h-full cursor-crosshair bg-transparent"
+                          style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                          className="absolute inset-0 w-full h-full cursor-crosshair bg-transparent touch-none select-none"
                         />
                         {!hasDrawnWitness1 && (
                           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-slate-400 text-xs select-none">
@@ -1055,17 +977,11 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
                         </button>
                       </div>
 
-                      <div className="border-2 border-slate-300 rounded-xl overflow-hidden bg-slate-50 shadow-inner h-32 relative touch-none">
+                      <div className="border-2 border-slate-300 rounded-xl overflow-hidden bg-slate-50 shadow-inner h-32 relative touch-none select-none" style={{ touchAction: 'none' }}>
                         <canvas 
                           ref={witness2CanvasRef}
-                          onMouseDown={startDrawingWitness2}
-                          onMouseMove={drawWitness2}
-                          onMouseUp={stopDrawingWitness2}
-                          onMouseLeave={stopDrawingWitness2}
-                          onTouchStart={startDrawingWitness2}
-                          onTouchMove={drawWitness2}
-                          onTouchEnd={stopDrawingWitness2}
-                          className="absolute inset-0 w-full h-full cursor-crosshair bg-transparent"
+                          style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                          className="absolute inset-0 w-full h-full cursor-crosshair bg-transparent touch-none select-none"
                         />
                         {!hasDrawnWitness2 && (
                           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-slate-400 text-xs select-none">

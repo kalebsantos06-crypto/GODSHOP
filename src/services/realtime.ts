@@ -3,6 +3,10 @@ import { QueryClient } from '@tanstack/react-query';
 
 let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
 let isConnected = false;
+let reconnectTimeout: any = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const INITIAL_RECONNECT_DELAY = 3000;
 
 // BroadcastChannel for instant local cross-tab sync
 const BC_NAME = 'godshop_realtime_broadcast';
@@ -12,7 +16,7 @@ if (typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined') {
   try {
     broadcastChannel = new BroadcastChannel(BC_NAME);
   } catch (e) {
-    console.warn('BroadcastChannel not supported:', e);
+    // BroadcastChannel not supported or blocked by sandboxing
   }
 }
 
@@ -28,7 +32,7 @@ export function broadcastLocalChange(table?: string) {
         timestamp: Date.now()
       });
     } catch (e) {
-      console.warn('Error posting to BroadcastChannel:', e);
+      // Ignored
     }
   }
 }
@@ -69,12 +73,12 @@ function updateLocalFallbackCache(table: string, eventType: string, newRecord: a
 
     localStorage.setItem(key, JSON.stringify(items));
   } catch (err) {
-    console.error(`[Realtime Cache Error] Table ${table}:`, err);
+    console.warn(`[Realtime Cache] Table ${table}:`, err);
   }
 }
 
 /**
- * Initializes Supabase Real-time postgres_changes subscription for 100% synchronization.
+ * Initializes Supabase Real-time postgres_changes subscription with automatic resilient reconnection.
  */
 export function initRealtimeSync(queryClient: QueryClient) {
   if (typeof window === 'undefined') return () => {};
@@ -83,7 +87,6 @@ export function initRealtimeSync(queryClient: QueryClient) {
   if (broadcastChannel) {
     broadcastChannel.onmessage = (event) => {
       if (event.data && event.data.type === 'LOCAL_DATA_CHANGED') {
-        console.log('⚡ [Multi-tab Sync] Refreshing query cache for:', event.data.table || 'all');
         if (event.data.table) {
           queryClient.invalidateQueries({ queryKey: [event.data.table] });
         }
@@ -92,113 +95,125 @@ export function initRealtimeSync(queryClient: QueryClient) {
     };
   }
 
+  // If Supabase is not configured, multi-tab sync via BroadcastChannel is active
   if (!isSupabaseConfigured()) {
-    console.warn('⚠️ [Realtime] Supabase is not configured yet. Realtime sync listening locally.');
     return () => {};
   }
 
-  // Remove existing channel if present
-  if (realtimeChannel) {
-    supabase.removeChannel(realtimeChannel);
-    realtimeChannel = null;
-  }
+  const connectChannel = () => {
+    if (!isSupabaseConfigured()) return;
 
-  console.log('🔄 [Realtime] Initializing Supabase 100% Real-time Subscription...');
+    if (realtimeChannel) {
+      try {
+        supabase.removeChannel(realtimeChannel);
+      } catch (e) {}
+      realtimeChannel = null;
+    }
 
-  realtimeChannel = supabase
-    .channel('godshop_realtime_sync_all')
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public' },
-      (payload) => {
-        const table = payload.table;
-        const eventType = payload.eventType;
-        const newRecord = payload.new;
-        const oldRecord = payload.old;
+    realtimeChannel = supabase
+      .channel('godshop_realtime_sync_all')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        (payload) => {
+          const table = payload.table;
+          const eventType = payload.eventType;
+          const newRecord = payload.new;
+          const oldRecord = payload.old;
 
-        console.log(`⚡ [Supabase Realtime Event] ${eventType} on '${table}'`, payload);
+          // Update local fallback cache immediately
+          updateLocalFallbackCache(table, eventType, newRecord, oldRecord);
 
-        // Update local fallback cache immediately
-        updateLocalFallbackCache(table, eventType, newRecord, oldRecord);
+          // Targeted cache invalidation based on table
+          switch (table) {
+            case 'sales':
+            case 'public_sales':
+              queryClient.invalidateQueries({ queryKey: ['sales'] });
+              queryClient.invalidateQueries({ queryKey: ['public_sales'] });
+              break;
 
-        // Targeted cache invalidation based on table
-        switch (table) {
-          case 'sales':
-          case 'public_sales':
-            queryClient.invalidateQueries({ queryKey: ['sales'] });
-            queryClient.invalidateQueries({ queryKey: ['public_sales'] });
-            break;
+            case 'clients':
+            case 'public_clients':
+              queryClient.invalidateQueries({ queryKey: ['clients'] });
+              queryClient.invalidateQueries({ queryKey: ['pendingRemote'] });
+              break;
 
-          case 'clients':
-          case 'public_clients':
-            queryClient.invalidateQueries({ queryKey: ['clients'] });
-            queryClient.invalidateQueries({ queryKey: ['pendingRemote'] });
-            break;
+            case 'iphones':
+              queryClient.invalidateQueries({ queryKey: ['iphones'] });
+              break;
 
-          case 'iphones':
-            queryClient.invalidateQueries({ queryKey: ['iphones'] });
-            break;
+            case 'consoles':
+              queryClient.invalidateQueries({ queryKey: ['consoles'] });
+              break;
 
-          case 'consoles':
-            queryClient.invalidateQueries({ queryKey: ['consoles'] });
-            break;
+            case 'suppliers':
+              queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+              break;
 
-          case 'suppliers':
-            queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-            break;
+            case 'prices':
+              queryClient.invalidateQueries({ queryKey: ['prices'] });
+              break;
 
-          case 'prices':
-            queryClient.invalidateQueries({ queryKey: ['prices'] });
-            break;
+            case 'users':
+            case 'public_users':
+              queryClient.invalidateQueries({ queryKey: ['systemUsers'] });
+              break;
 
-          case 'users':
-          case 'public_users':
-            queryClient.invalidateQueries({ queryKey: ['systemUsers'] });
-            break;
+            default:
+              queryClient.invalidateQueries();
+              break;
+          }
 
-          default:
-            queryClient.invalidateQueries();
-            break;
+          // Invalidate all queries to ensure full UI consistency
+          queryClient.invalidateQueries();
+
+          // Broadcast to other local browser tabs
+          broadcastLocalChange(table);
+
+          // Notify app components
+          window.dispatchEvent(
+            new CustomEvent('supabase_realtime_change', {
+              detail: { table, eventType, newRecord, oldRecord }
+            })
+          );
         }
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          isConnected = true;
+          reconnectAttempts = 0;
+          window.dispatchEvent(
+            new CustomEvent('supabase_realtime_status', { detail: { connected: true } })
+          );
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          isConnected = false;
+          window.dispatchEvent(
+            new CustomEvent('supabase_realtime_status', { detail: { connected: false, error: err } })
+          );
 
-        // Always invalidate all queries to ensure full UI consistency
-        queryClient.invalidateQueries();
+          // Automatic resilient reconnect with backoff
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS && isSupabaseConfigured() && navigator.onLine) {
+            const delay = Math.min(INITIAL_RECONNECT_DELAY * Math.pow(1.5, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(() => {
+              connectChannel();
+            }, delay);
+          }
+        }
+      });
+  };
 
-        // Broadcast to other local browser tabs
-        broadcastLocalChange(table);
-
-        // Notify app components
-        window.dispatchEvent(
-          new CustomEvent('supabase_realtime_change', {
-            detail: { table, eventType, newRecord, oldRecord }
-          })
-        );
-      }
-    )
-    .subscribe((status, err) => {
-      if (status === 'SUBSCRIBED') {
-        isConnected = true;
-        console.log('✅ [Realtime] Supabase Real-time 100% Connected & Listening!');
-        window.dispatchEvent(
-          new CustomEvent('supabase_realtime_status', { detail: { connected: true } })
-        );
-      } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-        isConnected = false;
-        console.warn('⚠️ [Realtime] Subscription state changed:', status, err);
-        window.dispatchEvent(
-          new CustomEvent('supabase_realtime_status', { detail: { connected: false, error: err } })
-        );
-      }
-    });
+  connectChannel();
 
   // Handle reconnect when browser comes back online or regains focus
   const handleReconnect = () => {
-    console.log('🔄 [Realtime] Regained network/focus. Invalidating query cache for full sync...');
     queryClient.invalidateQueries();
     
-    // Re-verify realtime channel status
-    if (realtimeChannel && !isConnected) {
-      realtimeChannel.subscribe();
+    if (!isConnected && isSupabaseConfigured()) {
+      reconnectAttempts = 0;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      connectChannel();
     }
   };
 
@@ -206,8 +221,11 @@ export function initRealtimeSync(queryClient: QueryClient) {
   window.addEventListener('focus', handleReconnect);
 
   return () => {
+    if (reconnectTimeout) clearTimeout(reconnectTimeout);
     if (realtimeChannel) {
-      supabase.removeChannel(realtimeChannel);
+      try {
+        supabase.removeChannel(realtimeChannel);
+      } catch (e) {}
       realtimeChannel = null;
     }
     window.removeEventListener('online', handleReconnect);
@@ -221,3 +239,4 @@ export function initRealtimeSync(queryClient: QueryClient) {
 export function getRealtimeStatus(): boolean {
   return isConnected;
 }
+

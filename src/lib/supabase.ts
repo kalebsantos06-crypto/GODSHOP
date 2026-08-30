@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 const dummyUrl = 'https://placeholder-project.supabase.co';
-const dummyKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder';
+const dummyKey = 'placeholder-anon-key';
 
 const getRawUrl = (): string => {
   try {
@@ -51,6 +51,24 @@ export const clearCustomSupabaseCredentials = () => {
   try {
     localStorage.removeItem('custom_supabase_url');
     localStorage.removeItem('custom_supabase_key');
+  } catch (e) {}
+};
+
+export const clearStaleAuthTokens = () => {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('sb-') || k.includes('auth-token') || k === 'supabase.auth.token')) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => {
+      try {
+        localStorage.removeItem(k);
+      } catch (e) {}
+    });
   } catch (e) {}
 };
 

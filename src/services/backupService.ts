@@ -29,7 +29,10 @@ export const backupService = {
 
     const custom_payments: Record<string, string> = {};
     for (const sale of sales) {
-      const stored = localStorage.getItem(`inst_payments_${sale.id}`);
+      let stored = localStorage.getItem(`inst_payments_${sale.id}`);
+      if (!stored && sale.custom_payments) {
+        stored = typeof sale.custom_payments === 'string' ? sale.custom_payments : JSON.stringify(sale.custom_payments);
+      }
       if (stored) {
         custom_payments[sale.id] = stored;
       }

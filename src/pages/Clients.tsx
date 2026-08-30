@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getBaseUrl, copyToClipboard } from '../utils/url';
-import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { Plus, Trash2, Phone, Edit2, MessageCircle, Link as LinkIcon, Copy, Check, Mail, FileText, MapPin, Eye, Shield, Laptop, Calendar, User, Info, Smartphone, FileSpreadsheet, X, Sparkles, ZoomIn, ZoomOut, RotateCw, Printer, Download, CreditCard, ExternalLink, Lock, RefreshCw } from 'lucide-react';
@@ -152,7 +151,11 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       link.download = defaultName;
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
+      try {
+        if (link && link.parentNode) {
+          link.parentNode.removeChild(link);
+        }
+      } catch (e) {}
       toast.success('Download iniciado!');
     } catch (err) {
       console.error('Error downloading file:', err);
@@ -194,55 +197,135 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     toast.success('Documento removido.');
   };
 
-  // Canvas drawing coords
-  const getEventCoords = (e: any, canvas: HTMLCanvasElement) => {
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
+  // Canvas drawing coords & event binding to prevent mobile page scrolling
+  const isDrawingRef = React.useRef(false);
+  const lastCoordsRef = React.useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const getCoords = (e: MouseEvent | Touch | PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
     };
-  };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch (_) {}
+      isDrawingRef.current = true;
+      setCanvasDrawingActive(true);
 
-    ctx.strokeStyle = '#D4AF37'; // God Shop Gold Color
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.strokeStyle = '#D4AF37'; // God Shop Gold Color
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
 
-    const coords = getEventCoords(e, canvas);
-    ctx.beginPath();
-    ctx.moveTo(coords.x, coords.y);
-    setCanvasDrawingActive(true);
-  };
+      const coords = getCoords(e);
+      lastCoordsRef.current = coords;
+      ctx.beginPath();
+      ctx.moveTo(coords.x, coords.y);
+    };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!canvasDrawingActive) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!isDrawingRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    const coords = getEventCoords(e, canvas);
-    ctx.lineTo(coords.x, coords.y);
-    ctx.stroke();
-    setHasSignature(true);
-    
-    if (e.cancelable) e.preventDefault();
-  };
+      const coords = getCoords(e);
+      ctx.lineTo(coords.x, coords.y);
+      ctx.stroke();
+      lastCoordsRef.current = coords;
+      setHasSignature(true);
+    };
 
-  const stopDrawing = () => {
-    setCanvasDrawingActive(false);
-    if (canvasRef.current) {
-      setSignatureData(canvasRef.current.toDataURL());
-    }
-  };
+    const handlePointerUp = (e: PointerEvent) => {
+      if (isDrawingRef.current) {
+        isDrawingRef.current = false;
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+        setCanvasDrawingActive(false);
+        setSignatureData(canvas.toDataURL());
+      }
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.touches.length === 0) return;
+      isDrawingRef.current = true;
+      setCanvasDrawingActive(true);
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.strokeStyle = '#D4AF37';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      const coords = getCoords(e.touches[0]);
+      lastCoordsRef.current = coords;
+      ctx.beginPath();
+      ctx.moveTo(coords.x, coords.y);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!isDrawingRef.current || e.touches.length === 0) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const coords = getCoords(e.touches[0]);
+      ctx.lineTo(coords.x, coords.y);
+      ctx.stroke();
+      lastCoordsRef.current = coords;
+      setHasSignature(true);
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isDrawingRef.current) {
+        isDrawingRef.current = false;
+        setCanvasDrawingActive(false);
+        setSignatureData(canvas.toDataURL());
+      }
+    };
+
+    canvas.addEventListener('pointerdown', handlePointerDown);
+    canvas.addEventListener('pointermove', handlePointerMove);
+    canvas.addEventListener('pointerup', handlePointerUp);
+    canvas.addEventListener('pointercancel', handlePointerUp);
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('pointerdown', handlePointerDown);
+      canvas.removeEventListener('pointermove', handlePointerMove);
+      canvas.removeEventListener('pointerup', handlePointerUp);
+      canvas.removeEventListener('pointercancel', handlePointerUp);
+
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+      canvas.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [isAdding, editingClient, signatureData]);
 
   const clearSignature = () => {
     const canvas = canvasRef.current;
@@ -840,19 +923,13 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                         </div>
                       </div>
                     ) : (
-                      <div className="relative w-full h-[150px] bg-white rounded-lg border border-white/10 overflow-hidden">
+                      <div className="relative w-full h-[150px] bg-white rounded-lg border border-white/10 overflow-hidden touch-none select-none" style={{ touchAction: 'none' }}>
                         <canvas
                           ref={canvasRef}
                           width={400}
                           height={150}
-                          onMouseDown={startDrawing}
-                          onMouseMove={draw}
-                          onMouseUp={stopDrawing}
-                          onMouseLeave={stopDrawing}
-                          onTouchStart={startDrawing}
-                          onTouchMove={draw}
-                          onTouchEnd={stopDrawing}
-                          className="w-full h-full cursor-crosshair touch-none bg-white"
+                          style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                          className="w-full h-full cursor-crosshair touch-none select-none bg-white"
                         />
                         {!hasSignature && (
                           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-slate-400 p-4 text-center">
@@ -992,7 +1069,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       />
 
       {/* MODAL DE PRÉ-VISUALIZAÇÃO COMPLETA DO CLIENTE */}
-      {selectedPreviewClient && createPortal(
+      {selectedPreviewClient && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-4 bg-black/95 backdrop-blur-md overflow-hidden">
           <div className="relative bg-[#0C0C0E] border border-white/10 rounded-2xl max-w-2xl w-full max-h-[82vh] sm:max-h-[85vh] flex flex-col shadow-2xl animate-fade-in text-white overflow-hidden">
             
@@ -1329,8 +1406,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
               </button>
             </div>
           </div>
-        </div>,
-        document.body
+        </div>
       )}
 
       {/* SEÇÃO OCULTA DE IMPRESSÃO (EXCLUSIVA PARA GERAR PDF/IMPRIMIR FICHA DE HOMOLOGAÇÃO) */}

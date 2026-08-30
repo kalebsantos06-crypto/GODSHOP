@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, clearStaleAuthTokens } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
 
 interface AuthContextType {
@@ -18,7 +18,6 @@ const safeGetStorage = (key: string): string | null => {
   try {
     return localStorage.getItem(key);
   } catch (e) {
-    console.warn(`localStorage read error for ${key}:`, e);
     return null;
   }
 };
@@ -26,17 +25,20 @@ const safeGetStorage = (key: string): string | null => {
 const safeSetStorage = (key: string, value: string): void => {
   try {
     localStorage.setItem(key, value);
-  } catch (e) {
-    console.warn(`localStorage write error for ${key}:`, e);
-  }
+  } catch (e) {}
 };
 
 const safeRemoveStorage = (key: string): void => {
   try {
     localStorage.removeItem(key);
-  } catch (e) {
-    console.warn(`localStorage remove error for ${key}:`, e);
-  }
+  } catch (e) {}
+};
+
+const handleInvalidToken = async () => {
+  clearStaleAuthTokens();
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch (e) {}
 };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -57,9 +59,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 2500);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       if (!isMounted) return;
       clearTimeout(safetyTimer);
+
+      if (error) {
+        const errorMsg = (error.message || '').toLowerCase();
+        if (errorMsg.includes('refresh token') || errorMsg.includes('invalid refresh') || errorMsg.includes('not found')) {
+          await handleInvalidToken();
+        }
+      }
+
       if (session?.user) {
         setUser(session.user);
         setIsAuthenticated(true);
@@ -87,10 +97,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
       setLoading(false);
-    }).catch((err) => {
+    }).catch(async (err) => {
       if (!isMounted) return;
       clearTimeout(safetyTimer);
-      console.warn("Supabase auth session fetch failed, checking offline fallback", err);
+      
+      const errorMsg = (err?.message || '').toLowerCase();
+      if (errorMsg.includes('refresh token') || errorMsg.includes('invalid refresh') || errorMsg.includes('not found')) {
+        await handleInvalidToken();
+      }
+
       const cachedUserStr = safeGetStorage('auth_cached_user');
       if (cachedUserStr) {
         try {
@@ -111,7 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!isMounted) return;
       if (session?.user) {
         setUser(session.user);
@@ -125,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsOfflineMode(false);
         safeRemoveStorage('auth_offline_mode');
         safeRemoveStorage('auth_cached_user');
+        await handleInvalidToken();
       }
     });
 

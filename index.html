@@ -1,120 +1,41 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR" class="notranslate" translate="no">
   <head>
     <meta charset="UTF-8" />
+    <meta name="google" content="notranslate" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#090d16" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="format-detection" content="telephone=no" />
+    <meta name="description" content="Dashboard para gerenciamento de estoque, vendas e controle fiscal de iPhones e Consoles com sincronização em nuvem." />
+    <meta property="og:title" content="GODSHOP" />
+    <meta property="og:description" content="Dashboard para gerenciamento de estoque, vendas e controle fiscal de iPhones e Consoles com sincronização em nuvem." />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <title>GODSHOP Pro</title>
     <script>
-      (function() {
-        // Intercept and suppress benign HMR/WebSocket errors and unhandled rejections
-        function isBenignHmrError(msg) {
-          if (!msg) return false;
-          const lower = String(msg).toLowerCase();
-          return lower.includes('websocket') || 
-                 lower.includes('hmr') || 
-                 lower.includes('closed without opened') || 
-                 lower.includes('fechado sem ter sido aberto');
+      // Suppress benign Vite HMR WebSocket connection errors in sandbox/cloud preview environments
+      window.addEventListener('unhandledrejection', function(e) {
+        var reason = e && (e.reason || e);
+        var str = String(reason && (reason.message || reason) || '');
+        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened')) {
+          e.preventDefault();
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         }
-
-        window.addEventListener('unhandledrejection', function(event) {
-          const reason = event.reason;
-          if (reason && (isBenignHmrError(reason) || isBenignHmrError(reason.message))) {
-            event.stopImmediatePropagation();
-            event.preventDefault();
-            console.warn('Gracefully suppressed unhandled HMR/WebSocket rejection:', reason);
-          }
-        }, true);
-
-        window.addEventListener('error', function(event) {
-          if (event.message && isBenignHmrError(event.message)) {
-            event.stopImmediatePropagation();
-            event.preventDefault();
-            console.warn('Gracefully suppressed HMR/WebSocket error:', event.message);
-          }
-        }, true);
-
-        // Monkeypatch standard WebSocket ONLY in container dev environment to prevent HMR connection attempts from throwing
-        const isDevEnv = window.location.hostname.includes('ais-dev') || window.location.port === '3000';
-        const RealWebSocket = window.WebSocket;
-        if (isDevEnv && RealWebSocket) {
-          class MockWebSocket {
-            constructor(url, protocols) {
-              const urlStr = String(url);
-              if (urlStr.includes('vite') || urlStr.includes('hmr') || urlStr.includes('/ws')) {
-                console.log('[Vite Stub] Intercepted HMR WebSocket connection for:', urlStr);
-                this.url = urlStr;
-                this.readyState = 0; // CONNECTING
-                this.bufferedAmount = 0;
-                this.extensions = '';
-                this.protocol = protocols || '';
-                this.binaryType = 'blob';
-                this.onopen = null;
-                this.onclose = null;
-                this.onerror = null;
-                this.onmessage = null;
-                this._listeners = {};
-
-                // Transition to OPEN state shortly
-                setTimeout(() => {
-                  this.readyState = 1; // OPEN
-                  const event = { type: 'open', target: this };
-                  if (this.onopen) this.onopen(event);
-                  if (this._listeners['open']) {
-                    this._listeners['open'].forEach(l => {
-                      try { l(event); } catch(e) {}
-                    });
-                  }
-                }, 50);
-                return this;
-              }
-              return new RealWebSocket(url, protocols);
-            }
-
-            addEventListener(type, listener) {
-              if (!this._listeners) this._listeners = {};
-              if (!this._listeners[type]) this._listeners[type] = [];
-              this._listeners[type].push(listener);
-            }
-
-            removeEventListener(type, listener) {
-              if (!this._listeners || !this._listeners[type]) return;
-              this._listeners[type] = this._listeners[type].filter(l => l !== listener);
-            }
-
-            send(data) {}
-
-            close() {
-              this.readyState = 3; // CLOSED
-              const event = { type: 'close', target: this, code: 1000, reason: 'normal', wasClean: true };
-              if (this.onclose) this.onclose(event);
-              if (this._listeners && this._listeners['close']) {
-                this._listeners['close'].forEach(l => {
-                  try { l(event); } catch(e) {}
-                });
-              }
-            }
-          }
-
-          MockWebSocket.CONNECTING = 0;
-          MockWebSocket.OPEN = 1;
-          MockWebSocket.CLOSING = 2;
-          MockWebSocket.CLOSED = 3;
-
-          window.WebSocket = MockWebSocket;
+      });
+      window.addEventListener('error', function(e) {
+        var str = String(e && (e.message || e) || '');
+        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened')) {
+          e.preventDefault();
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         }
-      })();
+      });
     </script>
+    <title>GODSHOP</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

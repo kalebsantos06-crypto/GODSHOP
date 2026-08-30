@@ -27,7 +27,7 @@ import {
   Sparkles,
   MessageCircle
 } from 'lucide-react';
-import { getSavedStatusTemplate, formatStatusMessage, buildWhatsAppUrl } from '../lib/whatsappUtils';
+import { getSavedStatusTemplate, formatStatusMessage, buildWhatsAppUrl, getStoreWhatsAppNumber } from '../lib/whatsappUtils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -388,55 +388,159 @@ export default function ClientRemoteRegister() {
   // Canvas signature logic
   const [canvasDrawingActive, setCanvasDrawingActive] = useState(false);
 
-  const getEventCoords = (e: any, canvas: HTMLCanvasElement) => {
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
+  // Canvas drawing coords & event binding to prevent mobile page scrolling
+  const isDrawingRef = useRef(false);
+  const lastCoordsRef = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    if (step !== 3) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const setupCanvas = () => {
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const dpr = Math.max(window.devicePixelRatio || 1, 2);
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.scale(dpr, dpr);
+          ctx.strokeStyle = '#D4AF37'; // God Shop Gold Color
+          ctx.lineWidth = 3;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+        }
+      }
     };
-  };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    setupCanvas();
+    const timer = setTimeout(setupCanvas, 100);
 
-    ctx.strokeStyle = '#D4AF37'; // God Shop Gold Color
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    const getCoords = (e: MouseEvent | Touch | PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    };
 
-    const coords = getEventCoords(e, canvas);
-    ctx.beginPath();
-    ctx.moveTo(coords.x, coords.y);
-    setCanvasDrawingActive(true);
-  };
+    const handlePointerDown = (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch (_) {}
+      isDrawingRef.current = true;
+      setCanvasDrawingActive(true);
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!canvasDrawingActive) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.strokeStyle = '#D4AF37'; // God Shop Gold Color
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
 
-    const coords = getEventCoords(e, canvas);
-    ctx.lineTo(coords.x, coords.y);
-    ctx.stroke();
-    setHasSignature(true);
-    
-    // Prevent screen scroll on touch devices while drawing
-    if (e.cancelable) e.preventDefault();
-  };
+      const coords = getCoords(e);
+      lastCoordsRef.current = coords;
+      ctx.beginPath();
+      ctx.moveTo(coords.x, coords.y);
+    };
 
-  const stopDrawing = () => {
-    setCanvasDrawingActive(false);
-    if (canvasRef.current) {
-      setSignatureData(canvasRef.current.toDataURL());
-    }
-  };
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!isDrawingRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const coords = getCoords(e);
+      ctx.lineTo(coords.x, coords.y);
+      ctx.stroke();
+      lastCoordsRef.current = coords;
+      setHasSignature(true);
+    };
+
+    const handlePointerUp = (e: PointerEvent) => {
+      if (isDrawingRef.current) {
+        isDrawingRef.current = false;
+        try {
+          canvas.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+        setCanvasDrawingActive(false);
+        setSignatureData(canvas.toDataURL());
+      }
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.touches.length === 0) return;
+      isDrawingRef.current = true;
+      setCanvasDrawingActive(true);
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.strokeStyle = '#D4AF37';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      const coords = getCoords(e.touches[0]);
+      lastCoordsRef.current = coords;
+      ctx.beginPath();
+      ctx.moveTo(coords.x, coords.y);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!isDrawingRef.current || e.touches.length === 0) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const coords = getCoords(e.touches[0]);
+      ctx.lineTo(coords.x, coords.y);
+      ctx.stroke();
+      lastCoordsRef.current = coords;
+      setHasSignature(true);
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isDrawingRef.current) {
+        isDrawingRef.current = false;
+        setCanvasDrawingActive(false);
+        setSignatureData(canvas.toDataURL());
+      }
+    };
+
+    canvas.addEventListener('pointerdown', handlePointerDown);
+    canvas.addEventListener('pointermove', handlePointerMove);
+    canvas.addEventListener('pointerup', handlePointerUp);
+    canvas.addEventListener('pointercancel', handlePointerUp);
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+    return () => {
+      clearTimeout(timer);
+      canvas.removeEventListener('pointerdown', handlePointerDown);
+      canvas.removeEventListener('pointermove', handlePointerMove);
+      canvas.removeEventListener('pointerup', handlePointerUp);
+      canvas.removeEventListener('pointercancel', handlePointerUp);
+
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+      canvas.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [step]);
 
   const clearSignature = () => {
     const canvas = canvasRef.current;
@@ -749,19 +853,20 @@ export default function ClientRemoteRegister() {
           </div>
 
           {/* WhatsApp Success Notification Button */}
-          {phone && (
-            <div className="pt-2">
-              <a
-                href={buildWhatsAppUrl(phone, formatStatusMessage(getSavedStatusTemplate('registration'), { clientName: name || 'Cliente' }))}
-                target="_blank"
-                rel="noreferrer"
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm py-3.5 px-6 rounded-2xl transition duration-200 shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2.5"
-              >
-                <MessageCircle className="h-5 w-5" />
-                <span>Confirmar Cadastro via WhatsApp</span>
-              </a>
-            </div>
-          )}
+          <div className="pt-2">
+            <a
+              href={buildWhatsAppUrl(
+                getStoreWhatsAppNumber(),
+                getSavedStatusTemplate('registration') || "É um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema."
+              )}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm py-3.5 px-6 rounded-2xl transition duration-200 shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2.5 active:scale-[0.98]"
+            >
+              <MessageCircle className="h-5 w-5 text-white animate-pulse" />
+              <span>Confirmar no WhatsApp</span>
+            </a>
+          </div>
 
           {/* Elegant Footer Disclaimer */}
           <div className="space-y-4 pt-2">
@@ -845,7 +950,7 @@ export default function ClientRemoteRegister() {
                   ? "bg-black border-[#D4AF37] text-[#D4AF37] shadow-[0_0_15px_rgba(212,175,55,0.25)]" 
                   : "bg-neutral-900 border-neutral-800 text-neutral-500"
               }`}>
-                {step > 1 ? <Check className="h-4 w-4 stroke-[3px]" /> : "1"}
+                {step > 1 ? <Check className="h-4 w-4 stroke-[3px]" /> : <span key="num-1">1</span>}
               </div>
               <span className={`text-[11px] font-semibold tracking-wide transition-all ${
                 step === 1 ? "text-[#D4AF37]" : "text-neutral-500"
@@ -861,7 +966,7 @@ export default function ClientRemoteRegister() {
                   ? "bg-black border-[#D4AF37] text-[#D4AF37] shadow-[0_0_15px_rgba(212,175,55,0.25)]" 
                   : "bg-neutral-900 border-neutral-800 text-neutral-500"
               }`}>
-                {step > 2 ? <Check className="h-4 w-4 stroke-[3px]" /> : "2"}
+                {step > 2 ? <Check className="h-4 w-4 stroke-[3px]" /> : <span key="num-2">2</span>}
               </div>
               <span className={`text-[11px] font-semibold tracking-wide transition-all ${
                 step === 2 ? "text-[#D4AF37]" : "text-neutral-500"
@@ -875,7 +980,7 @@ export default function ClientRemoteRegister() {
                   ? "bg-black border-[#D4AF37] text-[#D4AF37] shadow-[0_0_15px_rgba(212,175,55,0.25)]" 
                   : "bg-neutral-900 border-neutral-800 text-neutral-500"
               }`}>
-                "3"
+                <span key="num-3">3</span>
               </div>
               <span className={`text-[11px] font-semibold tracking-wide transition-all ${
                 step === 3 ? "text-[#D4AF37]" : "text-neutral-500"
@@ -887,18 +992,12 @@ export default function ClientRemoteRegister() {
         {/* Form Body with Animating Step Wrapper */}
         <div className="bg-[#0C0C0E]/90 backdrop-blur-3xl p-6 sm:p-8 rounded-3xl border border-white/5 shadow-2xl relative">
           
-          <AnimatePresence mode="wait">
-            
-            {/* ETAPA 1: DADOS PESSOAIS */}
-            {step === 1 && (
-              <motion.div
-                key="step1"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                transition={{ duration: 0.3 }}
-                className="space-y-6"
-              >
+          {/* ETAPA 1: DADOS PESSOAIS */}
+          {step === 1 && (
+            <div
+              key="step-panel-1"
+              className="space-y-6 animate-fade-in"
+            >
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-wider text-[#D4AF37] mb-1">
                     <User className="h-4 w-4" /> Dados Pessoais
@@ -1117,18 +1216,14 @@ export default function ClientRemoteRegister() {
                     Próximo <ChevronRight className="h-4 w-4" />
                   </button>
                 </div>
-              </motion.div>
+              </div>
             )}
 
             {/* ETAPA 2: ENDEREÇO */}
             {step === 2 && (
-              <motion.div
-                key="step2"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                transition={{ duration: 0.3 }}
-                className="space-y-6"
+              <div
+                key="step-panel-2"
+                className="space-y-6 animate-fade-in"
               >
                 <div>
                   <h2 className="text-base font-bold text-white flex items-center gap-2 uppercase tracking-wider text-[#D4AF37] mb-1">
@@ -1255,17 +1350,13 @@ export default function ClientRemoteRegister() {
                     Próximo <ChevronRight className="h-4 w-4" />
                   </button>
                 </div>
-              </motion.div>
+              </div>
             )}
 
             {/* ETAPA 3: REVISÃO E ASSINATURA */}
             {step === 3 && (
-              <motion.div
-                key="step3"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                transition={{ duration: 0.3 }}
+              <div
+                key="step-panel-3"
                 className="space-y-6 animate-fade-in"
               >
                 <div>
@@ -1351,19 +1442,13 @@ export default function ClientRemoteRegister() {
                     
                     {/* Drawing Canvas */}
                     <div className="md:col-span-8 flex flex-col gap-2">
-                      <div className="relative border border-neutral-800 rounded-2xl overflow-hidden bg-neutral-950 flex flex-col items-center">
+                      <div className="relative border border-neutral-800 rounded-2xl overflow-hidden bg-neutral-950 flex flex-col items-center touch-none select-none" style={{ touchAction: 'none' }}>
                         <canvas 
                           ref={canvasRef}
                           width={450}
                           height={180}
-                          onMouseDown={startDrawing}
-                          onMouseMove={draw}
-                          onMouseUp={stopDrawing}
-                          onMouseLeave={stopDrawing}
-                          onTouchStart={startDrawing}
-                          onTouchMove={draw}
-                          onTouchEnd={stopDrawing}
-                          className="w-full bg-neutral-950/40 cursor-crosshair h-[180px]"
+                          style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                          className="w-full bg-neutral-950/40 cursor-crosshair h-[180px] touch-none select-none"
                         />
                         {!hasSignature && (
                           <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-center p-4">
@@ -1444,10 +1529,9 @@ export default function ClientRemoteRegister() {
                     Confirmar Assinatura
                   </button>
                 </div>
-              </motion.div>
+              </div>
             )}
 
-          </AnimatePresence>
         </div>
 
         {/* Footer info/badges */}

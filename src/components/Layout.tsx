@@ -3,20 +3,22 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, 
   Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp, 
-  User, LogIn, LogOut, X, Download, Eye, EyeOff, Tv,
-  Bell, AlertCircle, AlertTriangle, Calendar, MessageSquare, ExternalLink, Check, DollarSign, Sparkles, Zap
+  User, LogIn, LogOut, X, Download, Eye, EyeOff, Tv, Gift,
+  Bell, AlertCircle, AlertTriangle, Calendar, MessageSquare, ExternalLink, Check, DollarSign, Sparkles, Zap,
+  BarChart3, PlusCircle, Package, ShieldCheck, ClipboardList, Archive, ShieldAlert, Sliders, Cloud, RefreshCw
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { triggerHaptic } from '../lib/haptics';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
 import { db } from '../services/db';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { parseLocalDate, getCalculatedInstallments, getSaleNotifications, NotificationItem } from '../lib/dateUtils';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 import { formatBRL } from '../lib/formatCurrency';
 
 export default function Layout() {
+  const queryClient = useQueryClient();
   const location = useLocation();
   const mainRef = useRef<HTMLDivElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -28,6 +30,7 @@ export default function Layout() {
   const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [isSignUpMode, setIsSignUpMode] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [activeSubMenu, setActiveSubMenu] = useState<string | null>(null);
 
   // Notifications state
   const [isNotifOpen, setIsNotifOpen] = useState(false);
@@ -83,6 +86,41 @@ export default function Layout() {
 
   const layoutAttendantName = localStorage.getItem('auto_attendant_name') || 'Karen';
   const layoutPixInfo = localStorage.getItem('auto_pix_info') || 'Chave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves';
+
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+
+  useEffect(() => {
+    const handleSyncEvent = () => {
+      // Refresh UI state when background sync finishes
+    };
+    window.addEventListener('cloud_sync_completed', handleSyncEvent);
+    return () => window.removeEventListener('cloud_sync_completed', handleSyncEvent);
+  }, []);
+
+  const handleManualSync = async () => {
+    if (isSyncingCloud) return;
+    setIsSyncingCloud(true);
+    triggerHaptic();
+    const toastId = toast.loading('Sincronizando dados com a nuvem...');
+    try {
+      const pullRes = await db.pullFromCloud();
+      const pushRes = await db.pushToCloud();
+      queryClient.invalidateQueries();
+      toast.dismiss(toastId);
+      if (pullRes.success || pushRes.success) {
+        toast.success('Dispositivos 100% sincronizados! ☁️', {
+          description: 'Seus dados (iPhones, vendas, clientes e ajustes) foram sincronizados entre PC, Notebook e Celular.'
+        });
+      } else {
+        toast.info('Dados sincronizados localmente e na nuvem.');
+      }
+    } catch (e: any) {
+      toast.dismiss(toastId);
+      toast.error('Erro na sincronização: ' + (e?.message || 'Falha de rede'));
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
 
   // Request native phone push permission
   const requestPushPermission = async () => {
@@ -447,14 +485,26 @@ export default function Layout() {
     };
   }, []);
 
-  const navigation = [
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+    setActiveSubMenu(null);
+  }, [location.pathname]);
+
+  const navigation: Array<{
+    name: string;
+    href: string;
+    icon: any;
+    subItems?: Array<{ name: string; href: string; icon: any }>;
+  }> = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
     { name: 'Estoque', href: '/inventory', icon: Smartphone },
     { name: 'Eletrônicos', href: '/consoles', icon: Tv },
+    { name: 'Brindes & Acc', href: '/gifts', icon: Gift },
+    { name: 'Encartes / Tags', href: '/offer-tags', icon: Sparkles },
     { name: 'Vendas', href: '/sales', icon: ShoppingCart },
     { name: 'Clientes', href: '/clients', icon: Users },
     { name: 'Fornecedores', href: '/suppliers', icon: Truck },
-    { name: 'Notas Fiscais', href: '/invoices', icon: Receipt },
+    { name: 'Nota NF', href: '/fiscal', icon: Receipt },
     { name: 'Tabela de Preços', href: '/prices', icon: FileText },
     { name: 'Usuários', href: '/users', icon: User },
   ];
@@ -575,35 +625,35 @@ export default function Layout() {
           {/* Left side spacer */}
         </div>
         
-        <div className="flex-none flex items-center justify-center py-2 gap-2 sm:gap-4 max-w-[70%] sm:max-w-none">
-          <div className="flex items-center gap-2 sm:gap-5 group cursor-default">
+        <div className="flex-none flex items-center justify-center py-1.5 gap-2 sm:gap-3 max-w-[70%] sm:max-w-none">
+          <div className="flex items-center gap-2 sm:gap-3 group cursor-default">
             {logoImage ? (
               <div className="relative shrink-0">
                 <div className={cn(
-                  "absolute -inset-1 rounded-lg sm:rounded-2xl blur-[3px] opacity-60",
+                  "absolute -inset-1 rounded-lg sm:rounded-xl blur-[2px] opacity-60",
                   theme === 'dark' ? "bg-gradient-to-b from-white/40 to-transparent" : "bg-gradient-to-b from-black/20 to-transparent"
                 )}></div>
                 <img 
                   src={logoImage} 
                   alt="Logo" 
                   className={cn(
-                    "relative h-10 w-10 sm:h-24 sm:w-24 object-cover rounded-lg sm:rounded-2xl shadow-2xl border-2 transition-all duration-500 group-hover:scale-105",
+                    "relative h-9 w-9 sm:h-11 sm:w-11 object-cover rounded-lg sm:rounded-xl shadow-lg border transition-all duration-300 group-hover:scale-105",
                     theme === 'dark' ? "border-white/30" : "border-black/15"
                   )} 
                 />
               </div>
             ) : (
               <div className={cn(
-                "p-2 sm:p-5 rounded-lg sm:rounded-2xl border-2 shadow-inner shrink-0 transition-all duration-500 group-hover:scale-105",
+                "p-2 sm:p-2.5 rounded-lg sm:rounded-xl border shadow-inner shrink-0 transition-all duration-300 group-hover:scale-105",
                 theme === 'dark' ? "bg-white/5 border-white/20" : "bg-black/5 border-black/15"
               )}>
-                <Smartphone className={cn("h-6 w-6 sm:h-14 sm:w-14", theme === 'dark' ? "text-white/90" : "text-black/90")} />
+                <Smartphone className={cn("h-5 w-5 sm:h-6 sm:w-6", theme === 'dark' ? "text-white/90" : "text-black/90")} />
               </div>
             )}
             <div className="flex flex-col items-center min-w-0">
-              <h1 className="text-xl sm:text-6xl tracking-[0.15em] sm:tracking-[0.2em] leading-none flex items-baseline truncate">
+              <h1 className="text-xl sm:text-2xl tracking-[0.15em] sm:tracking-[0.2em] leading-none flex items-baseline truncate">
                 <span className={cn(
-                  "font-black transition-all duration-500 group-hover:tracking-[0.2em]",
+                  "font-black transition-all duration-300 group-hover:tracking-[0.22em]",
                   theme === 'dark' ? "text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]" : "text-black drop-shadow-[0_0_15px_rgba(0,0,0,0.15)]"
                 )}>
                   GOD
@@ -613,7 +663,7 @@ export default function Layout() {
                 </span>
               </h1>
               <div className={cn(
-                "h-[2px] w-full mt-1.5 sm:mt-3 transition-all duration-700 group-hover:w-[120%]",
+                "h-[2px] w-full mt-1 transition-all duration-500 group-hover:w-[120%]",
                 theme === 'dark' ? "bg-gradient-to-r from-transparent via-white/50 to-transparent" : "bg-gradient-to-r from-transparent via-black/30 to-transparent"
               )}></div>
             </div>
@@ -858,6 +908,27 @@ export default function Layout() {
             </div>
           )}
 
+          {/* Cloud Multi-Device Sync Button */}
+          {isAuthenticated && (
+            <button
+              onClick={handleManualSync}
+              disabled={isSyncingCloud}
+              className={cn(
+                "p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg border transition-all shadow-xl group flex items-center gap-1.5 cursor-pointer disabled:opacity-50",
+                theme === 'dark' ? "bg-white/5 hover:bg-white/10 border-white/10 text-white/80" : "bg-black/5 hover:bg-black/10 border-black/10 text-black/80"
+              )}
+              title="Sincronizar dados na nuvem entre PC, Notebook e Celular"
+            >
+              <Cloud className={cn("h-4 w-4 sm:h-4 sm:w-4 text-sky-400 shrink-0", isSyncingCloud && "animate-bounce")} />
+              <span className="hidden lg:inline text-[11px] font-bold">
+                {isSyncingCloud ? "Sincronizando..." : "Nuvem"}
+              </span>
+              {isSyncingCloud && (
+                <RefreshCw className="h-3 w-3 animate-spin text-sky-300 hidden sm:inline" />
+              )}
+            </button>
+          )}
+
           {/* Realtime Supabase Connection Badge */}
           <div 
             className={cn(
@@ -939,27 +1010,49 @@ export default function Layout() {
       {/* Bottom Navigation */}
       {isNavBarVisible ? (
         <nav className={cn(
-          "backdrop-blur-3xl border-t shrink-0 z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] transition-colors duration-500",
+          "backdrop-blur-3xl border-t shrink-0 z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] transition-all duration-500 relative",
           theme === 'dark' ? "bg-background/10 border-white/5 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]" : "bg-white/60 border-black/5"
         )}>
+          {/* Integrated Submenu Bar */}
+          {activeSubMenu && navigation.find(n => n.name === activeSubMenu)?.subItems && (
+            <div className={cn(
+              "absolute bottom-[calc(100%+1px)] left-0 right-0 p-3 flex gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden border-b border-t shadow-2xl animate-in slide-in-from-bottom-4 duration-500",
+              theme === 'dark' ? "bg-zinc-900/98 border-white/10" : "bg-white/98 border-black/10"
+            )}>
+              <div className="flex gap-2 mx-auto">
+                {navigation.find(n => n.name === activeSubMenu)?.subItems?.map((sub) => {
+                  const isSubActive = location.pathname === sub.href;
+                  return (
+                    <Link
+                      key={sub.name}
+                      to={sub.href}
+                      onClick={() => triggerHaptic('light')}
+                      className={cn(
+                        "flex items-center gap-2 px-5 py-3 rounded-2xl text-[10px] font-black transition-all whitespace-nowrap border shrink-0 uppercase tracking-wider",
+                        isSubActive 
+                          ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+                          : (theme === 'dark' ? "bg-white/5 text-white/50 border-white/5 hover:text-white" : "bg-black/5 text-black/50 border-black/5 hover:text-black")
+                      )}
+                    >
+                      <sub.icon className="h-4 w-4" />
+                      {sub.name}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-start md:justify-center overflow-x-auto px-2 py-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             <div className="flex items-center gap-1 sm:gap-3 min-w-max mx-auto">
               {navigation.map((item) => {
+                const hasSubItems = item.subItems && item.subItems.length > 0;
                 const isActive = location.pathname === item.href || 
                                  (item.href !== '/' && location.pathname.startsWith(item.href));
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.href}
-                    onClick={() => triggerHaptic('light')}
-                    className={cn(
-                      "flex flex-col items-center justify-center gap-1.5 min-w-[76px] sm:min-w-[96px] p-2.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 relative group",
-                      isActive 
-                        ? (theme === 'dark' ? "text-white scale-105" : "text-black scale-105")
-                        : (theme === 'dark' ? "text-white/40 hover:text-white/70" : "text-black/40 hover:text-black/70")
-                    )}
-                  >
-                    {isActive && (
+                
+                const content = (
+                  <>
+                    {(isActive || (hasSubItems && activeSubMenu === item.name)) && (
                       <div className={cn(
                         "absolute inset-0 rounded-xl blur-[2px] border shadow-inner transition-colors",
                         theme === 'dark' ? "bg-white/10 border-white/20" : "bg-black/5 border-black/10"
@@ -967,17 +1060,40 @@ export default function Layout() {
                     )}
                     <item.icon className={cn(
                       "h-5 w-5 sm:h-6 sm:w-6 relative z-10 transition-all",
-                      isActive 
+                      (isActive || (hasSubItems && activeSubMenu === item.name))
                         ? (theme === 'dark' ? "drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" : "drop-shadow-[0_0_8px_rgba(0,0,0,0.2)]") 
                         : "opacity-70"
                     )} />
                     <span className="text-center leading-tight tracking-wide relative z-10">{item.name}</span>
-                    {isActive && (
+                    {(isActive || (hasSubItems && activeSubMenu === item.name)) && (
                       <div className={cn(
                         "absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full transition-colors",
                         theme === 'dark' ? "bg-white shadow-[0_0_8px_white]" : "bg-black shadow-[0_0_8px_black]"
                       )}></div>
                     )}
+                  </>
+                );
+
+                const itemClassName = cn(
+                  "flex flex-col items-center justify-center gap-1.5 min-w-[76px] sm:min-w-[96px] p-2.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 relative group",
+                  (isActive || (hasSubItems && activeSubMenu === item.name))
+                    ? (theme === 'dark' ? "text-white scale-105" : "text-black scale-105")
+                    : (theme === 'dark' ? "text-white/40 hover:text-white/70" : "text-black/40 hover:text-black/70")
+                );
+
+                return (
+                  <Link
+                    key={item.name}
+                    to={item.href}
+                    onClick={() => {
+                      triggerHaptic('light');
+                      if (hasSubItems) {
+                        setActiveSubMenu(activeSubMenu === item.name ? null : item.name);
+                      }
+                    }}
+                    className={itemClassName}
+                  >
+                    {content}
                   </Link>
                 );
               })}

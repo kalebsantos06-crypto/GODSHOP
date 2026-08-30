@@ -132,33 +132,39 @@ export function getCalculatedInstallments(
     }
   }
 
-  let remainingUnpaid = Number((totalAmount - totalPaid).toFixed(2));
-  let extraIndex = baseInstCount + 1;
-  while (true) {
-    const p = paymentsMap[extraIndex] || 0;
+  // Include any extra indices added beyond baseInstCount in customPayments / paymentsMap
+  const extraKeys = Object.keys(paymentsMap)
+    .map(Number)
+    .filter(k => !isNaN(k) && k > baseInstCount)
+    .sort((a, b) => a - b);
+
+  for (const k of extraKeys) {
+    const p = paymentsMap[k] || 0;
     if (p > 0.005) {
       totalPaid += p;
-      remainingUnpaid = Number((totalAmount - totalPaid).toFixed(2));
-      paidIndices.push(extraIndex);
-      extraIndex++;
+      paidIndices.push(k);
     } else {
-      break;
+      unpaidIndices.push(k);
     }
   }
 
+  let remainingUnpaid = Number((totalAmount - totalPaid).toFixed(2));
+
   if (remainingUnpaid > 0.01 && unpaidIndices.length === 0) {
-    unpaidIndices.push(extraIndex);
+    const maxIdx = Math.max(baseInstCount, ...Object.keys(paymentsMap).map(Number).filter(n => !isNaN(n)), 0);
+    unpaidIndices.push(maxIdx + 1);
   }
 
   const allIndices = Array.from(new Set([...paidIndices, ...unpaidIndices])).sort((a, b) => a - b);
 
   if (unpaidIndices.length > 0) {
-    const expectedPerUnpaid = Number((remainingUnpaid / unpaidIndices.length).toFixed(2));
+    const rawExpectedPerUnpaid = remainingUnpaid > 0 ? (remainingUnpaid / unpaidIndices.length) : 0;
+    const expectedPerUnpaid = Math.max(0, Number(rawExpectedPerUnpaid.toFixed(2)));
     const totalPaidExpected = paidIndices.reduce((sum, idx) => sum + (paymentsMap[idx] || 0), 0);
     const countExceptLast = unpaidIndices.length - 1;
     const sumExceptLast = countExceptLast * expectedPerUnpaid;
     const lastUnpaidIndex = unpaidIndices[unpaidIndices.length - 1];
-    const lastExpected = Number((totalAmount - totalPaidExpected - sumExceptLast).toFixed(2));
+    const lastExpected = Math.max(0, Number((totalAmount - totalPaidExpected - sumExceptLast).toFixed(2)));
 
     const expectedMap: { [key: number]: number } = {};
     for (const idx of paidIndices) {

@@ -67,7 +67,11 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
     }
 
     const successful = document.execCommand('copy');
-    document.body.removeChild(textArea);
+    try {
+      if (textArea && textArea.parentNode) {
+        textArea.parentNode.removeChild(textArea);
+      }
+    } catch (e) {}
     return successful;
   } catch (err) {
     console.error('Fallback copy failed:', err);

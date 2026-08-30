@@ -3,8 +3,10 @@
  */
 
 export const DEFAULT_STATUS_TEMPLATES = {
-  registration: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nÉ um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.\n\n📍 *Status:* Cadastro Realizado e Ativo.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nQualquer dúvida, nossa equipe está à total disposição! 📱✨",
+  registration: "É um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.",
   
+  client_remote_confirmation: "É um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.",
+
   order_confirmed: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nSeu pedido ({aparelho}) foi confirmado com sucesso em nosso sistema e o pagamento já foi aprovado!\n\n📍 *Status:* Pedido Confirmado e Registrado.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nQualquer dúvida, estamos à disposição! 💳✅",
   
   order_preparing: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nSeu pedido ({aparelho}) está em fase de preparação! Nossa equipe técnica está realizando a inspeção detalhada de bateria, câmeras e conectores, além da higienização e embalagem de proteção.\n\n📍 *Status:* Em Separação e Testes de Qualidade.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nAtenciosamente, Controle de Qualidade 📦🔍",
@@ -17,18 +19,22 @@ export const DEFAULT_STATUS_TEMPLATES = {
   
   guarantee_sent: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nSeu Termo de Garantia Oficial para o dispositivo ({aparelho}) foi devidamente ativado em nosso banco de dados!\n\n📍 *Status:* Garantia Oficial Ativada.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nGuarde esta mensagem como comprovante. 🛡️📋",
   
-  order_thank_you: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nMuito obrigado por comprar seu {aparelho} na GODSHOP! É uma honra ter você como nosso cliente.\n\n📍 *Status:* Pedido Concluído com Sucesso.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nAproveite seu novo aparelho! Conte sempre com nosso atendimento pós-venda. 🤍📱"
+  order_thank_you: "Olá, {cliente}! Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nMuito obrigado por comprar seu {aparelho} na GODSHOP! É uma honra ter você como nosso cliente.\n\n📍 *Status:* Pedido Concluído com Sucesso.\n\nNossa chave PIX oficial para pagamentos é:\nChave (Celular): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nAproveite seu novo aparelho! Conte sempre com nosso atendimento pós-venda. 🤍📱",
+
+  order_settled: "📄 *DECLARAÇÃO DE QUITAÇÃO DE DÉBITO — GODSHOP*\n\nOlá, {cliente}!\n\nConfirmamos com satisfação que a compra do produto abaixo foi *TOTALMENTE QUITADA* em nosso sistema:\n\n📱 *Item / Aparelho:* {aparelho}\n💰 *Valor Total:* {valor}\n✅ *Status:* QUITADO E FINALIZADO\n\nA GODSHOP declara que não existem débitos pendentes referentes a esta compra. Agradecemos a preferência e confiança!\n\nAtenciosamente,\n*GODSHOP — Kaleb dos Santos Gonçalves*"
 };
 
 export type WhatsAppStatusType = 
   | 'registration' 
+  | 'client_remote_confirmation'
   | 'order_confirmed'
   | 'order_preparing' 
   | 'order_ready'
   | 'order_on_way' 
   | 'order_delivered'
   | 'guarantee_sent'
-  | 'order_thank_you';
+  | 'order_thank_you'
+  | 'order_settled';
 
 export const STATUS_LABELS: Record<WhatsAppStatusType, { 
   step: number; 
@@ -45,6 +51,14 @@ export const STATUS_LABELS: Record<WhatsAppStatusType, {
     description: 'Boas-vindas e confirmação de cadastro',
     nextStep: 'Aguardando confirmação do pedido',
     badgeColor: 'from-amber-500/20 to-amber-600/10 border-amber-500/40 text-amber-300'
+  },
+  client_remote_confirmation: {
+    step: 1,
+    label: '1b. Confirmação do Cliente (Link)',
+    icon: '📱',
+    description: 'Mensagem enviada pelo cliente ao concluir o cadastro',
+    nextStep: 'Validação e prosseguimento do atendimento',
+    badgeColor: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/40 text-emerald-300'
   },
   order_confirmed: {
     step: 2,
@@ -101,6 +115,14 @@ export const STATUS_LABELS: Record<WhatsAppStatusType, {
     description: 'Conclusão de pedido e canal de pós-venda',
     nextStep: 'Suporte contínuo & Atendimento VIP',
     badgeColor: 'from-rose-500/20 to-rose-600/10 border-rose-500/40 text-rose-300'
+  },
+  order_settled: {
+    step: 9,
+    label: '9. Comprovante de Quitação',
+    icon: '📄',
+    description: 'Declaração oficial de quitação total do débito',
+    nextStep: 'Cliente 100% quitado e finalizado',
+    badgeColor: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/40 text-emerald-300'
   }
 };
 
@@ -108,14 +130,29 @@ export const STATUS_LABELS: Record<WhatsAppStatusType, {
  * Gets the saved template or falls back to default.
  */
 export function getSavedStatusTemplate(type: WhatsAppStatusType): string {
-  if (typeof window === 'undefined') return DEFAULT_STATUS_TEMPLATES[type];
+  if (typeof window === 'undefined') return DEFAULT_STATUS_TEMPLATES[type] || '';
   const storageKey = `auto_template_${type}`;
   const saved = localStorage.getItem(storageKey);
-  return saved || DEFAULT_STATUS_TEMPLATES[type];
+  return saved || DEFAULT_STATUS_TEMPLATES[type] || '';
 }
 
 /**
- * Formats a message string replacing variables like {cliente}, {aparelho}, {loja}.
+ * Gets the primary store WhatsApp phone number.
+ */
+export function getStoreWhatsAppNumber(): string {
+  if (typeof window === 'undefined') return '5532999634583';
+  const savedPhone = localStorage.getItem('auto_store_phone');
+  if (savedPhone) {
+    const clean = savedPhone.replace(/\D/g, '');
+    if (clean.length >= 10 && clean !== '13036942637' && clean !== '1336942637') {
+      return clean;
+    }
+  }
+  return '5532999634583';
+}
+
+/**
+ * Formats a message string replacing variables like {cliente}, {aparelho}, {loja}, {cpf}, etc.
  */
 export function formatStatusMessage(
   template: string,
@@ -125,6 +162,10 @@ export function formatStatusMessage(
     storeName?: string;
     price?: string;
     dueDate?: string;
+    cpf?: string;
+    phone?: string;
+    city?: string;
+    state?: string;
   }
 ): string {
   const clientName = data.clientName?.trim() || 'Cliente';
@@ -136,6 +177,13 @@ export function formatStatusMessage(
 
   return template
     .replace(/\{cliente\}/gi, clientName)
+    .replace(/\{nome\}/gi, clientName)
+    .replace(/\{cpf\}/gi, data.cpf || '***.***.***-**')
+    .replace(/\{telefone\}/gi, data.phone || '')
+    .replace(/\{celular\}/gi, data.phone || '')
+    .replace(/\{cidade\}/gi, data.city || '')
+    .replace(/\{uf\}/gi, data.state || '')
+    .replace(/\{estado\}/gi, data.state || '')
     .replace(/\{aparelho\}/gi, itemName)
     .replace(/\{item\}/gi, itemName)
     .replace(/\{produto\}/gi, itemName)

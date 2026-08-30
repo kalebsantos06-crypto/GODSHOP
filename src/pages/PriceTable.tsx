@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
-import { Plus, Trash2, Edit2, Search, Smartphone, X, Gamepad2, Tag, DollarSign, Calculator } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Plus, Trash2, Edit2, Search, Smartphone, X, Gamepad2, Tag, DollarSign, Calculator, Sparkles, Upload, FileText, Loader2, CheckCircle2, AlertCircle, Database } from 'lucide-react';
 import { toast } from 'sonner';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
 
@@ -18,6 +19,14 @@ export default function PriceTable() {
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   const [calcDisplay, setCalcDisplay] = useState('0');
   const [calcHistory, setCalcHistory] = useState('');
+
+  // IA Import States
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [isProcessingIA, setIsProcessingIA] = useState(false);
+  const [iaStep, setIaStep] = useState('');
+  const [extractedItems, setExtractedItems] = useState<any[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const { data: prices = [], isLoading } = useQuery({
     queryKey: ['prices'],
@@ -107,10 +116,163 @@ export default function PriceTable() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['prices'] });
-      toast.success('Tabela importada com sucesso!');
+      toast.success('Tabela demonstrativa importada!');
+      setIsImportModalOpen(false);
     },
     onError: () => toast.error('Erro ao importar tabela.')
   });
+
+  const updateExtractedItem = (index: number, field: string, value: any) => {
+    setExtractedItems(prev => {
+      const updated = [...prev];
+      const item = { ...updated[index], [field]: value };
+      if (field === 'price') {
+        const num = parseFloat(String(value).replace(',', '.'));
+        item.price = isNaN(num) ? 0 : num;
+        if (dollarRate > 0 && item.price > 0) {
+          item.price_usd = Number((item.price / dollarRate).toFixed(2));
+        }
+      } else if (field === 'price_usd') {
+        const num = parseFloat(String(value).replace(',', '.'));
+        item.price_usd = isNaN(num) ? 0 : num;
+        if (dollarRate > 0 && item.price_usd > 0) {
+          item.price = Number((item.price_usd * dollarRate).toFixed(2));
+        }
+      }
+      updated[index] = item;
+      return updated;
+    });
+  };
+
+  const removeExtractedItem = (index: number) => {
+    setExtractedItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const importExtractedMutation = useMutation({
+    mutationFn: async (itemsToImport: any[]) => {
+      for (const item of itemsToImport) {
+        let priceBrl = Number(item.price);
+        let usdPrice = item.price_usd ? Number(item.price_usd) : 0;
+
+        if ((isNaN(priceBrl) || priceBrl <= 0) && usdPrice > 0) {
+          priceBrl = Number((usdPrice * (dollarRate || 5.0)).toFixed(2));
+        }
+
+        if ((isNaN(usdPrice) || usdPrice <= 0) && priceBrl > 0 && dollarRate > 0) {
+          usdPrice = Number((priceBrl / dollarRate).toFixed(2));
+        }
+
+        await db.prices.create({
+          category: item.category || 'iphone',
+          model: item.model || 'Aparelho',
+          version: item.version || '',
+          storage: item.storage || '',
+          color: item.color || '',
+          condition: item.condition || 'Seminovo Grade A',
+          price: priceBrl > 0 ? priceBrl : 0,
+          price_usd: usdPrice > 0 ? usdPrice : 0
+        });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prices'] });
+      toast.success('Sua tabela foi importada com sucesso!');
+      setIsImportModalOpen(false);
+      setExtractedItems([]);
+      setSelectedFile(null);
+    },
+    onError: (err: any) => {
+      console.error(err);
+      toast.error('Erro ao salvar os itens extraídos.');
+    }
+  });
+
+  const handleFileProcess = async (file: File) => {
+    setSelectedFile(file);
+    setIsProcessingIA(true);
+    setIaStep('Enviando arquivo e iniciando leitura...');
+    
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Result = reader.result as string;
+          const base64Data = base64Result.split(',')[1];
+          const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/png');
+          
+          setIaStep('O Gemini IA está lendo e interpretando a sua tabela de preços...');
+          
+          const response = await fetch('/api/process-price-table', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              fileData: base64Data,
+              mimeType,
+            }),
+          });
+          
+          if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.error || 'Erro ao processar arquivo no servidor.');
+          }
+          
+          const data = await response.json();
+          if (data && Array.isArray(data.items)) {
+            setExtractedItems(data.items);
+            toast.success(`Leitura completa! ${data.items.length} itens detectados.`);
+          } else {
+            throw new Error('Não foi possível identificar itens de preços nesta tabela.');
+          }
+        } catch (innerErr: any) {
+          console.error(innerErr);
+          toast.error(innerErr.message || 'Erro ao processar a tabela com IA.');
+          setSelectedFile(null);
+        } finally {
+          setIsProcessingIA(false);
+        }
+      };
+      
+      reader.onerror = () => {
+        toast.error('Falha ao carregar o arquivo local.');
+        setIsProcessingIA(false);
+        setSelectedFile(null);
+      };
+      
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Erro ao ler arquivo.');
+      setIsProcessingIA(false);
+      setSelectedFile(null);
+    }
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileProcess(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      handleFileProcess(e.target.files[0]);
+    }
+  };
 
   // Auto-convert existing prices that don't have price_usd
   React.useEffect(() => {
@@ -269,7 +431,15 @@ export default function PriceTable() {
         <p className="text-xs text-muted-foreground max-w-md">
           <span className="font-bold text-emerald-600">Dica:</span> Os valores em Reais são recalculados instantaneamente sempre que a cotação do dólar muda. Isso garante que sua margem de lucro seja preservada.
         </p>
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <Link
+            to="/offer-tags"
+            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium transition-colors w-full sm:w-auto justify-center shadow-sm"
+            title="Gerar Arte / Encarte de Oferta"
+          >
+            <Sparkles className="h-4 w-4" />
+            Gerar Encartes
+          </Link>
           <button 
             onClick={() => setIsCalculatorOpen(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-blue-700 transition-colors w-full sm:w-auto justify-center shadow-sm"
@@ -279,11 +449,11 @@ export default function PriceTable() {
             Calculadora
           </button>
           <button 
-            onClick={() => importMutation.mutate()}
-            disabled={importMutation.isPending}
-            className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-secondary/80 transition-colors w-full sm:w-auto justify-center shadow-sm disabled:opacity-50"
+            onClick={() => setIsImportModalOpen(true)}
+            className="bg-secondary text-secondary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-secondary/80 transition-colors w-full sm:w-auto justify-center shadow-sm"
           >
-            {importMutation.isPending ? 'Importando...' : 'Importar Lista'}
+            <Upload className="h-4 w-4" />
+            Importar Tabela IA
           </button>
           <button 
             onClick={() => {
@@ -519,11 +689,20 @@ export default function PriceTable() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-emerald-600 font-bold text-base">
-                      {formatBRL(item.price_usd ? item.price_usd * dollarRate : item.price)}
+                      {formatBRL(
+                        item.price_usd && Number(item.price_usd) > 0 && dollarRate > 0
+                          ? Number(item.price_usd) * dollarRate
+                          : Number(item.price || 0)
+                      )}
                     </div>
+                    {item.price_usd && Number(item.price_usd) > 0 && (
+                      <span className="block text-[10px] text-muted-foreground font-normal">
+                        ${Number(item.price_usd).toFixed(2)} USD
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center justify-end gap-1.5 transition-opacity">
                       <button 
                         onClick={() => {
                           setEditingPrice(item);
@@ -541,7 +720,7 @@ export default function PriceTable() {
                         className="text-muted-foreground hover:text-destructive p-2 rounded-md hover:bg-destructive/10 transition-all"
                         title="Excluir"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4 text-destructive" />
                       </button>
                     </div>
                   </td>
@@ -549,7 +728,7 @@ export default function PriceTable() {
               ))}
               {filteredPrices.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-16 text-center">
+                  <td colSpan={6} className="px-6 py-16 text-center">
                     <div className="flex flex-col items-center gap-3 text-muted-foreground">
                       <div className="p-4 bg-muted rounded-full">
                         <Search className="h-10 w-10 opacity-20" />
@@ -651,6 +830,257 @@ export default function PriceTable() {
         message="Tem certeza que deseja remover este item da tabela de preços? Esta ação não pode ser desfeita."
         confirmText="Excluir"
       />
+
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-card w-full max-w-2xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in scale-in duration-200">
+            {/* Header */}
+            <div className="px-6 py-4 border-b flex items-center justify-between bg-muted/20">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                  <Sparkles className="h-5 w-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold">Importar Tabela com Inteligência Artificial</h3>
+                  <p className="text-xs text-muted-foreground">Envie uma foto, print ou PDF de preços para extração via Gemini</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setExtractedItems([]);
+                  setSelectedFile(null);
+                }}
+                className="text-muted-foreground hover:text-foreground p-1.5 rounded-lg hover:bg-muted transition-all"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto flex-1">
+              {!selectedFile && !isProcessingIA && extractedItems.length === 0 && (
+                <div className="space-y-6">
+                  {/* Drag and Drop Zone */}
+                  <div
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-xl p-8 text-center transition-all flex flex-col items-center justify-center gap-4 cursor-pointer min-h-[220px] ${
+                      dragActive 
+                        ? 'border-primary bg-primary/5 scale-[0.99]' 
+                        : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/10'
+                    }`}
+                    onClick={() => document.getElementById('ia-file-upload')?.click()}
+                  >
+                    <input 
+                      id="ia-file-upload"
+                      type="file" 
+                      accept="image/*,application/pdf" 
+                      className="hidden" 
+                      onChange={handleFileInputChange}
+                    />
+                    <div className="p-4 bg-muted rounded-full text-muted-foreground">
+                      <Upload className="h-10 w-10 opacity-70" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-sm">Clique para buscar ou arraste o arquivo aqui</p>
+                      <p className="text-xs text-muted-foreground mt-1">Suporta imagens (PNG, JPG, JPEG) ou arquivos PDF</p>
+                    </div>
+                  </div>
+
+                  {/* Or load default demo */}
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-card px-2 text-muted-foreground">Ou se preferir</span>
+                    </div>
+                  </div>
+
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => importMutation.mutate()}
+                      disabled={importMutation.isPending}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border text-sm font-medium hover:bg-muted transition-colors w-full sm:w-auto justify-center"
+                    >
+                      <Database className="h-4 w-4" />
+                      {importMutation.isPending ? 'Importando...' : 'Importar tabela padrão de exemplo'}
+                    </button>
+                    <p className="text-[10px] text-muted-foreground mt-1.5">Insere automaticamente uma lista de 20 modelos comuns de iPhone</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Processing Loading state */}
+              {isProcessingIA && (
+                <div className="py-12 flex flex-col items-center justify-center text-center gap-4">
+                  <div className="relative">
+                    <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                    <Sparkles className="h-6 w-6 text-primary absolute inset-0 m-auto animate-pulse" />
+                  </div>
+                  <div className="space-y-1.5 max-w-sm">
+                    <p className="font-semibold text-base text-foreground animate-pulse">{iaStep}</p>
+                    <p className="text-xs text-muted-foreground">Isso geralmente leva de 5 a 15 segundos enquanto a IA analisa o layout, localiza preços e os formata em colunas.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Extracted items review */}
+              {extractedItems.length > 0 && !isProcessingIA && (
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-emerald-600 bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/20 text-xs">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-emerald-600" />
+                      <span>A IA extraiu <strong>{extractedItems.length} aparelhos</strong>! Você pode ajustar os preços ou modelos abaixo antes de salvar:</span>
+                    </div>
+                  </div>
+
+                  <div className="border rounded-xl overflow-hidden max-h-[380px] overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-muted text-muted-foreground uppercase text-[10px] tracking-wider sticky top-0 z-10">
+                        <tr>
+                          <th className="px-3 py-2.5 font-semibold">Tipo</th>
+                          <th className="px-3 py-2.5 font-semibold">Modelo</th>
+                          <th className="px-3 py-2.5 font-semibold">Memória</th>
+                          <th className="px-3 py-2.5 font-semibold">Condição</th>
+                          <th className="px-3 py-2.5 font-semibold w-32">Preço (R$)</th>
+                          <th className="px-2 py-2.5 text-center w-10"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {extractedItems.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-muted/30">
+                            <td className="px-3 py-2">
+                              <select
+                                value={item.category || 'iphone'}
+                                onChange={(e) => updateExtractedItem(idx, 'category', e.target.value)}
+                                className="bg-background border rounded px-1.5 py-1 text-[11px] font-medium"
+                              >
+                                <option value="iphone">📱 iPhone</option>
+                                <option value="console">🎮 Console</option>
+                              </select>
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="text"
+                                value={item.model || ''}
+                                onChange={(e) => updateExtractedItem(idx, 'model', e.target.value)}
+                                className="bg-background border rounded px-2 py-1 text-xs font-medium w-full min-w-[120px]"
+                                placeholder="Modelo"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="text"
+                                value={item.storage || ''}
+                                onChange={(e) => updateExtractedItem(idx, 'storage', e.target.value)}
+                                className="bg-background border rounded px-2 py-1 text-xs text-muted-foreground w-20"
+                                placeholder="128GB"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <select
+                                value={item.condition || 'Seminovo Grade A'}
+                                onChange={(e) => updateExtractedItem(idx, 'condition', e.target.value)}
+                                className="bg-background border rounded px-1.5 py-1 text-[11px]"
+                              >
+                                <option value="Novo Lacrado">Novo Lacrado</option>
+                                <option value="Seminovo Grade A">Seminovo Grade A</option>
+                                <option value="Seminovo Grade B">Seminovo Grade B</option>
+                                <option value="Com Detalhe">Com Detalhe</option>
+                              </select>
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground text-[11px] font-medium">R$</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.price || ''}
+                                  onChange={(e) => updateExtractedItem(idx, 'price', e.target.value)}
+                                  className={`bg-background border rounded pl-7 pr-2 py-1 text-xs font-bold w-28 text-foreground ${
+                                    !item.price || item.price <= 0 ? 'border-amber-500 bg-amber-500/5' : 'border-emerald-500/50'
+                                  }`}
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              {item.price_usd && Number(item.price_usd) > 0 && (
+                                <span className="text-[10px] text-muted-foreground block mt-0.5 font-normal">
+                                  ${Number(item.price_usd).toFixed(2)} USD
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => removeExtractedItem(idx)}
+                                className="text-muted-foreground hover:text-destructive p-1 rounded hover:bg-destructive/10 transition-colors"
+                                title="Remover item"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t bg-muted/10 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setExtractedItems([]);
+                  setSelectedFile(null);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium border hover:bg-muted transition-colors"
+              >
+                Fechar
+              </button>
+              {extractedItems.length > 0 && !isProcessingIA && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExtractedItems([]);
+                      setSelectedFile(null);
+                    }}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
+                  >
+                    Descartar / Novo Arquivo
+                  </button>
+                  <button
+                    type="button"
+                    disabled={importExtractedMutation.isPending}
+                    onClick={() => importExtractedMutation.mutate(extractedItems)}
+                    className="px-5 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {importExtractedMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      <>
+                        Confirmar e Importar {extractedItems.length} Itens
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
