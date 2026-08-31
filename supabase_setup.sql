@@ -349,3 +349,117 @@ CREATE POLICY "Permitir atualização de tokens públicos" ON public_tokens
   FOR UPDATE USING (true);
 
 
+-- ==========================================
+-- 10. TABELA DE ANOTAÇÕES (notes)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS notes (
+  id TEXT PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  category TEXT DEFAULT 'Geral',
+  priority TEXT DEFAULT 'Normal',
+  due_date TEXT,
+  due_time TEXT,
+  completed BOOLEAN DEFAULT FALSE,
+  completed_at TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Geral';
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'Normal';
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS due_date TEXT;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS due_time TEXT;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS completed BOOLEAN DEFAULT FALSE;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS completed_at TEXT;
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE notes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Permitir acesso total a anotações do próprio usuário" ON notes;
+CREATE POLICY "Permitir acesso total a anotações do próprio usuário" ON notes
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Permitir fallback anotações públicas" ON notes;
+CREATE POLICY "Permitir fallback anotações públicas" ON notes
+  FOR ALL TO public
+  USING (true)
+  WITH CHECK (true);
+
+
+-- ==========================================
+-- 11. TABELA DE CHECKLIST DE ANOTAÇÕES (note_checklist_items)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS note_checklist_items (
+  id TEXT PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  completed BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE note_checklist_items ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE note_checklist_items ADD COLUMN IF NOT EXISTS note_id TEXT;
+ALTER TABLE note_checklist_items ADD COLUMN IF NOT EXISTS text TEXT;
+ALTER TABLE note_checklist_items ADD COLUMN IF NOT EXISTS completed BOOLEAN DEFAULT FALSE;
+ALTER TABLE note_checklist_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE note_checklist_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+ALTER TABLE note_checklist_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Permitir acesso total a checklist do próprio usuário" ON note_checklist_items;
+CREATE POLICY "Permitir acesso total a checklist do próprio usuário" ON note_checklist_items
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Permitir fallback checklist público" ON note_checklist_items;
+CREATE POLICY "Permitir fallback checklist público" ON note_checklist_items
+  FOR ALL TO public
+  USING (true)
+  WITH CHECK (true);
+
+
+-- ==========================================
+-- 12. TABELA DE ÁUDIOS DE ANOTAÇÕES (note_audio)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS note_audio (
+  id TEXT PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  audio_url TEXT NOT NULL,
+  duration NUMERIC DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE note_audio ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE note_audio ADD COLUMN IF NOT EXISTS note_id TEXT;
+ALTER TABLE note_audio ADD COLUMN IF NOT EXISTS audio_url TEXT;
+ALTER TABLE note_audio ADD COLUMN IF NOT EXISTS duration NUMERIC DEFAULT 0;
+ALTER TABLE note_audio ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+ALTER TABLE note_audio ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Permitir acesso total a áudios do próprio usuário" ON note_audio;
+CREATE POLICY "Permitir acesso total a áudios do próprio usuário" ON note_audio
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Permitir fallback áudios públicos" ON note_audio;
+CREATE POLICY "Permitir fallback áudios públicos" ON note_audio
+  FOR ALL TO public
+  USING (true)
+  WITH CHECK (true);
+
+
+

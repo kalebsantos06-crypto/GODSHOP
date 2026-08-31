@@ -435,7 +435,8 @@ const writePublicUsers = (data: any[]) => {
 const ALL_CLOUD_TABLES = [
   'suppliers', 'clients', 'iphones', 'consoles', 'prices', 'sales',
   'purchases', 'products', 'product_units', 'fiscal_documents', 'fiscal_configs',
-  'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'users'
+  'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'users',
+  'notes', 'note_checklist_items', 'note_audio'
 ];
 
 // Helper to filter out deleted items

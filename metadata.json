@@ -1,6 +1,6 @@
 {
   "name": "GODSHOP",
   "description": "Dashboard para gerenciamento de estoque, vendas e controle fiscal de iPhones e Consoles com sincronização em nuvem.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

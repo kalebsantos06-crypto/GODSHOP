@@ -338,7 +338,8 @@ export const cloudApi = {
 const ALL_APP_TABLES = [
   'suppliers', 'clients', 'iphones', 'consoles', 'prices', 'sales',
   'purchases', 'products', 'product_units', 'fiscal_documents', 'fiscal_configs',
-  'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'users'
+  'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'users',
+  'notes', 'note_checklist_items', 'note_audio'
 ];
 
 const STORE_SETTINGS_KEYS = [
@@ -640,7 +641,7 @@ export const db = {
       };
     }
 
-    const tables = ['clients', 'suppliers', 'iphones', 'consoles', 'sales', 'prices', 'purchases', 'products', 'product_units', 'fiscal_documents', 'fiscal_configs', 'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos'];
+    const tables = ['clients', 'suppliers', 'iphones', 'consoles', 'sales', 'prices', 'purchases', 'products', 'product_units', 'fiscal_documents', 'fiscal_configs', 'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'notes', 'note_checklist_items', 'note_audio'];
     const results = { synced: 0, failed: 0 };
 
     for (const table of tables) {
@@ -2672,6 +2673,175 @@ export const db = {
       }
       const local = getLocalData('product_photos');
       setLocalData('product_photos', local.filter((i: any) => i.id !== id));
+    }
+  },
+
+  notes: {
+    list: async () => {
+      try {
+        const userId = await getCurrentUserId();
+        let query = supabase.from('notes').select('*');
+        if (userId) query = query.eq('user_id', userId);
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (error) throw error;
+        setLocalData('notes', data || []);
+        return data || [];
+      } catch (err: any) {
+        console.warn('Error listing notes from Supabase, falling back to local:', err);
+        return getLocalData('notes');
+      }
+    },
+    create: async (data: any) => {
+      const id = generateId();
+      const userId = await getCurrentUserId();
+      const insertData = { 
+        ...data, 
+        id, 
+        user_id: userId, 
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      try {
+        await supabase.from('notes').insert([insertData]);
+      } catch (err: any) {
+        console.warn('Fallback saving note locally:', err);
+      }
+      const local = getLocalData('notes');
+      setLocalData('notes', [insertData, ...local]);
+      return insertData;
+    },
+    update: async (id: string, data: any) => {
+      const updateData = { ...data, updated_at: new Date().toISOString() };
+      try {
+        await supabase.from('notes').update(updateData).eq('id', id);
+      } catch (err: any) {
+        console.warn('Fallback updating note locally:', err);
+      }
+      const local = getLocalData('notes');
+      setLocalData('notes', local.map(i => i.id === id ? { ...i, ...updateData } : i));
+    },
+    delete: async (id: string) => {
+      try {
+        recordLocalDelete('notes', id);
+        await cloudApi.deleteItem('notes', id);
+        const userId = await getCurrentUserId();
+        if (userId) {
+          await supabase.from('notes').delete().eq('id', id).eq('user_id', userId);
+        }
+      } catch (err: any) {
+        console.warn('Fallback deleting note locally:', err);
+      }
+      const local = getLocalData('notes');
+      setLocalData('notes', local.filter(i => i.id !== id));
+    }
+  },
+
+  note_checklist_items: {
+    list: async () => {
+      try {
+        const userId = await getCurrentUserId();
+        let query = supabase.from('note_checklist_items').select('*');
+        if (userId) query = query.eq('user_id', userId);
+        const { data, error } = await query.order('created_at', { ascending: true });
+        if (error) throw error;
+        setLocalData('note_checklist_items', data || []);
+        return data || [];
+      } catch (err: any) {
+        console.warn('Error listing note_checklist_items from Supabase, falling back to local:', err);
+        return getLocalData('note_checklist_items');
+      }
+    },
+    create: async (data: any) => {
+      const id = generateId();
+      const userId = await getCurrentUserId();
+      const insertData = { 
+        ...data, 
+        id, 
+        user_id: userId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      try {
+        await supabase.from('note_checklist_items').insert([insertData]);
+      } catch (err: any) {
+        console.warn('Fallback saving note checklist item locally:', err);
+      }
+      const local = getLocalData('note_checklist_items');
+      setLocalData('note_checklist_items', [...local, insertData]);
+      return insertData;
+    },
+    update: async (id: string, data: any) => {
+      const updateData = { ...data, updated_at: new Date().toISOString() };
+      try {
+        await supabase.from('note_checklist_items').update(updateData).eq('id', id);
+      } catch (err: any) {
+        console.warn('Fallback updating note checklist item locally:', err);
+      }
+      const local = getLocalData('note_checklist_items');
+      setLocalData('note_checklist_items', local.map(i => i.id === id ? { ...i, ...updateData } : i));
+    },
+    delete: async (id: string) => {
+      try {
+        recordLocalDelete('note_checklist_items', id);
+        await cloudApi.deleteItem('note_checklist_items', id);
+        const userId = await getCurrentUserId();
+        if (userId) {
+          await supabase.from('note_checklist_items').delete().eq('id', id).eq('user_id', userId);
+        }
+      } catch (err: any) {
+        console.warn('Fallback deleting note checklist item locally:', err);
+      }
+      const local = getLocalData('note_checklist_items');
+      setLocalData('note_checklist_items', local.filter(i => i.id !== id));
+    }
+  },
+
+  note_audio: {
+    list: async () => {
+      try {
+        const userId = await getCurrentUserId();
+        let query = supabase.from('note_audio').select('*');
+        if (userId) query = query.eq('user_id', userId);
+        const { data, error } = await query.order('created_at', { ascending: true });
+        if (error) throw error;
+        setLocalData('note_audio', data || []);
+        return data || [];
+      } catch (err: any) {
+        console.warn('Error listing note_audio from Supabase, falling back to local:', err);
+        return getLocalData('note_audio');
+      }
+    },
+    create: async (data: any) => {
+      const id = generateId();
+      const userId = await getCurrentUserId();
+      const insertData = { 
+        ...data, 
+        id, 
+        user_id: userId,
+        created_at: new Date().toISOString()
+      };
+      try {
+        await supabase.from('note_audio').insert([insertData]);
+      } catch (err: any) {
+        console.warn('Fallback saving note audio locally:', err);
+      }
+      const local = getLocalData('note_audio');
+      setLocalData('note_audio', [...local, insertData]);
+      return insertData;
+    },
+    delete: async (id: string) => {
+      try {
+        recordLocalDelete('note_audio', id);
+        await cloudApi.deleteItem('note_audio', id);
+        const userId = await getCurrentUserId();
+        if (userId) {
+          await supabase.from('note_audio').delete().eq('id', id).eq('user_id', userId);
+        }
+      } catch (err: any) {
+        console.warn('Fallback deleting note audio locally:', err);
+      }
+      const local = getLocalData('note_audio');
+      setLocalData('note_audio', local.filter(i => i.id !== id));
     }
   },
 

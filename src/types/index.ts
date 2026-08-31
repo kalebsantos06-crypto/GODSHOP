@@ -182,3 +182,35 @@ export interface ProductPhoto {
   blend_mode?: 'none' | 'screen' | 'lighten' | string;
 }
 
+export interface Note {
+  id: string;
+  user_id?: string;
+  title: string;
+  description: string;
+  category: 'Geral' | 'Clientes' | 'Produtos' | 'Vendas' | 'Financeiro' | 'Fornecedores' | 'Compras' | 'Outros';
+  priority: 'Baixa' | 'Normal' | 'Alta' | 'Urgente';
+  due_date?: string | null;
+  due_time?: string | null;
+  completed: boolean;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface NoteChecklistItem {
+  id: string;
+  note_id: string;
+  text: string;
+  completed: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface NoteAudio {
+  id: string;
+  note_id: string;
+  audio_url: string;
+  duration: number;
+  created_at: string;
+}
+

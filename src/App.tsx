@@ -28,6 +28,7 @@ const PriceTable = lazy(() => import('./pages/PriceTable'));
 const Settings = lazy(() => import('./pages/Settings'));
 const UsersPage = lazy(() => import('./pages/Users'));
 const OfferTagGenerator = lazy(() => import('./pages/OfferTagGenerator'));
+const Notes = lazy(() => import('./pages/Notes'));
 const Login = lazy(() => import('./pages/Login'));
 const FiscalHub = lazy(() => import('./pages/fiscal/FiscalHub'));
 const ClientSignature = lazy(() => import('./pages/ClientSignature'));
@@ -188,6 +189,7 @@ function AppContent() {
               <Route path="sales" element={<Sales />} />
               <Route path="invoices" element={<Invoices />} />
               <Route path="prices" element={<PriceTable />} />
+              <Route path="notes" element={<Notes />} />
               <Route path="offer-tags" element={<OfferTagGenerator />} />
               <Route path="clients" element={<Clients />} />
               <Route path="suppliers" element={<Suppliers />} />

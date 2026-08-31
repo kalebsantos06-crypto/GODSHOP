@@ -506,6 +506,7 @@ export default function Layout() {
     { name: 'Fornecedores', href: '/suppliers', icon: Truck },
     { name: 'Nota NF', href: '/fiscal', icon: Receipt },
     { name: 'Tabela de Preços', href: '/prices', icon: FileText },
+    { name: 'Anotações', href: '/notes', icon: ClipboardList },
     { name: 'Usuários', href: '/users', icon: User },
   ];
 
