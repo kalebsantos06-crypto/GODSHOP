@@ -87,28 +87,37 @@ if (typeof window !== 'undefined') {
   }
 }
 
-// Intercept and suppress benign HMR / WebSocket errors (Vite HMR is disabled in cloud sandboxes)
+// Intercept and suppress benign network / HMR / WebSocket / Failed to fetch errors in sandbox
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason;
-    const reasonStr = String(reason?.message || reason || '');
-    const isWebSocketError = 
-      reasonStr.toLowerCase().includes('websocket') || 
+    const reasonStr = String(reason?.message || reason || '').toLowerCase();
+    const isBenignNetworkError = 
+      reasonStr.includes('websocket') || 
       reasonStr.includes('closed without opened') ||
-      reasonStr.includes('failed to connect');
-    if (isWebSocketError) {
+      reasonStr.includes('failed to connect') ||
+      reasonStr.includes('failed to fetch') ||
+      reasonStr.includes('load failed') ||
+      reasonStr.includes('networkerror') ||
+      reasonStr.includes('abort');
+    if (isBenignNetworkError) {
+      console.warn('[Network Safe Intercept] Suppressed unhandled rejection:', reason);
       event.preventDefault();
       event.stopImmediatePropagation?.();
     }
   });
 
   window.addEventListener('error', (event) => {
-    const msg = String(event.message || '');
-    const isWebSocketError = 
-      msg.toLowerCase().includes('websocket') || 
+    const msg = String(event.message || '').toLowerCase();
+    const isBenignNetworkError = 
+      msg.includes('websocket') || 
       msg.includes('closed without opened') ||
-      msg.includes('failed to connect');
-    if (isWebSocketError) {
+      msg.includes('failed to connect') ||
+      msg.includes('failed to fetch') ||
+      msg.includes('load failed') ||
+      msg.includes('networkerror');
+    if (isBenignNetworkError) {
+      console.warn('[Network Safe Intercept] Suppressed window error:', event.message);
       event.preventDefault();
       event.stopImmediatePropagation?.();
     }

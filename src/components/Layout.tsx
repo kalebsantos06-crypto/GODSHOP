@@ -403,22 +403,25 @@ export default function Layout() {
         const res = await fetch(`/api/settings${queryParams}`);
         if (res.ok) {
           const serverSettings = await res.json();
-          if (serverSettings.app_background) {
-            localStorage.setItem('app_background', serverSettings.app_background);
-            setBgImage(serverSettings.app_background);
-          }
-          if (serverSettings.app_logo !== undefined) {
-            if (serverSettings.app_logo) {
-              localStorage.setItem('app_logo', serverSettings.app_logo);
-              setLogoImage(serverSettings.app_logo);
-            } else {
-              localStorage.removeItem('app_logo');
-              setLogoImage(null);
+          if (serverSettings && typeof serverSettings === 'object') {
+            if (serverSettings.app_background) {
+              localStorage.setItem('app_background', serverSettings.app_background);
+              setBgImage(serverSettings.app_background);
+            }
+            if (serverSettings.app_logo !== undefined) {
+              if (serverSettings.app_logo) {
+                localStorage.setItem('app_logo', serverSettings.app_logo);
+                setLogoImage(serverSettings.app_logo);
+              } else {
+                localStorage.removeItem('app_logo');
+                setLogoImage(null);
+              }
             }
           }
         }
       } catch (err) {
-        console.error("Error loading settings from server:", err);
+        // Gracefully fallback to localStorage when server is unreachable or offline
+        console.warn("Using local settings (offline/server unreachable):", err);
       }
     };
 

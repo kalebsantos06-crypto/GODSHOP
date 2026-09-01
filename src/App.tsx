@@ -4,7 +4,7 @@
  */
 
 import { useEffect, lazy, Suspense } from 'react';
-import { HashRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Layout from './components/Layout';
@@ -63,29 +63,28 @@ function PageLoadingFallback() {
 function handleInitialRedirects() {
   if (typeof window === 'undefined') return;
   
-  const pathname = window.location.pathname;
-  const search = window.location.search;
-  const hash = window.location.hash;
+  const pathname = window.location.pathname || '';
+  const search = window.location.search || '';
+  const hash = window.location.hash || '';
 
-  // Direct path-based links like /cadastro-cliente or /assinar/123
-  if (pathname && pathname !== '/' && pathname !== '/index.html') {
+  // Direct path-based links for client self-registration or client signature only
+  if (pathname.startsWith('/cadastro-cliente')) {
+    window.location.replace(`${window.location.origin}/#/cadastro-cliente${search}`);
+    return;
+  }
+  if (pathname.startsWith('/assinar')) {
     window.location.replace(`${window.location.origin}/#${pathname}${search}`);
     return;
   }
 
-  // Query param links like /?token=xyz or /?assinatura=123
-  if (search && (!hash || hash === '#/' || hash === '#')) {
-    const params = new URLSearchParams(search);
-    const token = params.get('token');
-    const assinatura = params.get('assinatura') || params.get('id');
-    if (token) {
-      window.location.replace(`${window.location.origin}/#/cadastro-cliente?token=${token}`);
-      return;
-    }
-    if (assinatura) {
-      window.location.replace(`${window.location.origin}/#/assinar/${assinatura}`);
-      return;
-    }
+  // Preserve public standalone client links
+  if (hash.startsWith('#/cadastro-cliente') || hash.startsWith('#/assinar/')) {
+    return;
+  }
+
+  // On cold start/restart, always reset internal sub-routes (such as guarantee note) back to Dashboard
+  if (hash.startsWith('#/guarantee') || hash.startsWith('#/invoices')) {
+    window.location.hash = '/';
   }
 }
 
@@ -94,8 +93,22 @@ handleInitialRedirects();
 
 function AppContent() {
   const { user, isAuthenticated } = useAuth();
-  const [searchParams] = useSearchParams();
-  const assinarId = searchParams.get('assinatura') || new URLSearchParams(window.location.search).get('assinatura');
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Ensure fresh app start/restart always opens on Dashboard
+  useEffect(() => {
+    const isClientStandalone = location.pathname.startsWith('/assinar') || location.pathname.startsWith('/cadastro-cliente');
+    if (!isClientStandalone) {
+      const sessionStarted = sessionStorage.getItem('godshop_app_session_started');
+      if (!sessionStarted) {
+        sessionStorage.setItem('godshop_app_session_started', 'true');
+        if (location.pathname !== '/' && location.pathname !== '/login') {
+          navigate('/', { replace: true });
+        }
+      }
+    }
+  }, [location.pathname, navigate]);
 
   // Initialize Supabase 100% Real-time synchronization
   useEffect(() => {
@@ -162,15 +175,6 @@ function AppContent() {
       window.removeEventListener('cloud_sync_completed', handleSyncCompleted);
     };
   }, [isAuthenticated, user]);
-
-  if (assinarId) {
-    return (
-      <Suspense fallback={<PageLoadingFallback />}>
-        <Toaster position="top-right" richColors />
-        <ClientSignature id={assinarId} />
-      </Suspense>
-    );
-  }
 
   return (
     <>

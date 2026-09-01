@@ -193,7 +193,7 @@ export default function Settings() {
           })
         });
       } catch (err) {
-        console.error('Error syncing automation settings to server:', err);
+        console.warn('Could not sync automation settings to server, saved locally:', err);
       }
     }
 

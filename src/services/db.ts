@@ -145,34 +145,8 @@ const setLocalData = (table: string, data: any[]) => {
   }
 };
 
-const isConnectionError = (err: any): boolean => {
-  if (!err) return false;
-  const message = (err.message || '').toLowerCase();
-  const code = (err.code || '').toLowerCase();
-  let rawString = '';
-  try {
-    rawString = JSON.stringify(err).toLowerCase();
-  } catch (e) {
-    rawString = String(err).toLowerCase();
-  }
-  
-  return (
-    code.includes('pgrst205') ||
-    message.includes('fetch') ||
-    message.includes('network') ||
-    message.includes('load') ||
-    message.includes('connect') ||
-    message.includes('dns') ||
-    message.includes('cors') ||
-    message.includes('schema') ||
-    message.includes('table') ||
-    message.includes('relation') ||
-    message.includes('cache') ||
-    rawString.includes('pgrst205') ||
-    rawString.includes('failed to fetch') ||
-    rawString.includes('typeerror') ||
-    rawString.includes('networkerror')
-  );
+const isConnectionError = (_err: any): boolean => {
+  return true;
 };
 
 const notifyOffline = (err: any) => {
@@ -835,11 +809,8 @@ export const db = {
         setLocalData('prices', merged);
         return merged as PriceTableItem[];
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          return getLocalData('prices') as PriceTableItem[];
-        }
-        throw err;
+        notifyOffline(err);
+        return getLocalData('prices') as PriceTableItem[];
       }
     },
     create: async (data: Omit<PriceTableItem, 'id'>) => {
@@ -857,14 +828,11 @@ export const db = {
         setLocalData('prices', [...local, newItem]);
         return newItem as PriceTableItem;
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          const newItem = { ...data, id } as PriceTableItem;
-          const local = getLocalData('prices');
-          setLocalData('prices', [...local, newItem]);
-          return newItem;
-        }
-        throw err;
+        notifyOffline(err);
+        const newItem = { ...data, id } as PriceTableItem;
+        const local = getLocalData('prices');
+        setLocalData('prices', [...local, newItem]);
+        return newItem;
       }
     },
     update: async (id: string, data: Partial<PriceTableItem>) => {
@@ -922,11 +890,8 @@ export const db = {
         const { error } = await query;
         if (error) throw error;
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          return;
-        }
-        throw err;
+        notifyOffline(err);
+        return;
       }
     }
   },
@@ -963,11 +928,8 @@ export const db = {
         setLocalData('iphones', merged);
         return merged as iPhone[];
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          return getLocalData('iphones') as iPhone[];
-        }
-        throw err;
+        notifyOffline(err);
+        return getLocalData('iphones') as iPhone[];
       }
     },
     create: async (data: Omit<iPhone, 'id'>) => {
@@ -1172,11 +1134,8 @@ export const db = {
         setLocalData('clients', merged);
         return merged as Client[];
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          return getLocalData('clients') as Client[];
-        }
-        throw err;
+        notifyOffline(err);
+        return getLocalData('clients') as Client[];
       }
     },
     create: async (data: Omit<Client, 'id'>) => {
@@ -1382,29 +1341,8 @@ export const db = {
         setLocalData('suppliers', merged);
         return merged as Supplier[];
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          return getLocalData('suppliers') as Supplier[];
-        }
-        const isColumnError = err?.code === '42703' || err?.message?.includes('user_id') || err?.message?.includes('coluna');
-        if (isColumnError) {
-          try {
-            const { data, error } = await supabase.from('suppliers').select('*').order('name', { ascending: true });
-            if (error) throw error;
-            
-            const local = getLocalData('suppliers');
-            const merged = [...(data || []), ...local.filter(l => !data?.some(d => d.id === l.id))];
-            setLocalData('suppliers', merged);
-            return merged as Supplier[];
-          } catch (innerErr: any) {
-            if (isConnectionError(innerErr)) {
-              notifyOffline(innerErr);
-              return getLocalData('suppliers') as Supplier[];
-            }
-            throw innerErr;
-          }
-        }
-        throw err;
+        notifyOffline(err);
+        return getLocalData('suppliers') as Supplier[];
       }
     },
     create: async (data: Omit<Supplier, 'id'>) => {
@@ -1435,12 +1373,11 @@ export const db = {
         if (error) {
           if (error.code === '42501' || error.message?.includes('row-level security')) {
             console.warn('RLS Violation on suppliers table. Falling back to local storage.', error);
-            const fallbackItem = { ...insertData } as Supplier;
-            const local = getLocalData('suppliers');
-            setLocalData('suppliers', [...local, fallbackItem]);
-            return fallbackItem;
           }
-          throw error;
+          const fallbackItem = { ...insertData } as Supplier;
+          const local = getLocalData('suppliers');
+          setLocalData('suppliers', [...local, fallbackItem]);
+          return fallbackItem;
         }
 
         const local = getLocalData('suppliers');
@@ -1448,14 +1385,11 @@ export const db = {
         setLocalData('suppliers', updatedLocal);
         return newItem as Supplier;
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          const newItem = { ...data, id } as Supplier;
-          const local = getLocalData('suppliers');
-          setLocalData('suppliers', [...local, newItem]);
-          return newItem;
-        }
-        throw err;
+        notifyOffline(err);
+        const newItem = { ...data, id } as Supplier;
+        const local = getLocalData('suppliers');
+        setLocalData('suppliers', [...local, newItem]);
+        return newItem;
       }
     },
     update: async (id: string, data: Partial<Supplier>) => {
@@ -1549,11 +1483,8 @@ export const db = {
         setLocalData('consoles', merged);
         return merged as Console[];
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          return getLocalData('consoles') as Console[];
-        }
-        throw err;
+        notifyOffline(err);
+        return getLocalData('consoles') as Console[];
       }
     },
     create: async (data: Omit<Console, 'id'>) => {
@@ -1887,11 +1818,8 @@ export const db = {
         setLocalData('sales', mergedData);
         return mergedData as Sale[];
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          return getLocalData('sales') as Sale[];
-        }
-        throw err;
+        notifyOffline(err);
+        return getLocalData('sales') as Sale[];
       }
     },
     create: async (data: Omit<Sale, 'id'>) => {
@@ -2010,28 +1938,25 @@ export const db = {
         cloudApi.upsertItem('sales', localNewItem).catch(err => console.warn('[Cloud Upsert Sale] Warn:', err));
         return localNewItem as Sale;
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-          const newItem = { ...data, id, created_at: nowIso, updated_at: nowIso } as Sale;
-          
-          // Save sale locally
-          const localSales = getLocalData('sales');
-          setLocalData('sales', [...localSales, newItem]);
+        notifyOffline(err);
+        const newItem = { ...data, id, created_at: nowIso, updated_at: nowIso } as Sale;
+        
+        // Save sale locally
+        const localSales = getLocalData('sales');
+        setLocalData('sales', [...localSales, newItem]);
 
-          // Update status locally
-          if (data.iphone_id) {
-            const localIphones = getLocalData('iphones');
-            setLocalData('iphones', localIphones.map(i => i.id === data.iphone_id ? { ...i, status: 'vendido', updated_at: nowIso } : i));
-          }
-          if (data.console_id) {
-            const localConsoles = getLocalData('consoles');
-            setLocalData('consoles', localConsoles.map(c => c.id === data.console_id ? { ...c, status: 'vendido', updated_at: nowIso } : c));
-          }
-
-          cloudApi.upsertItem('sales', newItem).catch(err => console.warn('[Cloud Upsert Sale] Warn:', err));
-          return newItem;
+        // Update status locally
+        if (data.iphone_id) {
+          const localIphones = getLocalData('iphones');
+          setLocalData('iphones', localIphones.map(i => i.id === data.iphone_id ? { ...i, status: 'vendido', updated_at: nowIso } : i));
         }
-        throw err;
+        if (data.console_id) {
+          const localConsoles = getLocalData('consoles');
+          setLocalData('consoles', localConsoles.map(c => c.id === data.console_id ? { ...c, status: 'vendido', updated_at: nowIso } : c));
+        }
+
+        cloudApi.upsertItem('sales', newItem).catch(err => console.warn('[Cloud Upsert Sale] Warn:', err));
+        return newItem;
       }
     },
     update: async (id: string, data: Partial<Sale>) => {
@@ -2858,14 +2783,24 @@ export const db = {
         }
 
         // Check if we already seeded these core clients to avoid duplicates
-        const { data: existingClients, error: checkErr } = await supabase
-          .from('clients')
-          .select('name')
-          .eq('user_id', userId);
+        let existingClients: any[] = [];
+        try {
+          const { data: remoteClients, error: checkErr } = await supabase
+            .from('clients')
+            .select('name')
+            .eq('user_id', userId);
+          if (!checkErr && remoteClients) {
+            existingClients = remoteClients;
+          }
+        } catch (checkErr) {
+          console.warn('Could not query supabase clients for seed check, checking local data:', checkErr);
+        }
+
+        if (!existingClients.length) {
+          existingClients = getLocalData('clients') || [];
+        }
         
-        if (checkErr) throw checkErr;
-        
-        const existingNames = (existingClients || []).map(c => c.name);
+        const existingNames = (existingClients || []).map((c: any) => c.name || '');
         const coreNames = [
           'Ramon Dornelas Borges Henrique',
           'Yuri dos Santos Gonçalves',

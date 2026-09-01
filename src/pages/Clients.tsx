@@ -343,11 +343,16 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     queryKey: ['pendingRemote', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
-      const res = await fetch(`/api/public-clients?userId=${user.id}`);
-      if (res.ok) {
-        return res.json();
+      try {
+        const res = await fetch(`/api/public-clients?userId=${user.id}`);
+        if (res.ok) {
+          return await res.json();
+        }
+        return [];
+      } catch (e) {
+        console.warn('Could not fetch pending remote clients:', e);
+        return [];
       }
-      return [];
     },
     enabled: !!user?.id,
     refetchInterval: 10000, // auto-refetch every 10 seconds to catch remote registrations

@@ -226,7 +226,7 @@ export default function ClientRemoteRegister() {
         }
       }
     } catch (err) {
-      console.error("Error fetching merchant settings:", err);
+      console.warn("Could not fetch merchant settings from server, using defaults:", err);
     }
   };
 

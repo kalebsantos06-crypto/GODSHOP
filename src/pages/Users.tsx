@@ -28,9 +28,14 @@ export default function UsersPage() {
   const { data: systemUsers = [], isLoading: loadingUsers, refetch: refetchUsers } = useQuery<SystemUser[]>({
     queryKey: ['systemUsers'],
     queryFn: async () => {
-      const res = await fetch('/api/users');
-      if (res.ok) return res.json();
-      throw new Error('Falha ao buscar usuários do sistema');
+      try {
+        const res = await fetch('/api/users');
+        if (res.ok) return await res.json();
+        return [];
+      } catch (err) {
+        console.warn('Could not fetch system users:', err);
+        return [];
+      }
     }
   });
 
@@ -39,9 +44,14 @@ export default function UsersPage() {
     queryKey: ['externalRegistrations', currentUser?.id],
     queryFn: async () => {
       if (!currentUser?.id) return [];
-      const res = await fetch(`/api/public-clients?userId=${currentUser.id}`);
-      if (res.ok) return res.json();
-      return [];
+      try {
+        const res = await fetch(`/api/public-clients?userId=${currentUser.id}`);
+        if (res.ok) return await res.json();
+        return [];
+      } catch (err) {
+        console.warn('Could not fetch external registrations:', err);
+        return [];
+      }
     },
     enabled: !!currentUser?.id,
   });

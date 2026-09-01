@@ -38,10 +38,10 @@ export default function PriceTable() {
     queryFn: async () => {
       try {
         const res = await fetch(`https://economia.awesomeapi.com.br/last/USD-BRL?t=${Date.now()}`);
+        if (!res.ok) return 5.0;
         const data = await res.json();
-        return parseFloat(data.USDBRL.bid);
+        return parseFloat(data?.USDBRL?.bid) || 5.0;
       } catch (e) {
-        console.error('Erro ao buscar cotação do dólar', e);
         return 5.0; // Fallback
       }
     },

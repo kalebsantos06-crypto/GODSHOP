@@ -869,8 +869,8 @@ export default function Notes() {
 
       {/* 2. Modal de Nova / Editar Anotação */}
       {(isAdding || editingNote) && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 pb-24 sm:pb-6 z-[100]">
-          <div className="bg-card dark:bg-zinc-900 border border-border/80 dark:border-white/10 rounded-2xl w-full max-w-lg max-h-[calc(100vh-140px)] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center p-2.5 sm:p-4 z-[100] overflow-y-auto overscroll-contain">
+          <div className="bg-card dark:bg-zinc-900 border border-border/80 dark:border-white/10 rounded-2xl w-full max-w-lg h-auto max-h-[92dvh] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden my-auto animate-in fade-in zoom-in duration-200">
             
             {/* Modal Header */}
             <div className="p-4 sm:p-5 border-b border-border/60 dark:border-white/10 flex items-center justify-between shrink-0 bg-muted/10">
@@ -892,8 +892,8 @@ export default function Notes() {
             </div>
 
             {/* Scrollable Form Body */}
-            <form onSubmit={saveNote} className="flex flex-col flex-1 overflow-hidden">
-              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+            <form onSubmit={saveNote} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 overscroll-contain">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5 md:col-span-2">
                     <label className="text-xs font-extrabold tracking-wider text-muted-foreground uppercase">Título</label>
@@ -1142,8 +1142,8 @@ export default function Notes() {
 
       {/* 7. Modal de Confirmação de Exclusão */}
       {deleteId && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 pb-24 sm:pb-6 z-[100]">
-          <div className="bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10 rounded-2xl w-full max-w-md shadow-2xl p-6 text-center animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 z-[100] overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/10 rounded-2xl w-full max-w-md shadow-2xl p-6 text-center my-auto animate-in fade-in zoom-in duration-200">
             <div className="p-3 bg-rose-500/10 text-rose-500 rounded-full w-14 h-14 flex items-center justify-center mx-auto mb-4">
               <Trash2 className="h-7 w-7" />
             </div>
