@@ -1098,39 +1098,28 @@ export const db = {
         if (error) throw error;
         tryCacheUserIdFromRows(data);
 
-        // Auto-seed if core data is missing or user has no clients
-        const coreNames = ['Ramon Dornelas Borges Henrique', 'Yuri dos Santos Gonçalves', 'Carlos Eduardo Reis Coelho'];
-        const missingCore = coreNames.some(name => !data?.some(c => c.name.toLowerCase().includes(name.toLowerCase())));
-        const isEmpty = !data || data.length === 0;
-
-        if (missingCore || (userId && isEmpty)) {
-          if (!seedingPromise) {
-            seedingPromise = db.autoSeed();
-          }
-          
-          try {
-            await seedingPromise;
-            // Re-fetch now that seeding is done with a fresh query
-            let reQuery = supabase.from('clients').select('*');
-            if (userId) {
-              reQuery = reQuery.eq('user_id', userId);
+        const deletedIds = getLocalDeletedIds('clients');
+        const local = getLocalData('clients');
+        const dbItems = (data || []).filter(d => d && d.id && !deletedIds.includes(d.id));
+        
+        // Merge db items with local items by ID
+        const map = new Map<string, Client>();
+        for (const item of dbItems) {
+          map.set(item.id, item);
+        }
+        for (const item of local) {
+          if (item && item.id && !deletedIds.includes(item.id)) {
+            if (!map.has(item.id)) {
+              map.set(item.id, item);
+            } else {
+              // Merge details
+              const existing = map.get(item.id)!;
+              map.set(item.id, { ...item, ...existing });
             }
-            
-            const { data: reData, error: reError } = await reQuery.order('name', { ascending: true });
-            
-            if (!reError && reData && reData.length > 0) {
-              const local = getLocalData('clients');
-              const merged = [...(reData || []), ...local.filter(l => !reData?.some(d => d.id === l.id))];
-              setLocalData('clients', merged);
-              return merged as Client[];
-            }
-          } catch (seedErr) {
-            console.error('Error in automatic database seeding:', seedErr);
           }
         }
-
-        const local = getLocalData('clients');
-        const merged = [...(data || []), ...local.filter(l => !data?.some(d => d.id === l.id))];
+        
+        const merged = Array.from(map.values());
         setLocalData('clients', merged);
         return merged as Client[];
       } catch (err: any) {
@@ -2767,6 +2756,357 @@ export const db = {
       }
       const local = getLocalData('note_audio');
       setLocalData('note_audio', local.filter(i => i.id !== id));
+    }
+  },
+
+  deduplicateDatabase: async (): Promise<{ success: boolean; message: string; stats: Record<string, number> }> => {
+    const stats: Record<string, number> = {
+      clients: 0,
+      iphones: 0,
+      consoles: 0,
+      suppliers: 0,
+      sales: 0,
+      prices: 0
+    };
+
+    try {
+      const userId = await getCurrentUserId().catch(() => null);
+
+      // 1. DEDUPLICATE CLIENTS
+      const clients = (getLocalData('clients') || []) as Client[];
+      const uniqueClients: Client[] = [];
+      const clientIdMap: Record<string, string> = {}; // duplicateId -> canonicalId
+      const deletedClientIds: string[] = [];
+
+      for (const c of clients) {
+        if (!c || !c.id) continue;
+        const cleanCpf = c.cpf ? c.cpf.replace(/\D/g, '') : '';
+        const cleanPhone = c.phone ? c.phone.replace(/\D/g, '') : '';
+        const normName = (c.name || '').trim().toLowerCase();
+
+        const existingIndex = uniqueClients.findIndex(ex => {
+          if (ex.id === c.id) return true;
+          const exCpf = ex.cpf ? ex.cpf.replace(/\D/g, '') : '';
+          const exPhone = ex.phone ? ex.phone.replace(/\D/g, '') : '';
+          const exName = (ex.name || '').trim().toLowerCase();
+
+          if (cleanCpf && exCpf && cleanCpf.length >= 11 && cleanCpf === exCpf) return true;
+          if (cleanPhone && exPhone && cleanPhone.length >= 8 && cleanPhone === exPhone) return true;
+          if (normName && exName && normName === exName) return true;
+          return false;
+        });
+
+        if (existingIndex >= 0) {
+          const canonical = uniqueClients[existingIndex];
+          clientIdMap[c.id] = canonical.id;
+          if (c.id !== canonical.id) {
+            deletedClientIds.push(c.id);
+            stats.clients++;
+          }
+          // Merge best available info into canonical
+          uniqueClients[existingIndex] = {
+            ...c,
+            ...canonical,
+            phone: canonical.phone || c.phone || '',
+            cpf: canonical.cpf || c.cpf,
+            email: canonical.email || c.email,
+            address: canonical.address || c.address,
+            street: canonical.street || c.street,
+            number: canonical.number || c.number,
+            city: canonical.city || c.city,
+            state: canonical.state || c.state,
+            neighborhood: canonical.neighborhood || c.neighborhood,
+          };
+        } else {
+          uniqueClients.push(c);
+          clientIdMap[c.id] = c.id;
+        }
+      }
+
+      if (stats.clients > 0 || deletedClientIds.length > 0) {
+        setLocalData('clients', uniqueClients);
+        for (const id of deletedClientIds) {
+          recordLocalDelete('clients', id);
+          if (userId) {
+            try { await supabase.from('clients').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+          }
+        }
+      }
+
+      // 2. DEDUPLICATE SUPPLIERS
+      const suppliers = (getLocalData('suppliers') || []) as Supplier[];
+      const uniqueSuppliers: Supplier[] = [];
+      const supplierIdMap: Record<string, string> = {};
+      const deletedSupplierIds: string[] = [];
+
+      for (const s of suppliers) {
+        if (!s || !s.id) continue;
+        const normName = (s.name || '').trim().toLowerCase();
+        const existingIndex = uniqueSuppliers.findIndex(ex => ex.id === s.id || (ex.name || '').trim().toLowerCase() === normName);
+
+        if (existingIndex >= 0) {
+          const canonical = uniqueSuppliers[existingIndex];
+          supplierIdMap[s.id] = canonical.id;
+          if (s.id !== canonical.id) {
+            deletedSupplierIds.push(s.id);
+            stats.suppliers++;
+          }
+          uniqueSuppliers[existingIndex] = {
+            ...s,
+            ...canonical,
+            contact: canonical.contact || s.contact || ''
+          };
+        } else {
+          uniqueSuppliers.push(s);
+          supplierIdMap[s.id] = s.id;
+        }
+      }
+
+      if (stats.suppliers > 0 || deletedSupplierIds.length > 0) {
+        setLocalData('suppliers', uniqueSuppliers);
+        for (const id of deletedSupplierIds) {
+          recordLocalDelete('suppliers', id);
+          if (userId) {
+            try { await supabase.from('suppliers').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+          }
+        }
+      }
+
+      // 3. DEDUPLICATE IPHONES
+      const iphones = (getLocalData('iphones') || []) as iPhone[];
+      const uniqueIphones: iPhone[] = [];
+      const iphoneIdMap: Record<string, string> = {};
+      const deletedIphoneIds: string[] = [];
+
+      for (const phone of iphones) {
+        if (!phone || !phone.id) continue;
+        const cleanImei = phone.imei ? phone.imei.trim().toUpperCase() : '';
+        const normModel = (phone.model || '').trim().toLowerCase();
+        const normStorage = (phone.storage || '').trim().toLowerCase();
+        const normColor = (phone.color || '').trim().toLowerCase();
+
+        const existingIndex = uniqueIphones.findIndex(ex => {
+          if (ex.id === phone.id) return true;
+          const exImei = ex.imei ? ex.imei.trim().toUpperCase() : '';
+          if (cleanImei && exImei && cleanImei.length >= 6 && cleanImei === exImei) return true;
+          const sameModel = normModel === (ex.model || '').trim().toLowerCase();
+          const sameStorage = normStorage === (ex.storage || '').trim().toLowerCase();
+          const sameColor = normColor === (ex.color || '').trim().toLowerCase();
+          const samePrice = Math.abs(Number(phone.buy_price || 0) - Number(ex.buy_price || 0)) < 0.01;
+          const phoneDate = new Date(phone.buy_date || 0).getTime();
+          const exDate = new Date(ex.buy_date || 0).getTime();
+          const sameDate = Math.abs(phoneDate - exDate) < 60000;
+          return sameModel && sameStorage && sameColor && samePrice && sameDate;
+        });
+
+        if (existingIndex >= 0) {
+          const canonical = uniqueIphones[existingIndex];
+          iphoneIdMap[phone.id] = canonical.id;
+          if (phone.id !== canonical.id) {
+            deletedIphoneIds.push(phone.id);
+            stats.iphones++;
+          }
+          const finalStatus = (canonical.status === 'vendido' || phone.status === 'vendido') ? 'vendido' : (canonical.status || phone.status);
+          uniqueIphones[existingIndex] = {
+            ...phone,
+            ...canonical,
+            status: finalStatus,
+            imei: canonical.imei || phone.imei,
+            supplier_id: canonical.supplier_id || phone.supplier_id || (phone.supplier_id ? supplierIdMap[phone.supplier_id] : '')
+          };
+        } else {
+          const mapped = {
+            ...phone,
+            supplier_id: phone.supplier_id ? (supplierIdMap[phone.supplier_id] || phone.supplier_id) : phone.supplier_id
+          };
+          uniqueIphones.push(mapped);
+          iphoneIdMap[phone.id] = phone.id;
+        }
+      }
+
+      if (stats.iphones > 0 || deletedIphoneIds.length > 0) {
+        setLocalData('iphones', uniqueIphones);
+        for (const id of deletedIphoneIds) {
+          recordLocalDelete('iphones', id);
+          if (userId) {
+            try { await supabase.from('iphones').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+          }
+        }
+      }
+
+      // 4. DEDUPLICATE CONSOLES
+      const consoles = (getLocalData('consoles') || []) as Console[];
+      const uniqueConsoles: Console[] = [];
+      const consoleIdMap: Record<string, string> = {};
+      const deletedConsoleIds: string[] = [];
+
+      for (const c of consoles) {
+        if (!c || !c.id) continue;
+        const normModel = (c.model || '').trim().toLowerCase();
+        const normVersion = (c.version || '').trim().toLowerCase();
+
+        const existingIndex = uniqueConsoles.findIndex(ex => {
+          if (ex.id === c.id) return true;
+          const sameModel = normModel === (ex.model || '').trim().toLowerCase();
+          const sameVersion = normVersion === (ex.version || '').trim().toLowerCase();
+          const samePrice = Math.abs(Number(c.buy_price || 0) - Number(ex.buy_price || 0)) < 0.01;
+          const cDate = new Date(c.buy_date || 0).getTime();
+          const exDate = new Date(ex.buy_date || 0).getTime();
+          const sameDate = Math.abs(cDate - exDate) < 60000;
+          return sameModel && sameVersion && samePrice && sameDate;
+        });
+
+        if (existingIndex >= 0) {
+          const canonical = uniqueConsoles[existingIndex];
+          consoleIdMap[c.id] = canonical.id;
+          if (c.id !== canonical.id) {
+            deletedConsoleIds.push(c.id);
+            stats.consoles++;
+          }
+          const finalStatus = (canonical.status === 'vendido' || c.status === 'vendido') ? 'vendido' : (canonical.status || c.status);
+          uniqueConsoles[existingIndex] = {
+            ...c,
+            ...canonical,
+            status: finalStatus
+          };
+        } else {
+          uniqueConsoles.push(c);
+          consoleIdMap[c.id] = c.id;
+        }
+      }
+
+      if (stats.consoles > 0 || deletedConsoleIds.length > 0) {
+        setLocalData('consoles', uniqueConsoles);
+        for (const id of deletedConsoleIds) {
+          recordLocalDelete('consoles', id);
+          if (userId) {
+            try { await supabase.from('consoles').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+          }
+        }
+      }
+
+      // 5. DEDUPLICATE SALES
+      const sales = (getLocalData('sales') || []) as Sale[];
+      const uniqueSales: Sale[] = [];
+      const deletedSaleIds: string[] = [];
+
+      for (const s of sales) {
+        if (!s || !s.id) continue;
+        const mappedClientId = s.client_id ? (clientIdMap[s.client_id] || s.client_id) : s.client_id;
+        const mappedIphoneId = s.iphone_id ? (iphoneIdMap[s.iphone_id] || s.iphone_id) : s.iphone_id;
+        const mappedConsoleId = s.console_id ? (consoleIdMap[s.console_id] || s.console_id) : s.console_id;
+        const sDate = s.sale_date ? new Date(s.sale_date).getTime() : 0;
+
+        const existingIndex = uniqueSales.findIndex(ex => {
+          if (ex.id === s.id) return true;
+          const exDate = ex.sale_date ? new Date(ex.sale_date).getTime() : 0;
+          const sameClient = ex.client_id === mappedClientId;
+          const sameIphone = mappedIphoneId && ex.iphone_id === mappedIphoneId;
+          const sameConsole = mappedConsoleId && ex.console_id === mappedConsoleId;
+          const samePrice = Math.abs(Number(ex.sell_price || 0) - Number(s.sell_price || 0)) < 0.01;
+          const sameDate = Math.abs(exDate - sDate) < 300000; // 5 mins
+          return sameClient && (sameIphone || sameConsole || samePrice) && sameDate;
+        });
+
+        if (existingIndex >= 0) {
+          const canonical = uniqueSales[existingIndex];
+          if (s.id !== canonical.id) {
+            deletedSaleIds.push(s.id);
+            stats.sales++;
+          }
+          
+          const highestPaid = Math.max(Number(canonical.installments_paid) || 0, Number(s.installments_paid) || 0);
+          const signatureData = canonical.signature_data || s.signature_data;
+          const signedAt = canonical.signed_at || s.signed_at;
+          const signedIp = canonical.signed_ip || s.signed_ip;
+          
+          let mergedCustom = canonical.custom_payments || s.custom_payments;
+          try {
+            const c1 = typeof canonical.custom_payments === 'string' ? JSON.parse(canonical.custom_payments) : (canonical.custom_payments || {});
+            const c2 = typeof s.custom_payments === 'string' ? JSON.parse(s.custom_payments) : (s.custom_payments || {});
+            const mergedObj = { ...c2, ...c1 };
+            mergedCustom = JSON.stringify(mergedObj);
+            localStorage.setItem(`inst_payments_${canonical.id}`, mergedCustom);
+          } catch (e) {}
+
+          uniqueSales[existingIndex] = {
+            ...s,
+            ...canonical,
+            client_id: mappedClientId,
+            iphone_id: mappedIphoneId,
+            console_id: mappedConsoleId,
+            installments_paid: highestPaid,
+            signature_data: signatureData,
+            signed_at: signedAt,
+            signed_ip: signedIp,
+            custom_payments: mergedCustom
+          };
+        } else {
+          uniqueSales.push({
+            ...s,
+            client_id: mappedClientId,
+            iphone_id: mappedIphoneId,
+            console_id: mappedConsoleId
+          });
+        }
+      }
+
+      if (stats.sales > 0 || deletedSaleIds.length > 0) {
+        setLocalData('sales', uniqueSales);
+        for (const id of deletedSaleIds) {
+          recordLocalDelete('sales', id);
+          if (userId) {
+            try { await supabase.from('sales').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+          }
+        }
+      }
+
+      // 6. DEDUPLICATE PRICES
+      const prices = (getLocalData('prices') || []) as PriceTableItem[];
+      const uniquePrices: PriceTableItem[] = [];
+      const deletedPriceIds: string[] = [];
+
+      for (const p of prices) {
+        if (!p || !p.id) continue;
+        const key = `${p.category || ''}_${p.model || ''}_${p.version || ''}_${p.storage || ''}_${p.color || ''}_${p.condition || ''}`.toLowerCase();
+        const existingIndex = uniquePrices.findIndex(ex => {
+          if (ex.id === p.id) return true;
+          const exKey = `${ex.category || ''}_${ex.model || ''}_${ex.version || ''}_${ex.storage || ''}_${ex.color || ''}_${ex.condition || ''}`.toLowerCase();
+          return key === exKey;
+        });
+
+        if (existingIndex >= 0) {
+          if (p.id !== uniquePrices[existingIndex].id) {
+            deletedPriceIds.push(p.id);
+            stats.prices++;
+          }
+        } else {
+          uniquePrices.push(p);
+        }
+      }
+
+      if (stats.prices > 0 || deletedPriceIds.length > 0) {
+        setLocalData('prices', uniquePrices);
+        for (const id of deletedPriceIds) {
+          recordLocalDelete('prices', id);
+          if (userId) {
+            try { await supabase.from('prices').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+          }
+        }
+      }
+
+      return {
+        success: true,
+        message: `Limpeza e unificação concluídas! Registros duplicados foram consolidados com sucesso.`,
+        stats
+      };
+    } catch (e: any) {
+      console.error('Error during deduplication:', e);
+      return {
+        success: false,
+        message: 'Erro durante unificação de cadastros: ' + e.message,
+        stats
+      };
     }
   },
 

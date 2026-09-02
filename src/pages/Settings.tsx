@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, LogOut, Image as ImageIcon, Smartphone, Database, Download, FileJson, Search, 
   Trash2, Plus, Sun, Moon, Cloud, ShieldAlert, User, LogIn, MessageSquare, Send, Play, 
-  CheckCircle2, AlertTriangle, RefreshCw, Settings as SettingsIcon, FileText, Layers, Bot, ChevronRight, Check
+  CheckCircle2, AlertTriangle, RefreshCw, Settings as SettingsIcon, FileText, Layers, Bot, ChevronRight, Check,
+  Copy, ClipboardPaste, Sparkles
 } from 'lucide-react';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
@@ -33,6 +34,10 @@ export default function Settings() {
   const [isImporting, setIsImporting] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [isStorageExplorerOpen, setIsStorageExplorerOpen] = useState(false);
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteJsonText, setPasteJsonText] = useState('');
+  const [isCopyingBackup, setIsCopyingBackup] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('app_theme') as 'light' | 'dark') || 'dark';
   });
@@ -511,25 +516,60 @@ export default function Settings() {
         }
       } catch (e) {}
       URL.revokeObjectURL(url);
-      toast.success('Cópia de segurança exportada com sucesso!');
+      toast.success('Cópia de segurança (.json) exportada com sucesso!');
     } catch (err: any) {
       toast.error('Erro ao exportar backup: ' + err.message);
     }
   };
 
+  const handleCopyBackupToClipboard = async () => {
+    setIsCopyingBackup(true);
+    try {
+      const data = await backupService.exportData();
+      const jsonStr = JSON.stringify(data);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(jsonStr);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = jsonStr;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      toast.success('Código do backup copiado! Você pode colar no celular ou enviar pelo WhatsApp.');
+    } catch (err: any) {
+      toast.error('Erro ao copiar backup: ' + err.message);
+    } finally {
+      setIsCopyingBackup(false);
+    }
+  };
+
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    const targetInput = e.target;
     if (!file) return;
 
     setIsImporting(true);
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const json = JSON.parse(event.target?.result as string);
+        const content = event.target?.result as string;
+        if (!content || !content.trim()) {
+          throw new Error('O arquivo selecionado está vazio.');
+        }
+        const json = JSON.parse(content);
         const result = await backupService.importData(json);
         if (result.success) {
           toast.success(result.message);
           queryClient.invalidateQueries();
+          await db.sales.list().catch(() => {});
+          await db.clients.list().catch(() => {});
+          setTimeout(() => {
+            window.location.reload();
+          }, 600);
         } else {
           toast.error(result.message);
         }
@@ -537,10 +577,44 @@ export default function Settings() {
         toast.error('Arquivo de backup corrompido ou inválido: ' + err.message);
       } finally {
         setIsImporting(false);
-        e.target.value = '';
+        if (targetInput) targetInput.value = '';
       }
     };
+    reader.onerror = () => {
+      setIsImporting(false);
+      toast.error('Erro ao ler arquivo no seu dispositivo.');
+    };
     reader.readAsText(file);
+  };
+
+  const handlePasteBackupSubmit = async () => {
+    if (!pasteJsonText.trim()) {
+      toast.error('Por favor, cole o código JSON do backup.');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const json = JSON.parse(pasteJsonText.trim());
+      const result = await backupService.importData(json);
+      if (result.success) {
+        toast.success(result.message);
+        queryClient.invalidateQueries();
+        setShowPasteModal(false);
+        setPasteJsonText('');
+        await db.sales.list().catch(() => {});
+        await db.clients.list().catch(() => {});
+        setTimeout(() => {
+          window.location.reload();
+        }, 600);
+      } else {
+        toast.error(result.message);
+      }
+    } catch (err: any) {
+      toast.error('Código de backup inválido ou corrompido: ' + err.message);
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, key: string, setPreview: React.Dispatch<React.SetStateAction<string | null>>) => {
@@ -965,16 +1039,26 @@ export default function Settings() {
                     Criar Cópia de Segurança (Exportar)
                   </h3>
                   <p className="text-xs text-muted-foreground mb-4">
-                    Baixa um arquivo JSON com todas as vendas, estoque, fornecedores e clientes no aparelho.
+                    Gere o backup com todas as vendas efetuadas, parcelas pagas, estoque e clientes.
                   </p>
                 </div>
-                <button
-                  onClick={handleExport}
-                  className="w-full bg-primary text-primary-foreground hover:bg-primary/95 py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                >
-                  <Download className="h-4 w-4" />
-                  Exportar Backup Local
-                </button>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={handleExport}
+                    className="w-full bg-primary text-primary-foreground hover:bg-primary/95 py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                  >
+                    <Download className="h-4 w-4" />
+                    Baixar Arquivo (.JSON)
+                  </button>
+                  <button
+                    disabled={isCopyingBackup}
+                    onClick={handleCopyBackupToClipboard}
+                    className="w-full bg-white/10 hover:bg-white/15 text-foreground py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer border border-white/10"
+                  >
+                    <Copy className="h-3.5 w-3.5 text-emerald-400" />
+                    {isCopyingBackup ? 'Copiando...' : 'Copiar Texto do Backup (Para Celular)'}
+                  </button>
+                </div>
               </div>
 
               {/* Import card */}
@@ -985,31 +1069,104 @@ export default function Settings() {
                     Carregar Backup Existente (Importar)
                   </h3>
                   <p className="text-xs text-muted-foreground mb-4">
-                    Selecione o arquivo de backup <code>.json</code> salvo anteriormente para substituir o banco de dados local.
+                    Restaure no celular ou computador através de arquivo .json ou colando o código copiado.
                   </p>
                 </div>
-                <label className="w-full bg-amber-500 text-black hover:bg-amber-600 py-2.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-sm text-center">
-                  {isImporting ? (
-                    <>
-                      <div className="h-3 w-3 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
-                      Restaurando dados...
-                    </>
-                  ) : (
-                    <>
-                      <FileJson className="h-4 w-4" />
-                      Importar Arquivo de Backup
-                    </>
-                  )}
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    disabled={isImporting}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full bg-amber-500 text-black hover:bg-amber-600 py-2.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-sm text-center disabled:opacity-50"
+                  >
+                    {isImporting ? (
+                      <>
+                        <div className="h-3.5 w-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                        Restaurando dados...
+                      </>
+                    ) : (
+                      <>
+                        <FileJson className="h-4 w-4" />
+                        Selecionar Arquivo de Backup (.json)
+                      </>
+                    )}
+                  </button>
                   <input
+                    ref={fileInputRef}
                     type="file"
-                    accept=".json"
+                    accept=".json,application/json,text/json,text/plain,*/*"
                     onChange={handleImport}
                     disabled={isImporting}
                     className="hidden"
                   />
-                </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowPasteModal(true)}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                  >
+                    <ClipboardPaste className="h-3.5 w-3.5 text-blue-200" />
+                    Colar Código do Backup (Recomendado no Celular)
+                  </button>
+                </div>
               </div>
             </div>
+
+            {/* Modal para Colar Backup */}
+            {showPasteModal && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-card border border-border w-full max-w-lg rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+                  <div className="flex items-center justify-between border-b border-border/50 pb-3">
+                    <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
+                      <ClipboardPaste className="h-5 w-5 text-blue-500" />
+                      Restaurar Backup Colando o Texto
+                    </h3>
+                    <button
+                      onClick={() => setShowPasteModal(false)}
+                      className="text-muted-foreground hover:text-foreground text-sm font-bold p-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Se você copiou o backup do seu computador (ou enviou pelo WhatsApp/Notas), cole o código JSON completo no campo abaixo:
+                  </p>
+                  <textarea
+                    rows={6}
+                    value={pasteJsonText}
+                    onChange={(e) => setPasteJsonText(e.target.value)}
+                    placeholder='Cole aqui o código do backup (ex: {"version": 1, "sales": [...], "clients": [...]})'
+                    className="w-full p-3 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                  />
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPasteModal(false)}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isImporting || !pasteJsonText.trim()}
+                      onClick={handlePasteBackupSubmit}
+                      className="px-5 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 shadow-lg disabled:opacity-50"
+                    >
+                      {isImporting ? (
+                        <>
+                          <div className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          Restaurando...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4 w-4" />
+                          Restaurar Dados Agora
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="mt-6 border-t border-white/5 pt-6">
               <h3 className="text-sm font-bold mb-3">Auxiliares de Banco de Dados</h3>

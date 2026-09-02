@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, Smartphone, ShoppingCart, Users, Truck, FileText, 
   Settings as SettingsIcon, Receipt, Gamepad2, Sun, Moon, ChevronUp, 
   User, LogIn, LogOut, X, Download, Eye, EyeOff, Tv, Gift,
   Bell, AlertCircle, AlertTriangle, Calendar, MessageSquare, ExternalLink, Check, DollarSign, Sparkles, Zap,
-  BarChart3, PlusCircle, Package, ShieldCheck, ClipboardList, Archive, ShieldAlert, Sliders, Cloud, RefreshCw
+  BarChart3, PlusCircle, Package, ShieldCheck, ClipboardList, Archive, ShieldAlert, Sliders, Cloud, RefreshCw,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { triggerHaptic } from '../lib/haptics';
@@ -457,6 +458,41 @@ export default function Layout() {
     };
   }, []);
 
+  // Bi-directional horizontal wheel scroll support for tables and tabs
+  useEffect(() => {
+    const handleHorizontalWheel = (e: WheelEvent) => {
+      // If user is already scrolling with horizontal tilt/touchpad (deltaX) or holding Shift, native handler does it
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) return;
+
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      let current: HTMLElement | null = target;
+      while (current && current !== document.body && current !== document.documentElement) {
+        const style = window.getComputedStyle(current);
+        const overflowX = style.overflowX;
+        const isHorizontalScrollable = (overflowX === 'auto' || overflowX === 'scroll') && current.scrollWidth > current.clientWidth + 2;
+        const isVerticalScrollable = (style.overflowY === 'auto' || style.overflowY === 'scroll') && current.scrollHeight > current.clientHeight + 2;
+
+        if (isHorizontalScrollable && !isVerticalScrollable) {
+          const delta = e.deltaY || e.deltaX;
+          const canScrollLeft = current.scrollLeft > 0 && delta < 0;
+          const canScrollRight = current.scrollLeft < (current.scrollWidth - current.clientWidth - 1) && delta > 0;
+
+          if (canScrollLeft || canScrollRight) {
+            current.scrollLeft += delta;
+            e.preventDefault();
+            return;
+          }
+        }
+        current = current.parentElement;
+      }
+    };
+
+    window.addEventListener('wheel', handleHorizontalWheel, { passive: false });
+    return () => window.removeEventListener('wheel', handleHorizontalWheel);
+  }, []);
+
   const scrollToTop = () => {
     if (mainRef.current) {
       mainRef.current.scrollTo({ top: 0, behavior: 'smooth' });
@@ -488,10 +524,99 @@ export default function Layout() {
     };
   }, []);
 
+  const [isNavOverflowing, setIsNavOverflowing] = useState(false);
+  const [navCanScrollLeft, setNavCanScrollLeft] = useState(false);
+  const [navCanScrollRight, setNavCanScrollRight] = useState(false);
+  const navScrollRef = useRef<HTMLDivElement>(null);
+  const isDraggingNav = useRef(false);
+  const startXNav = useRef(0);
+  const scrollLeftNav = useRef(0);
+  const hasDraggedNav = useRef(false);
+
+  const checkNavScroll = useCallback(() => {
+    if (navScrollRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = navScrollRef.current;
+      const overflowing = scrollWidth > clientWidth + 4;
+      setIsNavOverflowing(overflowing);
+      setNavCanScrollLeft(overflowing && scrollLeft > 6);
+      setNavCanScrollRight(overflowing && scrollLeft < scrollWidth - clientWidth - 6);
+    }
+  }, []);
+
+  const scrollNav = (direction: 'left' | 'right') => {
+    if (navScrollRef.current) {
+      const scrollAmount = 280;
+      navScrollRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+      setTimeout(checkNavScroll, 350);
+    }
+  };
+
+  const handleNavMouseDown = (e: React.MouseEvent) => {
+    if (!navScrollRef.current) return;
+    isDraggingNav.current = true;
+    hasDraggedNav.current = false;
+    startXNav.current = e.pageX - navScrollRef.current.offsetLeft;
+    scrollLeftNav.current = navScrollRef.current.scrollLeft;
+  };
+
+  const handleNavMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingNav.current || !navScrollRef.current) return;
+    const x = e.pageX - navScrollRef.current.offsetLeft;
+    const walk = (x - startXNav.current) * 1.4;
+    if (Math.abs(walk) > 4) {
+      hasDraggedNav.current = true;
+    }
+    navScrollRef.current.scrollLeft = scrollLeftNav.current - walk;
+    checkNavScroll();
+  };
+
+  const handleNavMouseUpOrLeave = () => {
+    isDraggingNav.current = false;
+    setTimeout(() => {
+      hasDraggedNav.current = false;
+    }, 60);
+  };
+
+  useEffect(() => {
+    const el = navScrollRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY !== 0 && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        el.scrollLeft += e.deltaY;
+        e.preventDefault();
+        checkNavScroll();
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [isNavBarVisible, checkNavScroll]);
+
+  useEffect(() => {
+    checkNavScroll();
+    window.addEventListener('resize', checkNavScroll);
+    return () => window.removeEventListener('resize', checkNavScroll);
+  }, [isNavBarVisible, checkNavScroll]);
+
   useEffect(() => {
     if (mainRef.current) mainRef.current.scrollTop = 0;
     setActiveSubMenu(null);
-  }, [location.pathname]);
+    checkNavScroll();
+    const timer = setTimeout(() => {
+      if (navScrollRef.current) {
+        const activeEl = navScrollRef.current.querySelector<HTMLElement>('[data-active="true"]');
+        if (activeEl) {
+          activeEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        }
+        checkNavScroll();
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [location.pathname, checkNavScroll]);
 
   const navigation: Array<{
     name: string;
@@ -984,7 +1109,7 @@ export default function Layout() {
       {/* Main Content */}
       <main 
         ref={mainRef}
-        className="flex-1 overflow-y-auto p-4 sm:p-8 relative z-10 touch-pan-y scroll-smooth custom-scrollbar"
+        className="flex-1 overflow-y-auto p-4 sm:p-8 relative z-10 custom-scrollbar overscroll-y-contain"
       >
         <div className={cn(
           "max-w-6xl mx-auto animate-fade-in sm:pb-6",
@@ -1020,10 +1145,10 @@ export default function Layout() {
           {/* Integrated Submenu Bar */}
           {activeSubMenu && navigation.find(n => n.name === activeSubMenu)?.subItems && (
             <div className={cn(
-              "absolute bottom-[calc(100%+1px)] left-0 right-0 p-3 flex gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden border-b border-t shadow-2xl animate-in slide-in-from-bottom-4 duration-500",
+              "absolute bottom-[calc(100%+1px)] left-0 right-0 p-3 flex gap-2 overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] border-b border-t shadow-2xl animate-in slide-in-from-bottom-4 duration-500",
               theme === 'dark' ? "bg-zinc-900/98 border-white/10" : "bg-white/98 border-black/10"
             )}>
-              <div className="flex gap-2 mx-auto">
+              <div className="flex gap-2 mx-auto sm:mx-0 px-2 min-w-max">
                 {navigation.find(n => n.name === activeSubMenu)?.subItems?.map((sub) => {
                   const isSubActive = location.pathname === sub.href;
                   return (
@@ -1047,61 +1172,114 @@ export default function Layout() {
             </div>
           )}
 
-          <div className="flex items-center justify-start md:justify-center overflow-x-auto px-2 py-3 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            <div className="flex items-center gap-1 sm:gap-3 min-w-max mx-auto">
-              {navigation.map((item) => {
-                const hasSubItems = item.subItems && item.subItems.length > 0;
-                const isActive = location.pathname === item.href || 
-                                 (item.href !== '/' && location.pathname.startsWith(item.href));
-                
-                const content = (
-                  <>
-                    {(isActive || (hasSubItems && activeSubMenu === item.name)) && (
-                      <div className={cn(
-                        "absolute inset-0 rounded-xl blur-[2px] border shadow-inner transition-colors",
-                        theme === 'dark' ? "bg-white/10 border-white/20" : "bg-black/5 border-black/10"
-                      )}></div>
-                    )}
-                    <item.icon className={cn(
-                      "h-5 w-5 sm:h-6 sm:w-6 relative z-10 transition-all",
-                      (isActive || (hasSubItems && activeSubMenu === item.name))
-                        ? (theme === 'dark' ? "drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" : "drop-shadow-[0_0_8px_rgba(0,0,0,0.2)]") 
-                        : "opacity-70"
-                    )} />
-                    <span className="text-center leading-tight tracking-wide relative z-10">{item.name}</span>
-                    {(isActive || (hasSubItems && activeSubMenu === item.name)) && (
-                      <div className={cn(
-                        "absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full transition-colors",
-                        theme === 'dark' ? "bg-white shadow-[0_0_8px_white]" : "bg-black shadow-[0_0_8px_black]"
-                      )}></div>
-                    )}
-                  </>
-                );
+          <div className="relative max-w-7xl mx-auto flex items-center px-1 sm:px-2">
+            {/* Scroll Left Button for Desktop/Notebook */}
+            {navCanScrollLeft && (
+              <button
+                type="button"
+                onClick={() => scrollNav('left')}
+                className={cn(
+                  "hidden sm:flex items-center justify-center absolute left-1.5 z-30 w-8 h-8 rounded-full border shadow-xl transition-all hover:scale-110 active:scale-95",
+                  theme === 'dark'
+                    ? "bg-zinc-900/95 text-white border-white/20 hover:bg-zinc-800"
+                    : "bg-white/95 text-zinc-900 border-black/15 hover:bg-zinc-100 shadow-md"
+                )}
+                title="Rolar menu para esquerda"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            )}
 
-                const itemClassName = cn(
-                  "flex flex-col items-center justify-center gap-1.5 min-w-[76px] sm:min-w-[96px] p-2.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 relative group",
-                  (isActive || (hasSubItems && activeSubMenu === item.name))
-                    ? (theme === 'dark' ? "text-white scale-105" : "text-black scale-105")
-                    : (theme === 'dark' ? "text-white/40 hover:text-white/70" : "text-black/40 hover:text-black/70")
-                );
+            {/* Main Nav Scroll Container */}
+            <div 
+              ref={navScrollRef}
+              onScroll={checkNavScroll}
+              onMouseDown={handleNavMouseDown}
+              onMouseMove={handleNavMouseMove}
+              onMouseUp={handleNavMouseUpOrLeave}
+              onMouseLeave={handleNavMouseUpOrLeave}
+              className={cn(
+                "flex-1 flex items-center overflow-x-auto py-2.5 px-3 sm:px-8 scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] select-none cursor-grab active:cursor-grabbing",
+                !isNavOverflowing ? "justify-center" : "justify-start"
+              )}
+            >
+              <div className="flex items-center gap-1 sm:gap-2.5 min-w-max">
+                {navigation.map((item) => {
+                  const hasSubItems = item.subItems && item.subItems.length > 0;
+                  const isActive = location.pathname === item.href || 
+                                   (item.href !== '/' && location.pathname.startsWith(item.href));
+                  
+                  const content = (
+                    <>
+                      {(isActive || (hasSubItems && activeSubMenu === item.name)) && (
+                        <div className={cn(
+                          "absolute inset-0 rounded-xl blur-[2px] border shadow-inner transition-colors",
+                          theme === 'dark' ? "bg-white/10 border-white/20" : "bg-black/5 border-black/10"
+                        )}></div>
+                      )}
+                      <item.icon className={cn(
+                        "h-5 w-5 sm:h-6 sm:w-6 relative z-10 transition-all",
+                        (isActive || (hasSubItems && activeSubMenu === item.name))
+                          ? (theme === 'dark' ? "drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" : "drop-shadow-[0_0_8px_rgba(0,0,0,0.2)]") 
+                          : "opacity-70"
+                      )} />
+                      <span className="text-center leading-tight tracking-wide relative z-10">{item.name}</span>
+                      {(isActive || (hasSubItems && activeSubMenu === item.name)) && (
+                        <div className={cn(
+                          "absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full transition-colors",
+                          theme === 'dark' ? "bg-white shadow-[0_0_8px_white]" : "bg-black shadow-[0_0_8px_black]"
+                        )}></div>
+                      )}
+                    </>
+                  );
 
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.href}
-                    onClick={() => {
-                      triggerHaptic('light');
-                      if (hasSubItems) {
-                        setActiveSubMenu(activeSubMenu === item.name ? null : item.name);
-                      }
-                    }}
-                    className={itemClassName}
-                  >
-                    {content}
-                  </Link>
-                );
-              })}
+                  const itemClassName = cn(
+                    "flex flex-col items-center justify-center gap-1.5 min-w-[76px] sm:min-w-[94px] p-2 sm:p-2.5 rounded-xl text-[10px] sm:text-xs font-bold transition-all duration-300 relative group shrink-0",
+                    (isActive || (hasSubItems && activeSubMenu === item.name))
+                      ? (theme === 'dark' ? "text-white scale-105" : "text-black scale-105")
+                      : (theme === 'dark' ? "text-white/40 hover:text-white/70" : "text-black/40 hover:text-black/70")
+                  );
+
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      data-active={isActive ? "true" : "false"}
+                      onClick={(e) => {
+                        if (hasDraggedNav.current) {
+                          e.preventDefault();
+                          return;
+                        }
+                        triggerHaptic('light');
+                        if (hasSubItems) {
+                          setActiveSubMenu(activeSubMenu === item.name ? null : item.name);
+                        }
+                      }}
+                      className={itemClassName}
+                    >
+                      {content}
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
+
+            {/* Scroll Right Button for Desktop/Notebook */}
+            {navCanScrollRight && (
+              <button
+                type="button"
+                onClick={() => scrollNav('right')}
+                className={cn(
+                  "hidden sm:flex items-center justify-center absolute right-1.5 z-30 w-8 h-8 rounded-full border shadow-xl transition-all hover:scale-110 active:scale-95",
+                  theme === 'dark'
+                    ? "bg-zinc-900/95 text-white border-white/20 hover:bg-zinc-800"
+                    : "bg-white/95 text-zinc-900 border-black/15 hover:bg-zinc-100 shadow-md"
+                )}
+                title="Rolar menu para direita"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </nav>
       ) : null}
