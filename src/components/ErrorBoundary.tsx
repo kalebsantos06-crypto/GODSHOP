@@ -19,33 +19,45 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): Partial<State> {
-    const errorStr = String(error?.message || error || '');
+    const errorStr = String(error?.message || error || '').toLowerCase();
     const isDomNodeError = 
       error?.name === 'NotFoundError' ||
-      errorStr.includes('removeChild') || 
-      errorStr.includes('insertBefore') || 
+      errorStr.includes('removechild') || 
+      errorStr.includes('insertbefore') || 
       errorStr.includes('not a child') ||
-      errorStr.includes('NotFoundError');
+      errorStr.includes('notfounderror');
 
-    // If it is a benign DOM mutation error caused by browser extensions or translation, suppress crash
-    if (isDomNodeError) {
-      console.warn('Recovered from benign DOM node removal error:', error);
+    const isNetworkFetchError =
+      errorStr.includes('failed to fetch') ||
+      errorStr.includes('networkerror') ||
+      errorStr.includes('load failed') ||
+      errorStr.includes('failed to connect');
+
+    // If it is a benign DOM mutation error or network fetch glitch, suppress crash
+    if (isDomNodeError || isNetworkFetchError) {
+      console.warn('Recovered from benign error in ErrorBoundary:', error);
       return { hasError: false, error: null };
     }
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    const errorStr = String(error?.message || error || '');
+    const errorStr = String(error?.message || error || '').toLowerCase();
     const isDomNodeError = 
       error?.name === 'NotFoundError' ||
-      errorStr.includes('removeChild') || 
-      errorStr.includes('insertBefore') || 
+      errorStr.includes('removechild') || 
+      errorStr.includes('insertbefore') || 
       errorStr.includes('not a child') ||
-      errorStr.includes('NotFoundError');
+      errorStr.includes('notfounderror');
 
-    if (isDomNodeError) {
-      console.warn('Ignored DOM child removal exception:', error);
+    const isNetworkFetchError =
+      errorStr.includes('failed to fetch') ||
+      errorStr.includes('networkerror') ||
+      errorStr.includes('load failed') ||
+      errorStr.includes('failed to connect');
+
+    if (isDomNodeError || isNetworkFetchError) {
+      console.warn('Ignored exception in ErrorBoundary:', error);
       this.setState({ hasError: false, error: null });
       return;
     }

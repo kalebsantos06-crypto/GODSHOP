@@ -96,6 +96,39 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Update browser tab title based on current active screen
+  useEffect(() => {
+    const titles: Record<string, string> = {
+      '/': 'GODSHOP | Dashboard',
+      '/inventory': 'GODSHOP | Estoque iPhones',
+      '/consoles': 'GODSHOP | Eletrônicos & Consoles',
+      '/gifts': 'GODSHOP | Brindes & Acessórios',
+      '/sales': 'GODSHOP | Registro de Vendas',
+      '/clients': 'GODSHOP | Clientes',
+      '/suppliers': 'GODSHOP | Fornecedores',
+      '/prices': 'GODSHOP | Tabela de Preços',
+      '/notes': 'GODSHOP | Anotações & Áudios',
+      '/offer-tags': 'GODSHOP | Encartes & Tags',
+      '/users': 'GODSHOP | Gestão de Usuários',
+      '/settings': 'GODSHOP | Configurações',
+      '/fiscal': 'GODSHOP | Módulo Fiscal NF-e',
+      '/invoices': 'GODSHOP | Carnês & Boletos',
+      '/login': 'GODSHOP | Acesso ao Sistema',
+      '/cadastro-cliente': 'GODSHOP | Cadastro de Cliente',
+    };
+
+    const path = location.pathname;
+    let pageTitle = titles[path];
+    if (!pageTitle) {
+      if (path.startsWith('/guarantee')) pageTitle = 'GODSHOP | Termo de Garantia';
+      else if (path.startsWith('/assinar')) pageTitle = 'GODSHOP | Assinatura Digital';
+      else if (path.startsWith('/fiscal')) pageTitle = 'GODSHOP | Módulo Fiscal NF-e';
+      else pageTitle = 'GODSHOP - Sistema de Gestão';
+    }
+
+    document.title = pageTitle;
+  }, [location.pathname]);
+
   // Ensure fresh app start/restart always opens on Dashboard
   useEffect(() => {
     const isClientStandalone = location.pathname.startsWith('/assinar') || location.pathname.startsWith('/cadastro-cliente');
