@@ -886,12 +886,13 @@ export default function Settings() {
                 onClick={async () => {
                   setIsSyncingCloud(true);
                   try {
-                    const res = await db.pushToCloud();
-                    if (res.success) {
-                      toast.success('Todos os dados deste dispositivo foram enviados e salvos na nuvem com sucesso! Acesse de qualquer PC, notebook ou celular.');
+                    const syncRes = await db.syncAll();
+                    const pushRes = await db.pushToCloud();
+                    if (pushRes.success || syncRes.success) {
+                      toast.success('Todos os dados (vendas pagas/pendentes, parcelas, estoque e clientes) foram enviados para o banco de dados na nuvem com sucesso!');
                       await loadCloudStats();
                     } else {
-                      toast.error(res.message);
+                      toast.error(pushRes.message || 'Erro ao sincronizar dados');
                     }
                   } catch (e: any) {
                     toast.error('Erro ao salvar na nuvem: ' + e.message);
@@ -910,9 +911,10 @@ export default function Settings() {
                 onClick={async () => {
                   setIsSyncingCloud(true);
                   try {
+                    const syncRes = await db.syncAll();
                     const res = await db.pullFromCloud();
-                    if (res.success) {
-                      toast.success(res.message);
+                    if (res.success || syncRes.success) {
+                      toast.success('Dados e pagamentos sincronizados com sucesso!');
                       queryClient.invalidateQueries();
                       await loadCloudStats();
                     } else {

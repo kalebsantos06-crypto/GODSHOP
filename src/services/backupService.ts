@@ -247,16 +247,64 @@ export const backupService = {
       if (Array.isArray(data.sales)) {
         for (const s of data.sales) {
           try {
-            const mappedClientId = s.client_id ? clientIdMap[s.client_id] : null;
-            if (!mappedClientId) continue; // Cannot create sale without client
+            let mappedClientId = s.client_id ? clientIdMap[s.client_id] : null;
+            
+            // If client wasn't mapped by ID map, try finding client by name or create fallback
+            if (!mappedClientId && s.client_id) {
+              const matchedFromBackup = Array.isArray(data.clients) ? data.clients.find(c => c.id === s.client_id) : null;
+              if (matchedFromBackup) {
+                const foundClient = existingClients.find(ex => ex.name.toLowerCase() === matchedFromBackup.name.toLowerCase());
+                if (foundClient) {
+                  mappedClientId = foundClient.id;
+                  clientIdMap[s.client_id] = foundClient.id;
+                } else {
+                  const created = await db.clients.create({
+                    name: matchedFromBackup.name,
+                    phone: matchedFromBackup.phone || '',
+                    cpf: matchedFromBackup.cpf,
+                    email: matchedFromBackup.email,
+                    address: matchedFromBackup.address,
+                    street: matchedFromBackup.street,
+                    number: matchedFromBackup.number,
+                    neighborhood: matchedFromBackup.neighborhood,
+                    complement: matchedFromBackup.complement,
+                    city: matchedFromBackup.city,
+                    state: matchedFromBackup.state
+                  });
+                  mappedClientId = created.id;
+                  clientIdMap[s.client_id] = created.id;
+                  existingClients.push(created);
+                }
+              }
+            }
+
+            // If still no client found, fallback to the first existing client or create a generic one
+            if (!mappedClientId) {
+              if (existingClients.length > 0) {
+                mappedClientId = existingClients[0].id;
+              } else {
+                const created = await db.clients.create({
+                  name: 'Cliente Importado',
+                  phone: ''
+                });
+                mappedClientId = created.id;
+                existingClients.push(created);
+              }
+            }
+
             const mappedIphoneId = s.iphone_id ? iphoneIdMap[s.iphone_id] : undefined;
             const mappedConsoleId = s.console_id ? consoleIdMap[s.console_id] : undefined;
             
-            const existing = existingSales.find(ex => 
-              ex.client_id === mappedClientId && 
-              ex.sell_price === Number(s.sell_price) && 
-              new Date(ex.sale_date).getTime() === new Date(s.sale_date || new Date().toISOString()).getTime()
-            );
+            // Flexible matching to see if sale is already in DB
+            const sSaleDate = s.sale_date ? new Date(s.sale_date).getTime() : 0;
+            const existing = existingSales.find(ex => {
+              if (ex.id === s.id) return true;
+              const exSaleDate = ex.sale_date ? new Date(ex.sale_date).getTime() : 0;
+              const sameClient = ex.client_id === mappedClientId;
+              const samePrice = Math.abs(Number(ex.sell_price) - Number(s.sell_price)) < 0.01;
+              const sameDate = Math.abs(exSaleDate - sSaleDate) < 60000; // within 1 minute
+              return sameClient && samePrice && (sameDate || ex.sale_date === s.sale_date);
+            });
 
             if (!existing) {
               const createdSale = await db.sales.create({
@@ -271,18 +319,43 @@ export const backupService = {
                 down_payment: s.down_payment,
                 first_installment_date: s.first_installment_date,
                 installments_paid: s.installments_paid,
+                custom_payments: s.custom_payments || (data.custom_payments && data.custom_payments[s.id]),
                 signature_data: s.signature_data,
                 signed_at: s.signed_at,
                 signed_ip: s.signed_ip
               });
               
               // Restore custom payments mapping to the new sale ID
-              if (data.custom_payments && data.custom_payments[s.id]) {
-                localStorage.setItem(`inst_payments_${createdSale.id}`, data.custom_payments[s.id]);
+              const paymentsToStore = (data.custom_payments && data.custom_payments[s.id]) || (s.custom_payments ? (typeof s.custom_payments === 'string' ? s.custom_payments : JSON.stringify(s.custom_payments)) : null);
+              if (paymentsToStore) {
+                localStorage.setItem(`inst_payments_${createdSale.id}`, paymentsToStore);
               }
               
               existingSales.push(createdSale);
               salesCount++;
+            } else {
+              // Existing sale: update payments and signatures if backup has richer data
+              let needsUpdate = false;
+              const updatePayload: any = {};
+              if (s.installments_paid !== undefined && (s.installments_paid > (existing.installments_paid || 0))) {
+                updatePayload.installments_paid = s.installments_paid;
+                needsUpdate = true;
+              }
+              if (s.signature_data && !existing.signature_data) {
+                updatePayload.signature_data = s.signature_data;
+                updatePayload.signed_at = s.signed_at;
+                updatePayload.signed_ip = s.signed_ip;
+                needsUpdate = true;
+              }
+              const paymentsToStore = (data.custom_payments && data.custom_payments[s.id]) || (s.custom_payments ? (typeof s.custom_payments === 'string' ? s.custom_payments : JSON.stringify(s.custom_payments)) : null);
+              if (paymentsToStore) {
+                localStorage.setItem(`inst_payments_${existing.id}`, paymentsToStore);
+                updatePayload.custom_payments = paymentsToStore;
+                needsUpdate = true;
+              }
+              if (needsUpdate) {
+                await db.sales.update(existing.id, updatePayload).catch(e => console.warn('Update sale warning:', e));
+              }
             }
           } catch (e: any) {
             console.error('Error importing sale:', s, e);
