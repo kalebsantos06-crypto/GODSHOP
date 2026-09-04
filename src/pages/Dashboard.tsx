@@ -99,15 +99,7 @@ export default function Dashboard() {
   // Calculate profit with memoization
   const totalProfit = useMemo(() => {
     return sales.reduce((sum, sale) => {
-      let buyPrice = 0;
-      if (sale.iphone_id) {
-        const iphone = iphones.find(i => i.id === sale.iphone_id);
-        if (iphone) buyPrice = iphone.buy_price;
-      } else if (sale.console_id) {
-        const consoleItem = consoles.find(c => c.id === sale.console_id);
-        if (consoleItem) buyPrice = consoleItem.buy_price;
-      }
-      return sum + (sale.sell_price - buyPrice);
+      return sum + db.getProfit(sale, iphones, consoles);
     }, 0);
   }, [sales, iphones, consoles]);
 
@@ -182,21 +174,18 @@ export default function Dashboard() {
   const profitPreview = useMemo(() => {
     return sales.slice(0, 3).map(sale => {
       let label = 'Venda';
-      let buyPrice = 0;
       if (sale.iphone_id) {
         const item = iphones.find(i => i.id === sale.iphone_id);
         label = item ? `${item.model} ${item.storage}` : 'iPhone';
-        buyPrice = item?.buy_price || 0;
       } else if (sale.console_id) {
         const item = consoles.find(c => c.id === sale.console_id);
         label = item ? `${item.model} ${item.version}` : 'Console';
-        buyPrice = item?.buy_price || 0;
       }
       const client = clients.find(c => c.id === sale.client_id);
       const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
       return {
         label: clientDisplay,
-        value: formatBRL(sale.sell_price - buyPrice),
+        value: formatBRL(db.getProfit(sale, iphones, consoles)),
         sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
       };
     });
@@ -273,8 +262,7 @@ export default function Dashboard() {
         });
         if (modelSales.length === 0) return null;
         const profit = modelSales.reduce((sum, s) => {
-          const item = s.iphone_id ? iphones.find(i => i.id === s.iphone_id) : consoles.find(c => c.id === s.console_id);
-          return sum + (s.sell_price - (item?.buy_price || 0));
+          return sum + db.getProfit(s, iphones, consoles);
         }, 0);
         return { model, avg: profit / modelSales.length };
       })
@@ -304,15 +292,7 @@ export default function Dashboard() {
         return d >= monthStart && d <= monthEnd;
       });
       const profit = monthSales.reduce((sum, sale) => {
-        let buyPrice = 0;
-        if (sale.iphone_id) {
-          const item = iphones.find(i => i.id === sale.iphone_id);
-          if (item) buyPrice = item.buy_price;
-        } else if (sale.console_id) {
-          const item = consoles.find(c => c.id === sale.console_id);
-          if (item) buyPrice = item.buy_price;
-        }
-        return sum + (sale.sell_price - buyPrice);
+        return sum + db.getProfit(sale, iphones, consoles);
       }, 0);
       return {
         name: format(month, 'MMM', { locale: ptBR }),
