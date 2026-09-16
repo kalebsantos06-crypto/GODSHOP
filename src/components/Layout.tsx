@@ -13,6 +13,7 @@ import { triggerHaptic } from '../lib/haptics';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
 import { db } from '../services/db';
+import { dispatchWebhookMessage } from '../lib/whatsappUtils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { parseLocalDate, getCalculatedInstallments, getSaleNotifications, NotificationItem } from '../lib/dateUtils';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
@@ -214,28 +215,16 @@ export default function Layout() {
 
       if (useWebhook) {
         try {
-          const res = await fetch(webhookUrl.trim(), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(webhookToken ? { 'Authorization': `Bearer ${webhookToken}` } : {})
-            },
-            body: JSON.stringify({
-              phone: item.clientPhone,
-              message: text,
-              clientName: item.clientName,
-              itemName: item.itemName,
-              installmentIndex: item.installmentIndex,
-              expectedAmount: item.expectedAmount,
-              dueDate: format(dueDateObj, 'yyyy-MM-dd')
-            })
+          await dispatchWebhookMessage({
+            phone: item.clientPhone,
+            text,
+            clientName: item.clientName,
+            itemName: item.itemName,
+            installmentIndex: item.installmentIndex,
+            expectedAmount: item.expectedAmount,
+            dueDate: format(dueDateObj, 'yyyy-MM-dd')
           });
-          if (res.ok) successCount++;
-          else {
-            const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
-            window.open(url, '_blank');
-            successCount++;
-          }
+          successCount++;
         } catch (e) {
           const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
           window.open(url, '_blank');

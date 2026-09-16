@@ -12,7 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '../lib/utils';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 import { parseLocalDate, getSaleNotifications } from '../lib/dateUtils';
-import { DEFAULT_STATUS_TEMPLATES } from '../lib/whatsappUtils';
+import { DEFAULT_STATUS_TEMPLATES, dispatchWebhookMessage, WebhookProvider } from '../lib/whatsappUtils';
 import { formatBRL } from '../lib/formatCurrency';
 import { useSearchParams } from 'react-router-dom';
 
@@ -65,6 +65,7 @@ export default function Settings() {
   // Automation states
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('auto_webhook_url') || '');
   const [webhookToken, setWebhookToken] = useState(() => localStorage.getItem('auto_webhook_token') || '');
+  const [webhookProvider, setWebhookProvider] = useState<WebhookProvider>(() => (localStorage.getItem('auto_webhook_provider') as WebhookProvider) || 'custom');
   const [isWebhookEnabled, setIsWebhookEnabled] = useState(() => localStorage.getItem('auto_webhook_enabled') === 'true');
   const [isFullAutoEnabled, setIsFullAutoEnabled] = useState(() => localStorage.getItem('auto_full_auto_enabled') === 'true');
   const [template3Days, setTemplate3Days] = useState(() => localStorage.getItem('auto_template_3_days') || DEFAULT_TEMPLATES.days_3_before);
@@ -148,6 +149,7 @@ export default function Settings() {
   const saveAutomationSettings = async () => {
     localStorage.setItem('auto_webhook_url', webhookUrl);
     localStorage.setItem('auto_webhook_token', webhookToken);
+    localStorage.setItem('auto_webhook_provider', webhookProvider);
     localStorage.setItem('auto_webhook_enabled', String(isWebhookEnabled));
     localStorage.setItem('auto_full_auto_enabled', String(isFullAutoEnabled));
     localStorage.setItem('auto_template_3_days', template3Days);
@@ -177,6 +179,7 @@ export default function Settings() {
             settings: {
               webhookUrl,
               webhookToken,
+              webhookProvider,
               isWebhookEnabled,
               isFullAutoEnabled,
               template3Days,
@@ -263,30 +266,19 @@ export default function Settings() {
 
     if (useWebhook) {
       try {
-        const res = await fetch(webhookUrl.trim(), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(webhookToken ? { 'Authorization': `Bearer ${webhookToken}` } : {})
-          },
-          body: JSON.stringify({
-            phone,
-            message: text,
-            clientName: item.clientName,
-            itemName: item.itemName,
-            installmentIndex: item.installmentIndex,
-            expectedAmount: item.expectedAmount,
-            dueDate: format(typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate, 'yyyy-MM-dd')
-          })
+        await dispatchWebhookMessage({
+          phone,
+          text,
+          clientName: item.clientName,
+          itemName: item.itemName,
+          installmentIndex: item.installmentIndex,
+          expectedAmount: item.expectedAmount,
+          dueDate: item.dueDate
         });
-
-        if (res.ok) {
-          toast.success(`Mensagem enviada com sucesso para ${item.clientName}!`);
-          setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
-          addLog(item, 'success', 'webhook');
-        } else {
-          throw new Error('Falha no webhook');
-        }
+        
+        toast.success(`Mensagem enviada com sucesso para ${item.clientName}!`);
+        setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
+        addLog(item, 'success', 'webhook');
       } catch (err) {
         toast.error(`Erro no Webhook. Abrindo via WhatsApp Web para ${item.clientName}...`);
         const url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`;
@@ -342,37 +334,21 @@ export default function Settings() {
 
       if (useWebhook) {
         try {
-          const res = await fetch(webhookUrl.trim(), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(webhookToken ? { 'Authorization': `Bearer ${webhookToken}` } : {})
-            },
-            body: JSON.stringify({
-              phone: item.clientPhone,
-              message: text,
-              clientName: item.clientName,
-              itemName: item.itemName,
-              installmentIndex: item.installmentIndex,
-              expectedAmount: item.expectedAmount,
-              dueDate: format(typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate, 'yyyy-MM-dd')
-            })
+          await dispatchWebhookMessage({
+            phone: item.clientPhone,
+            text,
+            clientName: item.clientName,
+            itemName: item.itemName,
+            installmentIndex: item.installmentIndex,
+            expectedAmount: item.expectedAmount,
+            dueDate: item.dueDate
           });
-
-          if (res.ok) {
-            successCount++;
-            setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
-            addLog(item, 'success', 'webhook');
-          } else {
-            // Fallback to WhatsApp Web if Webhook fails
-            const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
-            window.open(url, '_blank');
-            successCount++;
-            setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
-            addLog(item, 'success', 'whatsapp_web');
-          }
-        } catch (e) {
-          // Fallback to WhatsApp Web on network error
+          
+          successCount++;
+          setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
+          addLog(item, 'success', 'webhook');
+        } catch (err) {
+          // Fallback to WhatsApp Web if Webhook fails
           const url = `https://api.whatsapp.com/send?phone=${item.clientPhone}&text=${encodeURIComponent(text)}`;
           window.open(url, '_blank');
           successCount++;
@@ -442,6 +418,10 @@ export default function Settings() {
           if (s.webhookToken !== undefined) {
             setWebhookToken(s.webhookToken);
             localStorage.setItem('auto_webhook_token', s.webhookToken);
+          }
+          if (s.webhookProvider !== undefined) {
+            setWebhookProvider(s.webhookProvider as WebhookProvider);
+            localStorage.setItem('auto_webhook_provider', s.webhookProvider);
           }
           if (s.isWebhookEnabled !== undefined) {
             setIsWebhookEnabled(s.isWebhookEnabled);
@@ -1362,6 +1342,20 @@ export default function Settings() {
                       <li>O sistema enviará um <strong>POST JSON</strong> contendo: <code>phone</code>, <code>message</code>, <code>client</code>, <code>amount</code>, <code>dueDate</code>.</li>
                       <li>Se não tiver gateway, <strong>desative a chave acima</strong> para usar o envio 100% gratuito via WhatsApp Web!</li>
                     </ul>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-extrabold text-muted-foreground uppercase mb-1">Gateway / API (Formato de Envio)</label>
+                    <select
+                      value={webhookProvider}
+                      onChange={(e) => setWebhookProvider(e.target.value as WebhookProvider)}
+                      className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 mb-3"
+                    >
+                      <option value="custom">Payload Completo (Padrão/Customizado)</option>
+                      <option value="wzap">WZAP / Z-API</option>
+                      <option value="evolution">Evolution API</option>
+                      <option value="wppconnect">WPPConnect / W-API</option>
+                    </select>
                   </div>
 
                   <div>

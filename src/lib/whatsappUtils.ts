@@ -218,3 +218,72 @@ export function openWhatsAppMessage(phone: string, text: string): boolean {
   window.open(url, '_blank', 'noopener,noreferrer');
   return true;
 }
+
+export type WebhookProvider = 'custom' | 'wzap' | 'evolution' | 'wppconnect';
+
+/**
+ * Dispatches a message to a configured Webhook API (like WZAP, Evolution API, etc.)
+ */
+export async function dispatchWebhookMessage(payload: {
+  phone: string;
+  text: string;
+  clientName?: string;
+  itemName?: string;
+  installmentIndex?: number;
+  expectedAmount?: number;
+  dueDate?: string | Date;
+}): Promise<boolean> {
+  const webhookUrl = localStorage.getItem('auto_webhook_url') || '';
+  const webhookToken = localStorage.getItem('auto_webhook_token') || '';
+  const provider = (localStorage.getItem('auto_webhook_provider') || 'custom') as WebhookProvider;
+
+  if (!webhookUrl.trim()) throw new Error('Webhook URL not configured');
+
+  const cleanPhone = (payload.phone || '').replace(/\D/g, '');
+  const formattedPhone = cleanPhone.length === 10 || cleanPhone.length === 11 
+     ? `55${cleanPhone}` 
+     : cleanPhone;
+
+  let body: any = {};
+  
+  if (provider === 'wzap') {
+    body = {
+      phone: formattedPhone,
+      message: payload.text
+    };
+  } else if (provider === 'evolution') {
+    // Evolution API v1/v2 text format
+    body = {
+      number: formattedPhone,
+      text: payload.text
+    };
+  } else if (provider === 'wppconnect') {
+    body = {
+      chatId: `${formattedPhone}@c.us`,
+      text: payload.text
+    };
+  } else {
+    // custom (original format)
+    body = {
+      phone: formattedPhone,
+      message: payload.text,
+      clientName: payload.clientName,
+      itemName: payload.itemName,
+      installmentIndex: payload.installmentIndex,
+      expectedAmount: payload.expectedAmount,
+      dueDate: payload.dueDate
+    };
+  }
+
+  const res = await fetch(webhookUrl.trim(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(webhookToken ? { 'Authorization': `Bearer ${webhookToken}` } : {})
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+  return true;
+}
