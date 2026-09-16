@@ -69,11 +69,19 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
 
   // Logo & Background from store settings
-  const [logoImage, setLogoImage] = useState<string | null>(() => {
-    return localStorage.getItem('app_logo') || null;
+  const [logoImage, setLogoImage] = useState<string>(() => {
+    try {
+      return localStorage.getItem('app_logo') || '/logo.png';
+    } catch {
+      return '/logo.png';
+    }
   });
   const [bgImage, setBgImage] = useState<string>(() => {
-    return localStorage.getItem('app_background') || '';
+    try {
+      return localStorage.getItem('app_background') || '/background.jpg';
+    } catch {
+      return '/background.jpg';
+    }
   });
 
   useEffect(() => {
@@ -87,20 +95,37 @@ export default function Login() {
       }, 150);
     }
 
-    // Fetch store branding
+    // Fetch store branding from server and cloud sync
     const fetchBranding = async () => {
+      // 1. Try local Express API if present (with JSON check for Cloudflare/static hosting safety)
       try {
         const res = await fetch('/api/settings');
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
-          if (data.app_logo) {
-            setLogoImage(data.app_logo);
-            localStorage.setItem('app_logo', data.app_logo);
+          if (data && typeof data === 'object') {
+            if (data.app_logo) {
+              setLogoImage(data.app_logo);
+              localStorage.setItem('app_logo', data.app_logo);
+            }
+            if (data.app_background) {
+              setBgImage(data.app_background);
+              localStorage.setItem('app_background', data.app_background);
+            }
           }
-          if (data.app_background) {
-            setBgImage(data.app_background);
-            localStorage.setItem('app_background', data.app_background);
-          }
+        }
+      } catch (err) {
+        // Silent fallback
+      }
+
+      // 2. If Supabase is connected, pull cloud store_settings so logo syncs immediately
+      try {
+        if (checkIsSupabaseConfigured()) {
+          await db.pullFromCloud();
+          const cloudLogo = localStorage.getItem('app_logo');
+          const cloudBg = localStorage.getItem('app_background');
+          if (cloudLogo) setLogoImage(cloudLogo);
+          if (cloudBg) setBgImage(cloudBg);
         }
       } catch (err) {
         // Silent fallback
@@ -276,19 +301,23 @@ export default function Login() {
               <div className="relative mb-4 group cursor-default">
                 <div className="absolute -inset-2 bg-gradient-to-r from-emerald-500/20 via-white/10 to-teal-500/20 rounded-3xl blur-md opacity-70 transition group-hover:opacity-100" />
                 
-                {logoImage ? (
-                  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl p-1 bg-gradient-to-b from-white/20 to-white/5 border border-white/20 shadow-xl overflow-hidden flex items-center justify-center">
-                    <img 
-                      src={logoImage} 
-                      alt="Logo da Loja" 
-                      className="h-full w-full object-cover rounded-xl"
-                    />
-                  </div>
-                ) : (
-                  <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-gradient-to-b from-zinc-800 to-zinc-900 border border-white/15 shadow-xl flex items-center justify-center">
-                    <Smartphone className="h-8 w-8 text-white drop-shadow-[0_2px_8px_rgba(255,255,255,0.3)]" />
-                  </div>
-                )}
+                <div className="relative h-16 w-16 sm:h-20 sm:w-20 rounded-2xl p-1 bg-gradient-to-b from-white/20 to-white/5 border border-white/20 shadow-xl overflow-hidden flex items-center justify-center">
+                  <img 
+                    src={logoImage || '/logo.png'} 
+                    alt="Logo GODSHOP" 
+                    className="h-full w-full object-cover rounded-xl"
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (!img.src.includes('logo.png')) {
+                        img.src = '/logo.png';
+                      } else if (!img.src.includes('apple-touch-icon.png')) {
+                        img.src = '/apple-touch-icon.png';
+                      } else if (!img.src.includes('pwa-192.png')) {
+                        img.src = '/pwa-192.png';
+                      }
+                    }}
+                  />
+                </div>
               </div>
 
               {/* Brand Title */}

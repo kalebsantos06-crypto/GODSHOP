@@ -209,7 +209,7 @@ export default function GuaranteeNote() {
     import('html2canvas-pro');
     
     // Load store logo
-    setLogoImage(localStorage.getItem('app_logo') || null);
+    setLogoImage(localStorage.getItem('app_logo') || '/logo.png');
   }, []);
 
   const { data: sales = [], isLoading: isLoadingSales } = useQuery({

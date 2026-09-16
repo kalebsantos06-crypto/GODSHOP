@@ -2034,8 +2034,20 @@ app.get("/api/settings", (req, res) => {
   if (keys.length > 0) {
     return res.json(settings[keys[0]]);
   }
-  
-  res.json({});
+
+  // Fallback to store_settings in cloud_database.json if present
+  try {
+    const cloudDb = readCloudDb();
+    if (cloudDb && cloudDb.store_settings && Object.keys(cloudDb.store_settings).length > 0) {
+      return res.json(cloudDb.store_settings);
+    }
+  } catch (err) {}
+
+  // Fallback to default static branding
+  res.json({
+    app_logo: "/logo.png",
+    app_background: "/background.jpg"
+  });
 });
 
 // Endpoint to update settings

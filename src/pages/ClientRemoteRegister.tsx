@@ -108,7 +108,13 @@ export default function ClientRemoteRegister() {
   });
 
   // UI Settings (Dynamic theme values from Merchant Settings API)
-  const [logoImage, setLogoImage] = useState<string | null>(null);
+  const [logoImage, setLogoImage] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('app_logo') || '/logo.png';
+    } catch {
+      return '/logo.png';
+    }
+  });
   const [bgImage, setBgImage] = useState<string>('https://images.unsplash.com/photo-1614850523296-d8c1af93d400?q=80&w=2070&auto=format&fit=crop');
 
   // Modals
@@ -216,13 +222,16 @@ export default function ClientRemoteRegister() {
   const fetchMerchantSettings = async (userId: string) => {
     try {
       const res = await fetch(`/api/settings?userId=${userId}`);
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
-        if (data.app_logo) {
-          setLogoImage(data.app_logo);
-        }
-        if (data.app_background) {
-          setBgImage(data.app_background);
+        if (data && typeof data === 'object') {
+          if (data.app_logo) {
+            setLogoImage(data.app_logo);
+          }
+          if (data.app_background) {
+            setBgImage(data.app_background);
+          }
         }
       }
     } catch (err) {
@@ -742,6 +751,14 @@ export default function ClientRemoteRegister() {
                 transition={{ delay: 0.2, duration: 0.5 }}
                 src={logoImage} 
                 alt="Logo GOD SHOP" 
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  if (!img.src.includes('logo.png')) {
+                    img.src = '/logo.png';
+                  } else if (!img.src.includes('apple-touch-icon.png')) {
+                    img.src = '/apple-touch-icon.png';
+                  }
+                }}
                 className="h-20 mx-auto object-contain rounded-2xl border-2 border-[#D4AF37]/40 p-1.5 bg-black/80 shadow-2xl shadow-[#D4AF37]/5" 
               />
             ) : (

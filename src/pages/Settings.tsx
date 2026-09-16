@@ -383,21 +383,26 @@ export default function Settings() {
     const loadServerAndLocalSettings = async () => {
       // Local first
       setBgPreview(localStorage.getItem('app_background') || '/background.jpg');
-      setLogoPreview(localStorage.getItem('app_logo') || null);
+      setLogoPreview(localStorage.getItem('app_logo') || '/logo.png');
 
       try {
         const queryParams = user?.id ? `?userId=${user.id}` : '';
         const res = await fetch(`/api/settings${queryParams}`);
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
           const s = await res.json();
           if (s.app_background) {
             setBgPreview(s.app_background);
             localStorage.setItem('app_background', s.app_background);
           }
           if (s.app_logo !== undefined) {
-            setLogoPreview(s.app_logo);
-            if (s.app_logo) localStorage.setItem('app_logo', s.app_logo);
-            else localStorage.removeItem('app_logo');
+            if (s.app_logo) {
+              setLogoPreview(s.app_logo);
+              localStorage.setItem('app_logo', s.app_logo);
+            } else {
+              setLogoPreview('/logo.png');
+              localStorage.removeItem('app_logo');
+            }
           }
           if (s.app_theme) {
             setCurrentTheme(s.app_theme);
@@ -788,7 +793,17 @@ export default function Settings() {
               <div className="flex flex-col items-center gap-4">
                 <div className="h-32 w-32 rounded-2xl border-2 border-dashed border-muted-foreground/25 flex items-center justify-center bg-muted/50 overflow-hidden shadow-inner">
                   {logoPreview ? (
-                    <img src={logoPreview} alt="Logo Preview" className="h-full w-full object-cover" />
+                    <img 
+                      src={logoPreview} 
+                      alt="Logo Preview" 
+                      className="h-full w-full object-cover" 
+                      onError={(e) => {
+                        const img = e.currentTarget;
+                        if (!img.src.includes('logo.png')) {
+                          img.src = '/logo.png';
+                        }
+                      }}
+                    />
                   ) : (
                     <Smartphone className="h-10 w-10 text-muted-foreground opacity-50" />
                   )}

@@ -385,13 +385,14 @@ export default function Layout() {
   useEffect(() => {
     const loadSettings = async () => {
       // Set local first as immediate state
-      setBgImage(localStorage.getItem('app_background') || 'https://images.unsplash.com/photo-1614850523296-d8c1af93d400?q=80&w=2070&auto=format&fit=crop');
-      setLogoImage(localStorage.getItem('app_logo') || null);
+      setBgImage(localStorage.getItem('app_background') || '/background.jpg');
+      setLogoImage(localStorage.getItem('app_logo') || '/logo.png');
 
       try {
         const queryParams = user?.id ? `?userId=${user.id}` : '';
         const res = await fetch(`/api/settings${queryParams}`);
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
           const serverSettings = await res.json();
           if (serverSettings && typeof serverSettings === 'object') {
             if (serverSettings.app_background) {
@@ -404,7 +405,7 @@ export default function Layout() {
                 setLogoImage(serverSettings.app_logo);
               } else {
                 localStorage.removeItem('app_logo');
-                setLogoImage(null);
+                setLogoImage('/logo.png');
               }
             }
           }
@@ -754,6 +755,14 @@ export default function Layout() {
                 <img 
                   src={logoImage} 
                   alt="Logo" 
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (!img.src.includes('logo.png')) {
+                      img.src = '/logo.png';
+                    } else if (!img.src.includes('apple-touch-icon.png')) {
+                      img.src = '/apple-touch-icon.png';
+                    }
+                  }}
                   className={cn(
                     "relative h-9 w-9 sm:h-11 sm:w-11 object-cover rounded-lg sm:rounded-xl shadow-lg border transition-all duration-300 group-hover:scale-105",
                     theme === 'dark' ? "border-white/30" : "border-black/15"
