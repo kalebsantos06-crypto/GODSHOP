@@ -10,6 +10,10 @@ import {
   RefreshCw, Volume2, Bookmark, User, Tag, ShieldCheck, CornerDownRight, SquareCheck
 } from 'lucide-react';
 import { startOfDay, differenceInDays, format, parseISO, isSameDay, isAfter, isBefore } from 'date-fns';
+import { CapacitorAudioRecorder } from '@capgo/capacitor-audio-recorder';
+import { NativeSettings, AndroidSettings, IOSSettings } from 'capacitor-native-settings';
+import { Capacitor } from '@capacitor/core';
+import { supabase } from '../lib/supabase';
 
 export default function Notes() {
   const queryClient = useQueryClient();
@@ -52,6 +56,7 @@ export default function Notes() {
 
   // Audio Recorder States
   const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [audioBase64, setAudioBase64] = useState<string | null>(null);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -76,6 +81,44 @@ export default function Notes() {
   });
 
   // Mutate Handlers
+  const uploadAudioIfNeeded = async (base64String: string): Promise<string> => {
+    if (!base64String.startsWith('data:audio/')) return base64String;
+    
+    try {
+      try {
+        await supabase.storage.createBucket('note_audio', { public: false });
+      } catch (e) {}
+      
+      const base64Data = base64String.split(',')[1];
+      const mimeType = base64String.split(';')[0].split(':')[1];
+      const byteCharacters = atob(base64Data);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mimeType });
+      
+      const ext = mimeType.split('/')[1] || 'webm';
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+      const { data: userAuth } = await supabase.auth.getUser();
+      const userId = userAuth.user?.id || 'anonymous';
+      const filePath = `${userId}/${fileName}`;
+      
+      const { data, error } = await supabase.storage.from('note_audio').upload(filePath, blob, {
+        upsert: true,
+        contentType: mimeType
+      });
+      
+      if (!error && data) {
+        return filePath;
+      }
+    } catch (e) {
+      console.error('Error uploading to Supabase Storage:', e);
+    }
+    return base64String; // fallback
+  };
+
   const addMutation = useMutation({
     mutationFn: async (newNote: Omit<Note, 'id' | 'created_at'>) => {
       const created = await db.notes.create(newNote);
@@ -91,9 +134,10 @@ export default function Notes() {
 
       // Save audio if any
       if (audioBase64) {
+        const finalUrl = await uploadAudioIfNeeded(audioBase64);
         await db.note_audio.create({
           note_id: created.id,
-          audio_url: audioBase64,
+          audio_url: finalUrl,
           duration: audioDuration
         });
       }
@@ -130,13 +174,14 @@ export default function Notes() {
       }
 
       if (audio) {
+        const finalUrl = await uploadAudioIfNeeded(audio.url);
         const existingAudios = audioData.filter(a => a.note_id === id);
         for (const a of existingAudios) {
           await db.note_audio.delete(a.id);
         }
         await db.note_audio.create({
           note_id: id,
-          audio_url: audio.url,
+          audio_url: finalUrl,
           duration: audio.duration
         });
       }
@@ -290,63 +335,141 @@ export default function Notes() {
   // Audio Recording Functions
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+      if (Capacitor.isNativePlatform()) {
+        const permStatus = await CapacitorAudioRecorder.checkPermissions();
+        if (permStatus.recordAudio !== 'granted') {
+          const reqStatus = await CapacitorAudioRecorder.requestPermissions();
+          if (reqStatus.recordAudio !== 'granted') {
+            toast.error('O acesso ao microfone está bloqueado. Abra as configurações do GODSHOP para permitir o uso do microfone.', {
+              duration: 8000,
+              action: {
+                label: 'ABRIR CONFIGURAÇÕES',
+                onClick: () => AndroidSettings.open({ setting: 'application_details' })
+              }
+            });
+            return;
+          }
         }
-      };
+        await CapacitorAudioRecorder.startRecording();
+        setIsRecording(true);
+        setIsRecordingPaused(false);
+        setRecordingTime(0);
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingTime((prev) => prev + 1);
+        }, 1000);
+      } else {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunksRef.current = [];
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
 
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        
-        // Convert to Base64
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64data = reader.result as string;
-          setAudioBase64(base64data);
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
         };
-        reader.readAsDataURL(blob);
 
-        stream.getTracks().forEach(track => track.stop());
-      };
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            setAudioBase64(base64data);
+          };
+          reader.readAsDataURL(blob);
+          stream.getTracks().forEach(track => track.stop());
+        };
 
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingTime(0);
+        mediaRecorder.start();
+        setIsRecording(true);
+        setIsRecordingPaused(false);
+        setRecordingTime(0);
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingTime((prev) => prev + 1);
+        }, 1000);
+      }
+    } catch (err: any) {
+      console.error('Error starting audio recording:', err);
+      toast.error('Para gravar uma anotação de voz, permita o acesso ao microfone.', {
+        duration: 8000,
+        action: {
+           label: 'PERMITIR MICROFONE',
+           onClick: startRecording
+        }
+      });
+    }
+  };
 
+  const pauseRecording = async () => {
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await CapacitorAudioRecorder.pauseRecording();
+      } else if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.pause();
+      }
+      setIsRecordingPaused(true);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    } catch (e) {
+      console.error('Error pausing recording:', e);
+    }
+  };
+
+  const resumeRecording = async () => {
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await CapacitorAudioRecorder.resumeRecording();
+      } else if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+        mediaRecorderRef.current.resume();
+      }
+      setIsRecordingPaused(false);
       recordingTimerRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1);
       }, 1000);
-    } catch (err: any) {
-      console.error('Error starting audio recording:', err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        toast.error('Permissão de microfone negada. Certifique-se de liberar o microfone no seu navegador ou abra o aplicativo em uma nova aba fora do painel!', {
-          duration: 6000
-        });
-      } else {
-        toast.error('Não foi possível acessar o microfone para gravação de voz.');
-      }
+    } catch (e) {
+      console.error('Error resuming recording:', e);
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+  const stopRecording = async () => {
+    if (!isRecording) return;
+    
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const result = await CapacitorAudioRecorder.stopRecording();
+        if (result.blob) {
+          const reader = new FileReader();
+          reader.onloadend = () => setAudioBase64(reader.result as string);
+          reader.readAsDataURL(result.blob);
+        } else if (result.uri) {
+           const { Filesystem } = await import('@capacitor/filesystem');
+           const file = await Filesystem.readFile({ path: result.uri });
+           setAudioBase64(`data:audio/aac;base64,${file.data}`);
+        }
+      } catch (err) {
+        console.error('Error stopping native recording:', err);
+      }
+    } else if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-      }
-      setAudioDuration(recordingTime);
     }
+    
+    setIsRecording(false);
+    setIsRecordingPaused(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+    }
+    setAudioDuration(recordingTime);
   };
 
-  const cancelRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+  const cancelRecording = async () => {
+    if (!isRecording) return;
+    
+    if (Capacitor.isNativePlatform()) {
+       try {
+         await CapacitorAudioRecorder.cancelRecording();
+       } catch (err) {}
+    } else if (mediaRecorderRef.current) {
       mediaRecorderRef.current.onstop = () => {
         if (mediaRecorderRef.current) {
           const stream = mediaRecorderRef.current.stream;
@@ -354,15 +477,17 @@ export default function Notes() {
         }
       };
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-      }
-      setRecordingTime(0);
-      audioChunksRef.current = [];
-      setAudioBase64(null);
-      toast.info('Gravação de voz cancelada');
     }
+    
+    setIsRecording(false);
+    setIsRecordingPaused(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+    }
+    setRecordingTime(0);
+    audioChunksRef.current = [];
+    setAudioBase64(null);
+    toast.info('Gravação de voz cancelada');
   };
 
   const deleteFormAudio = () => {
@@ -1052,28 +1177,47 @@ export default function Notes() {
                       Iniciar Gravação de Áudio
                     </button>
                   ) : isRecording ? (
-                    <div className="flex items-center justify-between bg-rose-500/5 px-4 py-3 rounded-xl border border-rose-500/20 text-rose-500">
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
-                        <span className="text-xs font-black uppercase tracking-wider animate-pulse">Gravando...</span>
-                        <span className="font-mono text-xs">{formatRecordingTime(recordingTime)}</span>
+                    <div className="flex flex-col gap-3 bg-indigo-500/5 px-4 py-3 rounded-xl border border-indigo-500/20">
+                      <div className="flex items-center justify-between text-indigo-500">
+                        <div className="flex items-center gap-2">
+                          {!isRecordingPaused && <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />}
+                          <span className={`text-xs font-black uppercase tracking-wider ${!isRecordingPaused ? 'animate-pulse' : ''}`}>
+                            {isRecordingPaused ? 'Gravação Pausada' : 'Gravando...'}
+                          </span>
+                          <span className="font-mono text-xs text-foreground">{formatRecordingTime(recordingTime)}</span>
+                        </div>
                       </div>
-                      <div className="flex gap-1.5">
+                      <div className="flex gap-2 w-full justify-between">
                         <button
                           type="button"
                           onClick={cancelRecording}
-                          className="px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg text-xs font-bold transition text-foreground cursor-pointer flex items-center gap-1"
+                          className="px-3 py-1.5 bg-muted hover:bg-muted/80 rounded-lg text-[11px] font-bold transition text-foreground cursor-pointer flex-1 flex justify-center items-center gap-1"
                         >
-                          <X className="h-3.5 w-3.5" />
-                          <span>Cancelar</span>
+                          <Trash2 className="h-3.5 w-3.5" /> Excluir
                         </button>
+                        {isRecordingPaused ? (
+                          <button
+                            type="button"
+                            onClick={resumeRecording}
+                            className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 rounded-lg text-[11px] font-bold transition text-white cursor-pointer flex-1 flex justify-center items-center gap-1"
+                          >
+                            <Play className="h-3.5 w-3.5" /> Continuar
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={pauseRecording}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 rounded-lg text-[11px] font-bold transition text-white cursor-pointer flex-1 flex justify-center items-center gap-1"
+                          >
+                            <Pause className="h-3.5 w-3.5" /> Pausar
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={stopRecording}
-                          className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-black transition flex items-center gap-1 cursor-pointer"
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-black transition cursor-pointer flex-1 flex justify-center items-center gap-1"
                         >
-                          <X className="h-3.5 w-3.5" />
-                          Parar
+                          <Check className="h-3.5 w-3.5 stroke-[3px]" /> Salvar
                         </button>
                       </div>
                     </div>
@@ -1182,9 +1326,35 @@ function AudioPlayer({ url, duration }: { url: string; duration: number }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playableUrl, setPlayableUrl] = useState<string>('');
 
   useEffect(() => {
-    const audio = new Audio(url);
+    let active = true;
+    
+    const loadAudio = async () => {
+      if (!url) return;
+      if (url.startsWith('data:audio/') || url.startsWith('http')) {
+        setPlayableUrl(url);
+      } else {
+        // It's a Supabase storage path
+        try {
+          const { data, error } = await supabase.storage.from('note_audio').createSignedUrl(url, 3600 * 24);
+          if (data && active) {
+            setPlayableUrl(data.signedUrl);
+          }
+        } catch (e) {
+           console.error('Error fetching audio signed url', e);
+        }
+      }
+    };
+    
+    loadAudio();
+    return () => { active = false; };
+  }, [url]);
+
+  useEffect(() => {
+    if (!playableUrl) return;
+    const audio = new Audio(playableUrl);
     audioRef.current = audio;
 
     const updateTime = () => setCurrentTime(audio.currentTime);
@@ -1201,7 +1371,7 @@ function AudioPlayer({ url, duration }: { url: string; duration: number }) {
       audio.removeEventListener('timeupdate', updateTime);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [url]);
+  }, [playableUrl]);
 
   const togglePlay = () => {
     if (!audioRef.current) return;

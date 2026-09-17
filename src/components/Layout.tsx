@@ -18,6 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { parseLocalDate, getCalculatedInstallments, getSaleNotifications, NotificationItem } from '../lib/dateUtils';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 import { formatBRL } from '../lib/formatCurrency';
+import { checkNotificationPermission, requestNotificationPermission, openNotificationSettings, showNotification, scheduleBackgroundNotifications } from '../lib/pushNotifications';
 
 export default function Layout() {
   const queryClient = useQueryClient();
@@ -38,17 +39,18 @@ export default function Layout() {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifTab, setNotifTab] = useState<'recent' | 'all'>('recent');
   const [activeFloatingNotif, setActiveFloatingNotif] = useState<NotificationItem | null>(null);
-  const [notifPermission, setNotifPermission] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      if (localStorage.getItem('godshop_notif_force_enabled') === 'true') {
-        return 'granted';
+  const [notifPermission, setNotifPermission] = useState<string>('default');
+
+  useEffect(() => {
+    // Check real native permission on mount
+    checkNotificationPermission().then(isGranted => {
+      if (isGranted) {
+        setNotifPermission('granted');
+      } else {
+        setNotifPermission('default');
       }
-      if ('Notification' in window) {
-        return Notification.permission;
-      }
-    }
-    return 'default';
-  });
+    });
+  }, []);
   const [isNotifGuideOpen, setIsNotifGuideOpen] = useState(false);
 
   // Fetch data for notifications
@@ -124,39 +126,80 @@ export default function Layout() {
     }
   };
 
-  // Request native phone push permission
-  const requestPushPermission = async () => {
-    if (typeof window !== 'undefined') {
-      // First try requesting native notification permission
-      if ('Notification' in window) {
-        try {
-          const permission = await Notification.requestPermission();
-          setNotifPermission(permission);
-          if (permission === 'granted') {
-            localStorage.setItem('godshop_notif_force_enabled', 'true');
-            toast.success('Notificações nativas ativadas! 🔔');
-            try {
-              new Notification("GODSHOP Ativado ⚡", {
-                body: "Você agora receberá alertas diretamente na barra de notificações do seu celular!",
-                icon: logoImage || "/favicon.ico"
-              });
-            } catch (e) {
-              console.log("Could not trigger initial notification: ", e);
-            }
-            return;
-          }
-        } catch (err) {
-          console.error('Error requesting native permission:', err);
+  const processNativeNotifications = async () => {
+    const isGranted = await checkNotificationPermission();
+    if (!isGranted) return;
+
+    try {
+      const alreadySent = JSON.parse(localStorage.getItem('godshop_sent_push_alerts') || '[]');
+      const newSent = [...alreadySent];
+      let updated = false;
+
+      for (const n of recentNotifications) {
+        if (!alreadySent.includes(n.id)) {
+          let msg = `A ${n.installmentIndex}ª parcela de ${formatBRL(n.expectedAmount)} do item ${n.itemName} `;
+          if (n.daysDiff === 0) msg += "vence HOJE!";
+          else if (n.daysDiff === 1) msg += "vence AMANHÃ!";
+          else if (n.daysDiff === 2) msg += "vence em 2 dias!";
+          else if (n.daysDiff === 3) msg += "vence em 3 dias!";
+          else if (n.daysDiff === -1) msg += "venceu ONTEM!";
+          else if (n.daysDiff === -2) msg += "venceu há 2 dias!";
+          else if (n.daysDiff === -3) msg += "venceu há 3 dias!";
+          else msg += `vence em ${n.daysDiff} dias!`;
+
+          await showNotification({
+            id: Math.floor(Math.random() * 1000000) + 1, // Capacitor requires numerical IDs
+            title: `GODSHOP: ${n.clientName}`,
+            body: msg
+          });
+          newSent.push(n.id);
+          updated = true;
         }
       }
 
-      // If native permission was denied, not supported, or failed (e.g. inside an iframe),
-      // gracefully enable internal app notification system and save preference so they are never blocked.
-      localStorage.setItem('godshop_notif_force_enabled', 'true');
-      setNotifPermission('granted');
-      toast.success('Notificações ativadas no sistema do aplicativo! 🔔');
-    } else {
-      toast.error('Este dispositivo/navegador não suporta notificações.');
+      if (updated) {
+        localStorage.setItem('godshop_sent_push_alerts', JSON.stringify(newSent));
+      }
+      
+      // Background scheduling for future dates
+      if (allNotifications.length > 0) {
+        await scheduleBackgroundNotifications(allNotifications);
+      }
+    } catch (e) {
+      console.error('Error triggering native push notification:', e);
+    }
+  };
+
+  // Request native phone push permission
+  const requestPushPermission = async () => {
+    try {
+      const status = await requestNotificationPermission();
+      setNotifPermission(status);
+      
+      if (status === 'granted') {
+        localStorage.setItem('godshop_notif_force_enabled', 'true');
+        toast.success('Notificações nativas ativadas! 🔔');
+        
+        await showNotification({
+          id: 99999,
+          title: "GODSHOP Ativado ⚡",
+          body: "Você agora receberá alertas diretamente na barra de notificações do seu celular!"
+        });
+
+        // Trigger right now so they see them immediately
+        await processNativeNotifications();
+      } else {
+        toast.error('Permissão de notificações bloqueada. Você pode ativar nas configurações do celular.', {
+          action: {
+            label: 'Configurações',
+            onClick: () => openNotificationSettings()
+          },
+          duration: 8000
+        });
+      }
+    } catch (error) {
+      console.error('Error requesting push permission:', error);
+      toast.error('Erro ao solicitar permissão de notificações.');
     }
   };
 
@@ -249,51 +292,14 @@ export default function Layout() {
   useEffect(() => {
     if (isAuthenticated && recentNotifications.length > 0) {
       // 1. Native OS notification bar triggers (runs once per new ID)
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        try {
-          const alreadySent = JSON.parse(localStorage.getItem('godshop_sent_push_alerts') || '[]');
-          const newSent = [...alreadySent];
-          let updated = false;
-
-          recentNotifications.forEach(n => {
-            if (!alreadySent.includes(n.id)) {
-              let msg = `A ${n.installmentIndex}ª parcela de ${formatBRL(n.expectedAmount)} do item ${n.itemName} `;
-              if (n.daysDiff === 0) msg += "vence HOJE!";
-              else if (n.daysDiff === 1) msg += "vence AMANHÃ!";
-              else if (n.daysDiff === 2) msg += "vence em 2 dias!";
-              else if (n.daysDiff === 3) msg += "vence em 3 dias!";
-              else if (n.daysDiff === -1) msg += "venceu ONTEM!";
-              else if (n.daysDiff === -2) msg += "venceu há 2 dias!";
-              else if (n.daysDiff === -3) msg += "venceu há 3 dias!";
-              else msg += `vence em ${n.daysDiff} dias!`;
-
-              new Notification(`GODSHOP: ${n.clientName}`, {
-                body: msg,
-                icon: logoImage || "/favicon.ico",
-                tag: n.id,
-                requireInteraction: true
-              });
-              newSent.push(n.id);
-              updated = true;
-            }
-          });
-
-          if (updated) {
-            localStorage.setItem('godshop_sent_push_alerts', JSON.stringify(newSent));
-          }
-        } catch (e) {
-          console.error('Error triggering native push notification:', e);
-        }
-      }
+      processNativeNotifications();
 
       // 2. Beautiful floating system island popup on page load
       const sessionSeen = JSON.parse(sessionStorage.getItem('godshop_session_seen_alerts') || '[]');
       const firstUnseen = recentNotifications.find(n => !sessionSeen.includes(n.id));
-
       if (firstUnseen) {
         setActiveFloatingNotif(firstUnseen);
         sessionStorage.setItem('godshop_session_seen_alerts', JSON.stringify([...sessionSeen, firstUnseen.id]));
-
         // Plays a subtle chime if desired or simply auto dismisses after 12s
         const timer = setTimeout(() => {
           setActiveFloatingNotif(null);
@@ -301,7 +307,7 @@ export default function Layout() {
         return () => clearTimeout(timer);
       }
     }
-  }, [isAuthenticated, recentNotifications.length]);
+  }, [isAuthenticated, recentNotifications.length, allNotifications.length, notifPermission]);
   
   const [bgImage, setBgImage] = useState<string>('/background.jpg');
   const [logoImage, setLogoImage] = useState<string | null>(null);

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR" class="notranslate" translate="no">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="google" content="notranslate" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#090d16" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="description" content="Dashboard para gerenciamento de estoque, vendas e controle fiscal de iPhones e Consoles com sincronização em nuvem." />
+    <meta property="og:title" content="GODSHOP" />
+    <meta property="og:description" content="Dashboard para gerenciamento de estoque, vendas e controle fiscal de iPhones e Consoles com sincronização em nuvem." />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512.png" />
+    <link rel="shortcut icon" href="/pwa-192.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <script>
+      // Suppress benign Vite HMR WebSocket connection errors in sandbox/cloud preview environments
+      window.addEventListener('unhandledrejection', function(e) {
+        var reason = e && (e.reason || e);
+        var str = String(reason && (reason.message || reason) || '');
+        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened')) {
+          e.preventDefault();
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        }
+      });
+      window.addEventListener('error', function(e) {
+        var str = String(e && (e.message || e) || '');
+        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened')) {
+          e.preventDefault();
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        }
+      });
+    </script>
+    <title>GODSHOP</title>
+    <script type="module" crossorigin src="/assets/index-BlTv2D51.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BUjGmFMf.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "short_name": "GODSHOP",
+  "name": "GODSHOP Pro - Sistema de Gestão",
+  "description": "Sistema completo de vendas, estoque e carnês com sincronização em tempo real.",
+  "icons": [
+    {
+      "src": "/pwa-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/pwa-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    },
+    {
+      "src": "/pwa-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "display": "standalone",
+  "orientation": "portrait",
+  "categories": ["business", "finance", "productivity"],
+  "dir": "ltr",
+  "lang": "pt-BR"
+}

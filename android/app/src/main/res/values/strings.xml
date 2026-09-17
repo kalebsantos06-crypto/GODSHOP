@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">godshop</string>
+    <string name="title_activity_main">godshop</string>
+    <string name="package_name">com.godshop.app</string>
+    <string name="custom_url_scheme">com.godshop.app</string>
+</resources>
