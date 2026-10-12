@@ -4,6 +4,8 @@ import { Plus, Trash2, Edit2, Search, Check, Mail, Phone, Shield, User, Users, C
 import { toast } from 'sonner';
 import { useAuth } from '../types/AuthContext';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
+import { fetchPendingRemoteClients } from '../services/clientLinkService';
+import { safeFetchJson } from '../lib/safeFetch';
 
 interface SystemUser {
   id: string;
@@ -29,11 +31,18 @@ export default function UsersPage() {
     queryKey: ['systemUsers'],
     queryFn: async () => {
       try {
-        const res = await fetch('/api/users');
-        if (res.ok) return await res.json();
-        return [];
+        const serverList = await safeFetchJson<SystemUser[]>('/api/users', undefined, []);
+        if (Array.isArray(serverList) && serverList.length > 0) {
+          localStorage.setItem('godshop_system_users', JSON.stringify(serverList));
+          return serverList;
+        }
       } catch (err) {
-        console.warn('Could not fetch system users:', err);
+        console.warn('Could not fetch system users from server:', err);
+      }
+      try {
+        const local = JSON.parse(localStorage.getItem('godshop_system_users') || '[]');
+        return Array.isArray(local) ? local : [];
+      } catch {
         return [];
       }
     }
@@ -45,9 +54,7 @@ export default function UsersPage() {
     queryFn: async () => {
       if (!currentUser?.id) return [];
       try {
-        const res = await fetch(`/api/public-clients?userId=${currentUser.id}`);
-        if (res.ok) return await res.json();
-        return [];
+        return await fetchPendingRemoteClients(currentUser.id);
       } catch (err) {
         console.warn('Could not fetch external registrations:', err);
         return [];
@@ -56,19 +63,41 @@ export default function UsersPage() {
     enabled: !!currentUser?.id,
   });
 
-  // Mutations for System Users
+  // Mutations for System Users (with localStorage fallback for Cloudflare Pages / APK)
   const addMutation = useMutation({
     mutationFn: async (newUser: Partial<SystemUser>) => {
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newUser)
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Erro ao adicionar usuário');
+      let createdUser: any = null;
+      try {
+        const res = await fetch('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newUser)
+        });
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          const resData = await res.json();
+          createdUser = resData.user || resData;
+        }
+      } catch (e) {}
+
+      if (!createdUser) {
+        createdUser = {
+          id: `usr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          name: newUser.name || '',
+          email: (newUser.email || '').toLowerCase().trim(),
+          phone: newUser.phone || '',
+          role: newUser.role || 'Vendedor',
+          status: newUser.status || 'Ativo',
+          created_at: new Date().toISOString()
+        };
       }
-      return res.json();
+
+      // Persist locally
+      try {
+        const currentList: SystemUser[] = JSON.parse(localStorage.getItem('godshop_system_users') || '[]');
+        localStorage.setItem('godshop_system_users', JSON.stringify([...currentList, createdUser]));
+      } catch (e) {}
+
+      return createdUser;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['systemUsers'] });
@@ -82,16 +111,27 @@ export default function UsersPage() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string, data: Partial<SystemUser> }) => {
-      const res = await fetch(`/api/users/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Erro ao atualizar usuário');
-      }
-      return res.json();
+      let updatedUser: any = null;
+      try {
+        const res = await fetch(`/api/users/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+          const resData = await res.json();
+          updatedUser = resData.user || resData;
+        }
+      } catch (e) {}
+
+      // Persist locally
+      try {
+        const currentList: SystemUser[] = JSON.parse(localStorage.getItem('godshop_system_users') || '[]');
+        const updatedList = currentList.map(u => u.id === id ? { ...u, ...data, updated_at: new Date().toISOString() } : u);
+        localStorage.setItem('godshop_system_users', JSON.stringify(updatedList));
+      } catch (e) {}
+
+      return updatedUser || data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['systemUsers'] });
@@ -105,8 +145,16 @@ export default function UsersPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Erro ao remover usuário');
+      try {
+        await fetch(`/api/users/${id}`, { method: 'DELETE' });
+      } catch (e) {}
+
+      // Persist locally
+      try {
+        const currentList: SystemUser[] = JSON.parse(localStorage.getItem('godshop_system_users') || '[]');
+        const updatedList = currentList.filter(u => u.id !== id);
+        localStorage.setItem('godshop_system_users', JSON.stringify(updatedList));
+      } catch (e) {}
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['systemUsers'] });

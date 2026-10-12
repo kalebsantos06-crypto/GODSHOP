@@ -344,7 +344,17 @@ export default function Notes() {
               duration: 8000,
               action: {
                 label: 'ABRIR CONFIGURAÇÕES',
-                onClick: () => AndroidSettings.open({ setting: 'application_details' })
+                onClick: () => {
+                  try {
+                    if (Capacitor.getPlatform() === 'android') {
+                      NativeSettings.openAndroid({ option: AndroidSettings.ApplicationDetails });
+                    } else if (Capacitor.getPlatform() === 'ios') {
+                      NativeSettings.openIOS({ option: IOSSettings.App });
+                    }
+                  } catch (e) {
+                    console.warn('Could not open native settings:', e);
+                  }
+                }
               }
             });
             return;

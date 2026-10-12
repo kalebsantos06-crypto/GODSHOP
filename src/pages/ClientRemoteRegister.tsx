@@ -28,6 +28,8 @@ import {
   MessageCircle
 } from 'lucide-react';
 import { getSavedStatusTemplate, formatStatusMessage, buildWhatsAppUrl, getStoreWhatsAppNumber } from '../lib/whatsappUtils';
+import { validateRegistrationToken, submitClientRemoteRegistration } from '../services/clientLinkService';
+import { safeFetchJson } from '../lib/safeFetch';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -63,8 +65,28 @@ const BRAZILIAN_STATES = [
 
 export default function ClientRemoteRegister() {
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
-  const legacyRef = searchParams.get('ref');
+  
+  // Robust parameter extraction supporting useSearchParams, hash routes, and query string
+  const getParam = (name: string): string => {
+    let val = searchParams.get(name) || '';
+    if (!val && typeof window !== 'undefined') {
+      try {
+        const hashQuery = window.location.hash.split('?')[1];
+        if (hashQuery) {
+          const params = new URLSearchParams(hashQuery);
+          val = params.get(name) || '';
+        }
+        if (!val) {
+          const directParams = new URLSearchParams(window.location.search);
+          val = directParams.get(name) || '';
+        }
+      } catch (e) {}
+    }
+    return val;
+  };
+
+  const token = getParam('token');
+  const legacyRef = getParam('ref');
   
   // App routing/validation states
   const [isValidatingToken, setIsValidatingToken] = useState(true);
@@ -138,7 +160,7 @@ export default function ClientRemoteRegister() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Validate Token on Mount
+  // Validate Token on Mount (Cloudflare Pages, APK, and Supabase resilient)
   useEffect(() => {
     const validateTokenAndFetchSettings = async () => {
       setIsValidatingToken(true);
@@ -154,30 +176,26 @@ export default function ClientRemoteRegister() {
       }
 
       try {
-        if (activeToken) {
-          const tokenRes = await fetch(`/api/tokens/validate?token=${activeToken}`);
-          if (tokenRes.ok) {
-            const tokenData = await tokenRes.json();
-            if (tokenData.valid) {
-              setMerchantId(tokenData.userId);
-              fetchMerchantSettings(tokenData.userId);
-            } else {
-              setIsTokenInvalid(true);
-              setTokenErrorMsg(tokenData.error || 'Este link é inválido, expirou ou já foi utilizado.');
-            }
-          } else {
-            setIsTokenInvalid(true);
-            setTokenErrorMsg('Falha de comunicação com o servidor de validação.');
+        const tokenData = await validateRegistrationToken(activeToken, refId);
+        if (tokenData.valid) {
+          const targetMerchant = tokenData.userId || refId || '';
+          if (targetMerchant) {
+            setMerchantId(targetMerchant);
+            fetchMerchantSettings(targetMerchant);
           }
-        } else if (refId) {
-          // Legacy direct ref fallback
-          setMerchantId(refId);
-          fetchMerchantSettings(refId);
+        } else {
+          setIsTokenInvalid(true);
+          setTokenErrorMsg(tokenData.error || 'Este link é inválido, expirou ou já foi utilizado.');
         }
       } catch (err) {
         console.error("Token validation error:", err);
-        setIsTokenInvalid(true);
-        setTokenErrorMsg('Erro de conexão ao validar o link de cadastro.');
+        if (refId) {
+          setMerchantId(refId);
+          fetchMerchantSettings(refId);
+        } else {
+          setIsTokenInvalid(true);
+          setTokenErrorMsg('Erro de conexão ao validar o link de cadastro.');
+        }
       } finally {
         setIsValidatingToken(false);
       }
@@ -257,17 +275,20 @@ export default function ClientRemoteRegister() {
           if (validPhone) params.append('phone', cleanPhoneVal);
           if (validEmail) params.append('email', cleanEmailVal);
 
-          const res = await fetch(`/api/clients/check-duplicate?${params.toString()}`);
-          if (res.ok) {
+          const res = await fetch(`/api/clients/check-duplicate?${params.toString()}`).catch(() => null);
+          if (res && res.ok && res.headers.get('content-type')?.includes('application/json')) {
             const data = await res.json();
             setDuplicateErrors({
-              cpf: data.duplicateCpf,
-              phone: data.duplicatePhone,
-              email: data.duplicateEmail
+              cpf: !!data.duplicateCpf,
+              phone: !!data.duplicatePhone,
+              email: !!data.duplicateEmail
             });
+          } else {
+            setDuplicateErrors({ cpf: false, phone: false, email: false });
           }
         } catch (err) {
-          console.error("Error checking duplicates:", err);
+          console.warn("Could not check duplicates on server, allowing registration:", err);
+          setDuplicateErrors({ cpf: false, phone: false, email: false });
         }
       } else {
         setDuplicateErrors({ cpf: false, phone: false, email: false });
@@ -651,28 +672,12 @@ export default function ClientRemoteRegister() {
     };
 
     try {
-      const response = await fetch('/api/public-clients', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: merchantId,
-          client: finalClientPayload,
-          token: token
-        }),
-      });
-
-      if (response.ok) {
-        setSuccess(true);
-        toast.success('Seu cadastro foi realizado e assinado com sucesso!');
-      } else {
-        const errData = await response.json();
-        toast.error(errData.error || 'Erro ao salvar cadastro do cliente.');
-      }
-    } catch (err) {
+      await submitClientRemoteRegistration(merchantId || legacyRef || '', finalClientPayload, token || undefined);
+      setSuccess(true);
+      toast.success('Seu cadastro foi realizado e assinado com sucesso!');
+    } catch (err: any) {
       console.error('Error during client save:', err);
-      toast.error('Erro de conexão ao enviar o cadastro.');
+      toast.error(err?.message || 'Erro ao enviar o cadastro.');
     } finally {
       setLoading(false);
     }

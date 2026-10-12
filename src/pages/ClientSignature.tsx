@@ -431,6 +431,7 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
       }
 
       const signedAt = new Date().toISOString();
+      let supabaseSuccess = false;
 
       try {
         // 1. Try writing directly to Supabase public_sales table first
@@ -505,9 +506,8 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
               witness2_signature: dbData.witness2_signature
             };
             setData(mappedData);
+            supabaseSuccess = true;
             toast.success('Termo assinado digitalmente com sucesso!', { id: toastId });
-            // Don't return early. We should also save to Express as a redundant fallback
-            // in case Supabase RLS policies prevent reading the row later.
           }
         } else {
           console.warn('Supabase signature update failed, falling back to local Express server:', dbErr);
@@ -516,31 +516,39 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
         console.warn('Supabase signature update exception, falling back to local Express server:', supaErr);
       }
 
-      // 2. Fallback to Express server API
-      const response = await fetch(`/api/public-sales/${id}/sign`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          signature_data,
-          client_name: fullName,
-          witness1_name: witness1Name,
-          witness1_cpf: witness1Cpf,
-          witness1_signature,
-          witness2_name: witness2Name,
-          witness2_cpf: witness2Cpf,
-          witness2_signature
-        })
-      });
+      // 2. Redundant sync to Express server API (works when Node is present, safely ignored on static Cloudflare Pages / APK)
+      try {
+        const response = await fetch(`/api/public-sales/${id}/sign`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            signature_data,
+            client_name: fullName,
+            witness1_name: witness1Name,
+            witness1_cpf: witness1Cpf,
+            witness1_signature,
+            witness2_name: witness2Name,
+            witness2_cpf: witness2Cpf,
+            witness2_signature
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error('Falha ao registrar assinatura no servidor.');
+        if (response.ok) {
+          const result = await response.json();
+          setData(result.data);
+          if (!supabaseSuccess) {
+            toast.success('Termo assinado digitalmente com sucesso!', { id: toastId });
+          }
+        } else if (!supabaseSuccess) {
+          throw new Error('Falha ao registrar assinatura no servidor.');
+        }
+      } catch (expErr: any) {
+        if (!supabaseSuccess) {
+          throw expErr;
+        }
       }
-
-      const result = await response.json();
-      setData(result.data);
-      toast.success('Termo assinado digitalmente com sucesso!', { id: toastId });
     } catch (err: any) {
       console.error(err);
       toast.error(err?.message || 'Erro ao processar assinatura eletrônica.', { id: toastId });

@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getBaseUrl, copyToClipboard } from '../utils/url';
+import { 
+  generateRegistrationLink, 
+  fetchPendingRemoteClients, 
+  dismissPendingRemoteClients 
+} from '../services/clientLinkService';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { Plus, Trash2, Phone, Edit2, MessageCircle, Link as LinkIcon, Copy, Check, Mail, FileText, MapPin, Eye, Shield, Laptop, Calendar, User, Info, Smartphone, FileSpreadsheet, X, Sparkles, ZoomIn, ZoomOut, RotateCw, Printer, Download, CreditCard, ExternalLink, Lock, RefreshCw } from 'lucide-react';
@@ -338,17 +343,13 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     toast.success('Assinatura limpa.');
   };
 
-  // Fetch pending remote registrations from the server
+  // Fetch pending remote registrations (Works on Cloudflare Pages, APK, and Node)
   const { data: pendingRemote = [], refetch: refetchPending } = useQuery({
     queryKey: ['pendingRemote', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
       try {
-        const res = await fetch(`/api/public-clients?userId=${user.id}`);
-        if (res.ok) {
-          return await res.json();
-        }
-        return [];
+        return await fetchPendingRemoteClients(user.id);
       } catch (e) {
         console.warn('Could not fetch pending remote clients:', e);
         return [];
@@ -364,18 +365,9 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       const { id: remoteId, created_at, ...cleanClient } = remoteClient;
       await db.clients.create(cleanClient);
       
-      // 2. Mark as synchronized on the server
+      // 2. Mark as synchronized and remove from pending (Cloudflare Pages, APK, Supabase)
       if (user?.id) {
-        await fetch('/api/public-clients/sync-done', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            userId: user.id,
-            clientIds: [remoteId],
-          }),
-        });
+        await dismissPendingRemoteClients(user.id, [remoteId]);
       }
     },
     onSuccess: () => {
@@ -392,16 +384,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
   const rejectRemoteMutation = useMutation({
     mutationFn: async (remoteClientId: string) => {
       if (user?.id) {
-        await fetch('/api/public-clients/sync-done', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            userId: user.id,
-            clientIds: [remoteClientId],
-          }),
-        });
+        await dismissPendingRemoteClients(user.id, [remoteClientId]);
       }
     },
     onSuccess: () => {
@@ -417,30 +400,18 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
   const handleCopyLink = async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch('/api/tokens/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId: user.id }),
-      });
-      if (res.ok) {
-        const tokenData = await res.json();
-        const link = `${getBaseUrl()}/#/cadastro-cliente?token=${tokenData.token}`;
-        const copiedSuccess = await copyToClipboard(link);
-        if (copiedSuccess) {
-          setCopied(true);
-          toast.success('Link único gerado e copiado! (Válido por 1 uso / 24h)');
-          setTimeout(() => setCopied(false), 3000);
-        } else {
-          toast.success(`Link gerado: ${link}`);
-        }
+      const result = await generateRegistrationLink(user.id);
+      const copiedSuccess = await copyToClipboard(result.link);
+      if (copiedSuccess) {
+        setCopied(true);
+        toast.success('Link único gerado e copiado! (Válido por 1 uso / 24h)');
+        setTimeout(() => setCopied(false), 3000);
       } else {
-        toast.error('Erro ao gerar token de link único.');
+        toast.success(`Link gerado: ${result.link}`);
       }
-    } catch (err) {
-      console.error(err);
-      toast.error('Erro de conexão ao gerar link único.');
+    } catch (err: any) {
+      console.error('Erro ao gerar link de cadastro:', err);
+      toast.error(err?.message || 'Erro ao gerar link de cadastro.');
     }
   };
   
