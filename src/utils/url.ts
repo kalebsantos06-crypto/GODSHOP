@@ -55,22 +55,22 @@ export const getBaseUrl = (): string => {
   return url;
 };
 
-// Helper for dynamic Capacitor Clipboard plugin
+// Helper for dynamic Capacitor Clipboard plugin bypassing Rollup static analysis
 const getCapacitorClipboard = async () => {
   try {
-    // @ts-ignore
-    const mod = await import('@capacitor/clipboard');
+    const importFn = new Function('specifier', 'return import(specifier);');
+    const mod = await importFn('@capacitor/clipboard');
     return mod?.Clipboard || null;
   } catch {
     return null;
   }
 };
 
-// Helper for dynamic Capacitor Share plugin
+// Helper for dynamic Capacitor Share plugin bypassing Rollup static analysis
 const getCapacitorShare = async () => {
   try {
-    // @ts-ignore
-    const mod = await import('@capacitor/share');
+    const importFn = new Function('specifier', 'return import(specifier);');
+    const mod = await importFn('@capacitor/share');
     return mod?.Share || null;
   } catch {
     return null;
