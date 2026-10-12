@@ -3,13 +3,17 @@ import {
   Upload, LogOut, Image as ImageIcon, Smartphone, Database, Download, FileJson, Search, 
   Trash2, Plus, Sun, Moon, Cloud, ShieldAlert, User, LogIn, MessageSquare, Send, Play, 
   CheckCircle2, AlertTriangle, RefreshCw, Settings as SettingsIcon, FileText, Layers, Bot, ChevronRight, Check,
-  Copy, ClipboardPaste, Sparkles
+  Copy, ClipboardPaste, Sparkles, Folder, Eye, EyeOff, Share2, ExternalLink
 } from 'lucide-react';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
 import { backupService } from '../services/backupService';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '../lib/utils';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Capacitor } from '@capacitor/core';
+import { copyToClipboard, readFromClipboard, shareContent, getCustomAppDomain, setCustomAppDomain } from '../utils/url';
+import { isSupabaseConfigured, setCustomSupabaseCredentials, supabase } from '../lib/supabase';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 import { parseLocalDate, getSaleNotifications } from '../lib/dateUtils';
 import { DEFAULT_STATUS_TEMPLATES, dispatchWebhookMessage, WebhookProvider } from '../lib/whatsappUtils';
@@ -37,6 +41,18 @@ export default function Settings() {
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteJsonText, setPasteJsonText] = useState('');
   const [isCopyingBackup, setIsCopyingBackup] = useState(false);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [showBackupCodeModal, setShowBackupCodeModal] = useState(false);
+  const [backupJsonCode, setBackupJsonCode] = useState('');
+  
+  // Supabase credentials and Cloudflare domain configuration state
+  const [supaUrlInput, setSupaUrlInput] = useState(() => localStorage.getItem('custom_supabase_url') || import.meta.env.VITE_SUPABASE_URL || '');
+  const [supaKeyInput, setSupaKeyInput] = useState(() => localStorage.getItem('custom_supabase_key') || import.meta.env.VITE_SUPABASE_ANON_KEY || '');
+  const [customDomainInput, setCustomDomainInput] = useState(() => getCustomAppDomain() || '');
+  const [showSupaKey, setShowSupaKey] = useState(false);
+  const [isTestingSupa, setIsTestingSupa] = useState(false);
+  const [isSavingSupa, setIsSavingSupa] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('app_theme') as 'light' | 'dark') || 'dark';
@@ -486,24 +502,68 @@ export default function Settings() {
   };
 
   const handleExport = async () => {
+    setIsExportingBackup(true);
     try {
       const data = await backupService.exportData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      try {
-        if (a && a.parentNode) {
-          a.parentNode.removeChild(a);
+      const jsonStr = JSON.stringify(data, null, 2);
+      const fileName = `backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`;
+
+      // Always populate the code state and open modal so the user can easily view, copy, or share
+      setBackupJsonCode(jsonStr);
+
+      // 1. Android APK (Capacitor native platform)
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await Filesystem.writeFile({
+            path: fileName,
+            data: jsonStr,
+            directory: Directory.Documents,
+            encoding: Encoding.UTF8
+          });
+
+          setShowBackupCodeModal(true);
+          await shareContent({
+            title: 'Backup GODSHOP',
+            text: 'Backup do sistema GODSHOP gerado com sucesso.',
+            dialogTitle: 'Compartilhar ou Salvar Arquivo de Backup'
+          });
+          toast.success(`Backup salvo na pasta Documentos (${fileName}) e pronto para copiar ou compartilhar!`);
+          return;
+        } catch (fsErr: any) {
+          console.warn('Capacitor Filesystem write error, falling back to Web APIs:', fsErr);
         }
-      } catch (e) {}
-      URL.revokeObjectURL(url);
-      toast.success('Cópia de segurança (.json) exportada com sucesso!');
+      }
+
+      // 2. Web Share API fallback (Mobile browsers, Chrome, Safari)
+      setShowBackupCodeModal(true);
+
+      // 3. FileSaver / Blob fallback
+      try {
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const { saveAs } = await import('file-saver');
+        saveAs(blob, fileName);
+        toast.success('Cópia de segurança (.json) exportada com sucesso!');
+      } catch (saveErr) {
+        // 4. Standard <a> click fallback
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          try {
+            if (a.parentNode) a.parentNode.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch (e) {}
+        }, 1000);
+        toast.success('Cópia de segurança (.json) baixada com sucesso!');
+      }
     } catch (err: any) {
-      toast.error('Erro ao exportar backup: ' + err.message);
+      toast.error('Erro ao exportar backup: ' + (err?.message || err));
+    } finally {
+      setIsExportingBackup(false);
     }
   };
 
@@ -512,21 +572,17 @@ export default function Settings() {
     try {
       const data = await backupService.exportData();
       const jsonStr = JSON.stringify(data);
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(jsonStr);
+      setBackupJsonCode(jsonStr);
+      setShowBackupCodeModal(true);
+
+      const copiedSuccess = await copyToClipboard(jsonStr);
+      if (copiedSuccess) {
+        toast.success('Código do backup copiado com sucesso! Você também pode visualizá-lo ou compartilhá-lo abaixo.');
       } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = jsonStr;
-        textarea.style.position = 'fixed';
-        textarea.style.left = '-9999px';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
+        toast.info('Código gerado! Você pode visualizá-lo, copiá-lo ou enviá-lo pelo WhatsApp.');
       }
-      toast.success('Código do backup copiado! Você pode colar no celular ou enviar pelo WhatsApp.');
     } catch (err: any) {
-      toast.error('Erro ao copiar backup: ' + err.message);
+      toast.error('Erro ao gerar código de backup: ' + (err?.message || err));
     } finally {
       setIsCopyingBackup(false);
     }
@@ -831,6 +887,16 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground text-center">
                   Recomendado: Imagem quadrada (PNG/JPG) de até 2MB.
                 </p>
+
+                <div className="w-full p-3 bg-muted/20 border border-border/50 rounded-xl text-left space-y-1">
+                  <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Folder className="h-3.5 w-3.5 text-primary" />
+                    Pasta Oficial de Logos ao Compilar:
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Você também pode colocar seus arquivos <code className="text-primary font-mono font-bold">logo.png</code> e <code className="text-primary font-mono font-bold">icon.png</code> diretamente na pasta <code className="bg-black/30 px-1 py-0.5 rounded text-foreground font-mono">public/logos/</code>. Ao compilar com <code className="text-primary font-mono">npm run build</code>, eles são preservados e embutidos automaticamente no APK e no Cloudflare.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -1039,194 +1105,490 @@ export default function Settings() {
                 </div>
                 <div className="flex flex-col gap-2">
                   <button
+                    disabled={isExportingBackup}
                     onClick={handleExport}
-                    className="w-full bg-primary text-primary-foreground hover:bg-primary/95 py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                    className="w-full bg-primary text-primary-foreground hover:bg-primary/95 py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
                   >
                     <Download className="h-4 w-4" />
-                    Baixar Arquivo (.JSON)
+                    {isExportingBackup ? 'Gerando Backup...' : 'Baixar Arquivo (.JSON)'}
                   </button>
-                  <button
-                    disabled={isCopyingBackup}
-                    onClick={handleCopyBackupToClipboard}
-                    className="w-full bg-white/10 hover:bg-white/15 text-foreground py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer border border-white/10"
-                  >
-                    <Copy className="h-3.5 w-3.5 text-emerald-400" />
-                    {isCopyingBackup ? 'Copiando...' : 'Copiar Texto do Backup (Para Celular)'}
-                  </button>
+                    <button
+                      disabled={isCopyingBackup}
+                      onClick={handleCopyBackupToClipboard}
+                      className="w-full bg-white/10 hover:bg-white/15 text-foreground py-2 rounded-lg text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer border border-white/10"
+                    >
+                      <Copy className="h-3.5 w-3.5 text-emerald-400" />
+                      {isCopyingBackup ? 'Gerando Código...' : 'Ver / Copiar Código do Backup (Celular/WhatsApp)'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Import card */}
+                <div className="border border-border rounded-xl p-4 bg-muted/10 hover:bg-muted/25 transition flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold flex items-center gap-1.5 text-foreground mb-1">
+                      <FileJson className="h-4 w-4 text-amber-500" />
+                      Carregar Backup Existente (Importar)
+                    </h3>
+                    <p className="text-xs text-muted-foreground mb-4">
+                      Restaure no celular ou computador através de arquivo .json ou colando o código copiado.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      disabled={isImporting}
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full bg-amber-500 text-black hover:bg-amber-600 py-2.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-sm text-center disabled:opacity-50"
+                    >
+                      {isImporting ? (
+                        <>
+                          <div className="h-3.5 w-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                          Restaurando dados...
+                        </>
+                      ) : (
+                        <>
+                          <FileJson className="h-4 w-4" />
+                          Selecionar Arquivo de Backup (.json)
+                        </>
+                      )}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".json,application/json,text/json,text/plain,*/*"
+                      onChange={handleImport}
+                      disabled={isImporting}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPasteModal(true)}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <ClipboardPaste className="h-3.5 w-3.5 text-blue-200" />
+                      Colar Código do Backup (Recomendado no Celular)
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* Import card */}
-              <div className="border border-border rounded-xl p-4 bg-muted/10 hover:bg-muted/25 transition flex flex-col justify-between">
-                <div>
-                  <h3 className="text-sm font-bold flex items-center gap-1.5 text-foreground mb-1">
-                    <FileJson className="h-4 w-4 text-amber-500" />
-                    Carregar Backup Existente (Importar)
-                  </h3>
-                  <p className="text-xs text-muted-foreground mb-4">
-                    Restaure no celular ou computador através de arquivo .json ou colando o código copiado.
-                  </p>
+              {/* Modal para Visualizar / Copiar Código de Backup Gerado */}
+              {showBackupCodeModal && (
+                <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-card border border-border w-full max-w-xl rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+                    <div className="flex items-center justify-between border-b border-border/50 pb-3">
+                      <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
+                        <Database className="h-5 w-5 text-emerald-400" />
+                        Código de Segurança do Backup
+                      </h3>
+                      <button
+                        onClick={() => setShowBackupCodeModal(false)}
+                        className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Este é o código completo dos seus dados. Você pode copiar para o celular, enviar pelo WhatsApp ou colar em outro dispositivo para restaurar tudo instantaneamente:
+                    </p>
+
+                    <div className="relative">
+                      <textarea
+                        readOnly
+                        rows={7}
+                        value={backupJsonCode}
+                        onClick={(e) => e.currentTarget.select()}
+                        className="w-full p-3 rounded-xl bg-background border border-input text-[11px] font-mono text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none select-all resize-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const success = await copyToClipboard(backupJsonCode);
+                          if (success) {
+                            toast.success('Código do backup copiado com sucesso!');
+                          } else {
+                            toast.error('Não foi possível copiar automaticamente. Selecione o texto acima.');
+                          }
+                        }}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        Copiar Código
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const shared = await shareContent({
+                            title: 'Backup GODSHOP',
+                            text: 'Código de Backup GODSHOP:\n' + backupJsonCode.substring(0, 1500) + (backupJsonCode.length > 1500 ? '... [completo no arquivo]' : ''),
+                            dialogTitle: 'Compartilhar Código de Backup'
+                          });
+                          if (!shared) {
+                            const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent('Código de Backup GODSHOP:\n' + backupJsonCode.substring(0, 1500) + (backupJsonCode.length > 1500 ? '... [completo no arquivo]' : ''))}`;
+                            window.open(waUrl, '_blank');
+                          }
+                        }}
+                        className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                        Compartilhar
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleExport}
+                        className="bg-muted hover:bg-muted/80 text-foreground font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Baixar Arquivo
+                      </button>
+                    </div>
+
+                    <div className="flex justify-end pt-2 border-t border-border/50">
+                      <button
+                        type="button"
+                        onClick={() => setShowBackupCodeModal(false)}
+                        className="px-4 py-2 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50 cursor-pointer"
+                      >
+                        Concluído
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-2">
+              )}
+
+              {/* Modal para Colar Backup */}
+              {showPasteModal && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-card border border-border w-full max-w-lg rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+                    <div className="flex items-center justify-between border-b border-border/50 pb-3">
+                      <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
+                        <ClipboardPaste className="h-5 w-5 text-blue-500" />
+                        Restaurar Backup Colando o Texto
+                      </h3>
+                      <button
+                        onClick={() => setShowPasteModal(false)}
+                        className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        Cole o código JSON completo no campo abaixo:
+                      </p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const text = await readFromClipboard();
+                            if (text && text.trim()) {
+                              setPasteJsonText(text.trim());
+                              toast.success('Código colado com sucesso da área de transferência!');
+                              return;
+                            }
+                          } catch (e) {
+                            console.warn('Clipboard read error:', e);
+                          }
+                          toast.info('Para colar manualmente, toque e segure na caixa de texto abaixo e selecione "Colar".');
+                        }}
+                        className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <ClipboardPaste className="h-3 w-3" />
+                        Colar do Celular
+                      </button>
+                    </div>
+
+                    <textarea
+                      rows={6}
+                      value={pasteJsonText}
+                      onChange={(e) => setPasteJsonText(e.target.value)}
+                      placeholder='Cole aqui o código do backup (ex: {"version": 1, "data": {...}})'
+                      style={{ WebkitUserSelect: 'text', userSelect: 'text' }}
+                      className="w-full p-3 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                    />
+
+                    <div className="flex items-center justify-between gap-2 pt-2">
+                      {pasteJsonText ? (
+                        <button
+                          type="button"
+                          onClick={() => setPasteJsonText('')}
+                          className="text-xs text-muted-foreground hover:text-foreground underline cursor-pointer"
+                        >
+                          Limpar texto
+                        </button>
+                      ) : <span />}
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowPasteModal(false)}
+                          className="px-4 py-2 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50 cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isImporting || !pasteJsonText.trim()}
+                          onClick={handlePasteBackupSubmit}
+                          className="px-5 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer"
+                        >
+                          {isImporting ? (
+                            <>
+                              <div className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                              Restaurando...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-4 w-4" />
+                              Restaurar Dados Agora
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-6 border-t border-white/5 pt-6">
+                <h3 className="text-sm font-bold mb-3">Auxiliares de Banco de Dados</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <button
-                    type="button"
-                    disabled={isImporting}
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full bg-amber-500 text-black hover:bg-amber-600 py-2.5 rounded-lg text-xs font-black transition flex items-center justify-center gap-2 cursor-pointer shadow-sm text-center disabled:opacity-50"
+                    onClick={async () => {
+                      try {
+                        const { fixDuplicates } = await import('../services/fixDuplicates');
+                        const toastId = toast.loading('Procurando e corrigindo duplicatas...');
+                        const res = await fixDuplicates();
+                        if (res.success) {
+                          toast.success(`Correção concluída! Clientes fundidos: ${res.clientsFixed}, Vendas apagadas: ${res.salesFixed}`, { id: toastId });
+                          queryClient.invalidateQueries();
+                        } else {
+                          toast.error('Erro ao corrigir duplicatas', { id: toastId });
+                        }
+                      } catch (e: any) {
+                        toast.error('Erro fatal: ' + e.message);
+                      }
+                    }}
+                    className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
                   >
-                    {isImporting ? (
-                      <>
-                        <div className="h-3.5 w-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
-                        Restaurando dados...
-                      </>
-                    ) : (
-                      <>
-                        <FileJson className="h-4 w-4" />
-                        Selecionar Arquivo de Backup (.json)
-                      </>
-                    )}
+                    <RefreshCw className="h-4 w-4" />
+                    Corrigir Duplicatas
                   </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".json,application/json,text/json,text/plain,*/*"
-                    onChange={handleImport}
-                    disabled={isImporting}
-                    className="hidden"
-                  />
                   <button
-                    type="button"
-                    onClick={() => setShowPasteModal(true)}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                    onClick={async () => {
+                      try {
+                        toast.promise(db.autoSeed(), {
+                          loading: 'Carregando dados de exemplo...',
+                          success: 'Dados de exemplo carregados!',
+                          error: 'Erro ao carregar dados de exemplo'
+                        });
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                    className="bg-white/5 text-white hover:bg-white/10 px-4 py-3 rounded-xl text-[10px] font-black transition flex items-center justify-center gap-2 cursor-pointer border border-white/10"
                   >
-                    <ClipboardPaste className="h-3.5 w-3.5 text-blue-200" />
-                    Colar Código do Backup (Recomendado no Celular)
+                    <Plus className="h-4 w-4" />
+                    CARREGAR CLIENTES EXEMPLO
+                  </button>
+
+                  <button
+                    onClick={handleRestoreData}
+                    disabled={isRestoring}
+                    className="bg-amber-500 text-black hover:bg-amber-600 px-4 py-3 rounded-xl text-[10px] font-black transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <Database className="h-4 w-4" />
+                    {isRestoring ? 'RESTAURANDO...' : 'RESTAURAR NOTAS ORIGINAIS'}
+                  </button>
+                  
+                  <button
+                    onClick={handleSearchStorage}
+                    disabled={isRestoring}
+                    className="bg-blue-600 text-white hover:bg-blue-700 px-4 py-3 rounded-xl text-[10px] font-black transition flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Search className="h-4 w-4" />
+                    {isRestoring ? 'BUSCANDO...' : 'IMPORTAR ARQUIVO DE TABELA'}
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Modal para Colar Backup */}
-            {showPasteModal && (
-              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-card border border-border w-full max-w-lg rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
-                  <div className="flex items-center justify-between border-b border-border/50 pb-3">
-                    <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
-                      <ClipboardPaste className="h-5 w-5 text-blue-500" />
-                      Restaurar Backup Colando o Texto
-                    </h3>
-                    <button
-                      onClick={() => setShowPasteModal(false)}
-                      className="text-muted-foreground hover:text-foreground text-sm font-bold p-1"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Se você copiou o backup do seu computador (ou enviou pelo WhatsApp/Notas), cole o código JSON completo no campo abaixo:
+            {/* Card: Configuração de Conexão com o Supabase (Nuvem do APK & Cloudflare) */}
+            <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-4">
+                <div>
+                  <h3 className="text-base font-bold flex items-center gap-2 text-foreground">
+                    <Cloud className="h-5 w-5 text-emerald-400" />
+                    Conexão do Banco de Dados Supabase (APK & Cloudflare)
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Permite sincronizar em tempo real o estoque, clientes, notas e cadastros externos recebidos via link.
                   </p>
-                  <textarea
-                    rows={6}
-                    value={pasteJsonText}
-                    onChange={(e) => setPasteJsonText(e.target.value)}
-                    placeholder='Cole aqui o código do backup (ex: {"version": 1, "sales": [...], "clients": [...]})'
-                    className="w-full p-3 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
-                  />
-                  <div className="flex items-center justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowPasteModal(false)}
-                      className="px-4 py-2 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isImporting || !pasteJsonText.trim()}
-                      onClick={handlePasteBackupSubmit}
-                      className="px-5 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 shadow-lg disabled:opacity-50"
-                    >
-                      {isImporting ? (
-                        <>
-                          <div className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                          Restaurando...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4 w-4" />
-                          Restaurar Dados Agora
-                        </>
-                      )}
-                    </button>
-                  </div>
+                </div>
+                <div className="flex items-center gap-2 self-start sm:self-center">
+                  {isSupabaseConfigured() ? (
+                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                      Conectado ao Supabase
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-amber-400"></span>
+                      Modo Local / Desconectado
+                    </span>
+                  )}
                 </div>
               </div>
-            )}
 
-            <div className="mt-6 border-t border-white/5 pt-6">
-              <h3 className="text-sm font-bold mb-3">Auxiliares de Banco de Dados</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <button
-                  onClick={async () => {
-                    try {
-                      const { fixDuplicates } = await import('../services/fixDuplicates');
-                      const toastId = toast.loading('Procurando e corrigindo duplicatas...');
-                      const res = await fixDuplicates();
-                      if (res.success) {
-                        toast.success(`Correção concluída! Clientes fundidos: ${res.clientsFixed}, Vendas apagadas: ${res.salesFixed}`, { id: toastId });
-                        queryClient.invalidateQueries();
-                      } else {
-                        toast.error('Erro ao corrigir duplicatas', { id: toastId });
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1.5">
+                    URL do Projeto Supabase
+                  </label>
+                  <input
+                    type="text"
+                    value={supaUrlInput}
+                    onChange={(e) => setSupaUrlInput(e.target.value)}
+                    placeholder="https://sua-empresa.supabase.co"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Encontrado no painel do Supabase em Project Settings &gt; API &gt; Project URL.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1.5">
+                    Chave Pública Anon (anon key)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showSupaKey ? "text" : "password"}
+                      value={supaKeyInput}
+                      onChange={(e) => setSupaKeyInput(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      className="w-full p-2.5 pr-10 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSupaKey(!showSupaKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      {showSupaKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Encontrado no painel do Supabase em Project Settings &gt; API &gt; Project API keys &gt; anon/public. Nunca use a service_role key.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1.5 flex items-center justify-between">
+                    <span>Domínio Público do Cloudflare Pages (Gerador de Links no APK)</span>
+                    <span className="text-[10px] text-emerald-400 font-mono">Ex: https://godshop.pages.dev</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customDomainInput}
+                    onChange={(e) => setCustomDomainInput(e.target.value)}
+                    placeholder="https://godshop.pages.dev"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Insira o endereço onde seu sistema está publicado no Cloudflare Pages. Quando você gerar links de cadastro no APK Android, ele usará esse link web para enviar aos clientes pelo WhatsApp.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={isTestingSupa}
+                    onClick={async () => {
+                      setIsTestingSupa(true);
+                      try {
+                        const { error } = await supabase.from('clients').select('id', { count: 'exact', head: true });
+                        if (!error) {
+                          toast.success('Conexão com o Supabase testada com sucesso! O banco está respondendo.');
+                        } else {
+                          toast.warning('Aviso de conexão com o Supabase: ' + error.message);
+                        }
+                      } catch (e: any) {
+                        toast.error('Erro ao conectar ao Supabase: ' + (e?.message || e));
+                      } finally {
+                        setIsTestingSupa(false);
                       }
-                    } catch (e: any) {
-                      toast.error('Erro fatal: ' + e.message);
-                    }
-                  }}
-                  className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  Corrigir Duplicatas
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      toast.promise(db.autoSeed(), {
-                        loading: 'Carregando dados de exemplo...',
-                        success: 'Dados de exemplo carregados!',
-                        error: 'Erro ao carregar dados de exemplo'
-                      });
-                    } catch (e) {
-                      console.error(e);
-                    }
-                  }}
-                  className="bg-white/5 text-white hover:bg-white/10 px-4 py-3 rounded-xl text-[10px] font-black transition flex items-center justify-center gap-2 cursor-pointer border border-white/10"
-                >
-                  <Plus className="h-4 w-4" />
-                  CARREGAR CLIENTES EXEMPLO
-                </button>
+                    }}
+                    className="bg-muted hover:bg-muted/80 text-foreground px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5", isTestingSupa && "animate-spin")} />
+                    Testar Conexão Agora
+                  </button>
+
+                  {(localStorage.getItem('custom_supabase_url') || localStorage.getItem('custom_supabase_key') || localStorage.getItem('custom_app_domain')) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        localStorage.removeItem('custom_supabase_url');
+                        localStorage.removeItem('custom_supabase_key');
+                        setCustomAppDomain('');
+                        setCustomDomainInput('');
+                        setSupaUrlInput(import.meta.env.VITE_SUPABASE_URL || '');
+                        setSupaKeyInput(import.meta.env.VITE_SUPABASE_ANON_KEY || '');
+                        toast.info('Credenciais e domínio restaurados para o padrão. Recarregando aplicação...');
+                        setTimeout(() => window.location.reload(), 600);
+                      }}
+                      className="text-xs text-muted-foreground hover:text-destructive px-3 py-2 cursor-pointer"
+                    >
+                      Restaurar Padrão
+                    </button>
+                  )}
+                </div>
 
                 <button
-                  onClick={handleRestoreData}
-                  disabled={isRestoring}
-                  className="bg-amber-500 text-black hover:bg-amber-600 px-4 py-3 rounded-xl text-[10px] font-black transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  type="button"
+                  disabled={isSavingSupa}
+                  onClick={async () => {
+                    setIsSavingSupa(true);
+                    try {
+                      if (!supaUrlInput.trim() || !supaKeyInput.trim()) {
+                        toast.error('Por favor, informe a URL e a Anon Key do Supabase.');
+                        return;
+                      }
+                      setCustomSupabaseCredentials(supaUrlInput, supaKeyInput);
+                      if (customDomainInput.trim()) {
+                        setCustomAppDomain(customDomainInput.trim());
+                      } else {
+                        setCustomAppDomain('');
+                      }
+                      toast.success('Configurações salvas com sucesso! Recarregando sistema...');
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 700);
+                    } catch (e: any) {
+                      toast.error('Erro ao salvar credenciais: ' + e.message);
+                    } finally {
+                      setIsSavingSupa(false);
+                    }
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition cursor-pointer"
                 >
-                  <Database className="h-4 w-4" />
-                  {isRestoring ? 'RESTAURANDO...' : 'RESTAURAR NOTAS ORIGINAIS'}
-                </button>
-                
-                <button
-                  onClick={handleSearchStorage}
-                  disabled={isRestoring}
-                  className="bg-blue-600 text-white hover:bg-blue-700 px-4 py-3 rounded-xl text-[10px] font-black transition flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Search className="h-4 w-4" />
-                  {isRestoring ? 'BUSCANDO...' : 'IMPORTAR ARQUIVO DE TABELA'}
+                  <Check className="h-4 w-4" />
+                  Salvar e Conectar
                 </button>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* RENDER TAB: AUTOMAÇÃO WHATSAPP */}
       {activeTab === 'automacao' && (

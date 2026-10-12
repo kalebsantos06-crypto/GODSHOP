@@ -380,7 +380,7 @@ export default function ClientRemoteRegister() {
     }
   };
 
-  // File Upload Handlers
+  // File Upload Handlers with Automatic Mobile Photo Compression
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -391,19 +391,63 @@ export default function ClientRemoteRegister() {
       return;
     }
 
-    // Limit to 5MB
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Arquivo muito grande. Limite máximo é 5MB.');
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error('Arquivo muito grande. Limite máximo é 20MB.');
       return;
     }
 
     setDocumentFile(file);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setDocumentUrl(reader.result as string);
-      toast.success('Documento anexado com sucesso!');
-    };
-    reader.readAsDataURL(file);
+
+    // If it's an image, compress/resize to keep payload lightweight and fast
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1280;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            setDocumentUrl(compressedDataUrl);
+            toast.success('Documento anexado e otimizado com sucesso!');
+          } else {
+            setDocumentUrl(event.target?.result as string);
+            toast.success('Documento anexado com sucesso!');
+          }
+        };
+        img.onerror = () => {
+          setDocumentUrl(event.target?.result as string);
+          toast.success('Documento anexado com sucesso!');
+        };
+        img.src = event.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    } else {
+      // PDF or other document
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setDocumentUrl(reader.result as string);
+        toast.success('Documento anexado com sucesso!');
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const removeDocument = () => {

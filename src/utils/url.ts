@@ -1,22 +1,45 @@
-/**
- * Utility functions for URL formatting and Clipboard operations,
- * optimized for iOS Safari, WhatsApp WebViews, Cloudflare Pages, and Capacitor Android APK.
- */
-export const getBaseUrl = (): string => {
-  if (typeof window === 'undefined') return 'https://godshop.pages.dev';
+import { Clipboard } from '@capacitor/clipboard';
+import { Share } from '@capacitor/share';
 
-  // Check if a custom public domain was set in localStorage or environment
+/**
+ * Utility functions for URL formatting, Clipboard operations, and Sharing,
+ * optimized for Android Capacitor APK, Cloudflare Pages, iOS Safari, and WebViews.
+ */
+
+export const getCustomAppDomain = (): string => {
   try {
     const custom = localStorage.getItem('custom_app_domain');
     if (custom && custom.trim()) {
       return custom.trim().replace(/\/$/, '');
     }
   } catch (e) {}
+  return '';
+};
+
+export const setCustomAppDomain = (domain: string): void => {
+  try {
+    const clean = domain.trim().replace(/\/$/, '');
+    if (clean) {
+      localStorage.setItem('custom_app_domain', clean);
+    } else {
+      localStorage.removeItem('custom_app_domain');
+    }
+  } catch (e) {}
+};
+
+export const getBaseUrl = (): string => {
+  if (typeof window === 'undefined') return 'https://godshop.pages.dev';
+
+  // 1. Check if a custom public domain was configured in Settings
+  const custom = getCustomAppDomain();
+  if (custom) {
+    return custom;
+  }
 
   let url = window.location.href.split('#')[0].split('?')[0].replace(/\/$/, '');
 
-  // If running inside Capacitor Android APK, localhost, file://, or non-http protocol,
-  // return the public production domain so links shared via WhatsApp can be opened by anyone!
+  // 2. If running inside Capacitor Android APK (localhost, capacitor://, file://, etc.),
+  // return the public production domain so links sent to customers open correctly anywhere!
   if (
     url.includes('localhost') ||
     url.includes('127.0.0.1') ||
@@ -27,7 +50,7 @@ export const getBaseUrl = (): string => {
     return 'https://godshop.pages.dev';
   }
 
-  // Convert dev container URLs to public shareable URLs (ais-dev -> ais-pre)
+  // 3. Convert dev container URLs to public shareable URLs (ais-dev -> ais-pre)
   if (url.includes('ais-dev-')) {
     url = url.replace('ais-dev-', 'ais-pre-');
   }
@@ -36,14 +59,22 @@ export const getBaseUrl = (): string => {
 };
 
 /**
- * Copies text to clipboard with robust fallback support for iOS Safari,
- * WhatsApp in-app browsers, Android WebViews, and async call stacks.
+ * Copies text to clipboard with Capacitor native plugin support,
+ * modern Clipboard API, and DOM fallback for Android APK and browsers.
  */
 export const copyToClipboard = async (text: string): Promise<boolean> => {
   if (!text) return false;
 
-  // Modern Clipboard API
-  if (navigator.clipboard && window.isSecureContext) {
+  // 1. Capacitor Native Clipboard (Android APK & iOS)
+  try {
+    await Clipboard.write({ string: text });
+    return true;
+  } catch (capErr) {
+    // Fall through to web clipboard
+  }
+
+  // 2. Modern Clipboard API (Secure browser contexts)
+  if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
     try {
       await navigator.clipboard.writeText(text);
       return true;
@@ -52,12 +83,10 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
     }
   }
 
-  // Fallback for iOS Safari, WhatsApp Webview, and unsecure/async contexts
+  // 3. DOM Textarea Fallback (WebViews and async contexts)
   try {
     const textArea = document.createElement('textarea');
     textArea.value = text;
-
-    // Position offscreen to prevent iOS scroll jumps
     textArea.style.position = 'fixed';
     textArea.style.top = '0';
     textArea.style.left = '0';
@@ -68,11 +97,12 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
     textArea.style.outline = 'none';
     textArea.style.boxShadow = 'none';
     textArea.style.background = 'transparent';
-    textArea.setAttribute('readonly', ''); // Prevent keyboard popup on iOS
 
     document.body.appendChild(textArea);
+    textArea.focus();
 
     if (navigator.userAgent.match(/iphone|ipad|ipod/i)) {
+      textArea.setAttribute('readonly', '');
       const range = document.createRange();
       range.selectNodeContents(textArea);
       const selection = window.getSelection();
@@ -83,6 +113,7 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
       textArea.setSelectionRange(0, 999999);
     } else {
       textArea.select();
+      textArea.setSelectionRange(0, text.length);
     }
 
     const successful = document.execCommand('copy');
@@ -91,9 +122,86 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
         textArea.parentNode.removeChild(textArea);
       }
     } catch (e) {}
-    return successful;
+    return Boolean(successful);
   } catch (err) {
     console.error('Fallback copy failed:', err);
     return false;
   }
+};
+
+/**
+ * Reads text from clipboard using Capacitor native plugin or Web Clipboard API.
+ */
+export const readFromClipboard = async (): Promise<string> => {
+  // 1. Capacitor Native Clipboard
+  try {
+    const result = await Clipboard.read();
+    if (result && typeof result.value === 'string' && result.value) {
+      return result.value;
+    }
+  } catch (capErr) {
+    // Fall through
+  }
+
+  // 2. Browser Clipboard API
+  if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) return text;
+    } catch (err) {
+      console.warn('navigator.clipboard.readText error:', err);
+    }
+  }
+
+  return '';
+};
+
+/**
+ * Shares text/URL using Capacitor Native Share Sheet or Web Share API.
+ */
+export const shareContent = async (options: {
+  title?: string;
+  text?: string;
+  url?: string;
+  dialogTitle?: string;
+}): Promise<boolean> => {
+  // 1. Capacitor Native Share
+  try {
+    await Share.share({
+      title: options.title || 'GODSHOP',
+      text: options.text || '',
+      url: options.url,
+      dialogTitle: options.dialogTitle || 'Compartilhar'
+    });
+    return true;
+  } catch (capErr: any) {
+    // If user cancelled, return true as it was handled
+    if (capErr?.message?.includes('canceled') || capErr?.message?.includes('cancelled')) {
+      return true;
+    }
+  }
+
+  // 2. Web Share API fallback
+  if (typeof navigator !== 'undefined' && navigator.share) {
+    try {
+      await navigator.share({
+        title: options.title,
+        text: options.text,
+        url: options.url
+      });
+      return true;
+    } catch (sErr: any) {
+      if (sErr?.name === 'AbortError') return true;
+    }
+  }
+
+  // 3. Fallback: WhatsApp web link if text/url provided
+  const combined = [options.text, options.url].filter(Boolean).join('\n\n');
+  if (combined && typeof window !== 'undefined') {
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(combined)}`;
+    window.open(waUrl, '_blank');
+    return true;
+  }
+
+  return false;
 };

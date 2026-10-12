@@ -281,7 +281,7 @@ CREATE POLICY "Permitir atualização pública" ON public_sales
 -- ==========================================
 CREATE TABLE IF NOT EXISTS public_clients (
   id TEXT PRIMARY KEY,
-  user_id UUID,
+  user_id TEXT, -- Suporta tanto UUID quanto IDs de vendedores/offline
   name TEXT NOT NULL,
   phone TEXT NOT NULL,
   cpf TEXT,
@@ -307,6 +307,17 @@ CREATE TABLE IF NOT EXISTS public_clients (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Migração segura para tabelas já criadas
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'public_clients' AND column_name = 'user_id' AND data_type = 'uuid'
+  ) THEN
+    ALTER TABLE public_clients ALTER COLUMN user_id TYPE TEXT;
+  END IF;
+END $$;
+
 ALTER TABLE public_clients ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Permitir leitura de clientes públicos" ON public_clients;
@@ -327,12 +338,23 @@ CREATE POLICY "Permitir deleção de clientes públicos" ON public_clients
 -- ==========================================
 CREATE TABLE IF NOT EXISTS public_tokens (
   token TEXT PRIMARY KEY,
-  user_id UUID NOT NULL,
+  user_id TEXT, -- Suporta tanto UUID quanto IDs de vendedores/offline
   used BOOLEAN DEFAULT FALSE,
   expires_at TEXT,
   used_at TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Migração segura para tabelas já criadas
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'public_tokens' AND column_name = 'user_id' AND data_type = 'uuid'
+  ) THEN
+    ALTER TABLE public_tokens ALTER COLUMN user_id TYPE TEXT;
+  END IF;
+END $$;
 
 ALTER TABLE public_tokens ENABLE ROW LEVEL SECURITY;
 

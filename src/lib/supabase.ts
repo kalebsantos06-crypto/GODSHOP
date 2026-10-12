@@ -1,14 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-const dummyUrl = 'https://placeholder-project.supabase.co';
-const dummyKey = 'placeholder-anon-key';
+export const DEFAULT_SUPABASE_URL = 'https://wkkjaakydjnfzayyedxy.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indra2phYWt5ZGpuZnpheXllZHh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NDUwMTQsImV4cCI6MjA5ODIyMTAxNH0.DcTQJaLlJnejtXCHOwc_Maod9ytCGtcLri6kGnXV_mM';
 
 const getRawUrl = (): string => {
   try {
     const custom = typeof localStorage !== 'undefined' ? localStorage.getItem('custom_supabase_url') : null;
     if (custom && custom.trim()) return custom.trim();
   } catch (e) {}
-  return import.meta.env.VITE_SUPABASE_URL || '';
+  return import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
 };
 
 const getRawKey = (): string => {
@@ -16,7 +16,7 @@ const getRawKey = (): string => {
     const custom = typeof localStorage !== 'undefined' ? localStorage.getItem('custom_supabase_key') : null;
     if (custom && custom.trim()) return custom.trim();
   } catch (e) {}
-  return import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+  return import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 };
 
 let supabaseUrl = getRawUrl();

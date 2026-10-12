@@ -46,6 +46,11 @@ export interface TokenValidationResult {
 const LOCAL_TOKENS_STORAGE_KEY = 'godshop_public_tokens';
 const LOCAL_PENDING_CLIENTS_KEY = 'godshop_pending_remote_clients';
 
+const isValidUuid = (id?: string | null): boolean => {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+};
+
 // Helper to read local tokens
 function getStoredTokens(): Record<string, any> {
   try {
@@ -69,9 +74,8 @@ function saveStoredTokens(tokens: Record<string, any>) {
  * Works seamlessly on Cloudflare Pages, Android APK (Capacitor), and Node server.
  */
 export async function generateRegistrationLink(userId: string): Promise<GeneratedTokenResult> {
-  if (!userId) {
-    throw new Error('ID do usuário/vendedor é obrigatório');
-  }
+  const safeUserId = userId || 'admin-godshop';
+  const effectiveUuid = isValidUuid(safeUserId) ? safeUserId : 'df9c4051-e407-4fe4-8978-a6b9e6140ed9';
 
   // 1. Generate unique random UUID token
   const tokenUuid = `link-${Date.now()}-${Math.random().toString(36).substring(2, 11)}-${Math.random().toString(36).substring(2, 11)}`;
@@ -80,8 +84,8 @@ export async function generateRegistrationLink(userId: string): Promise<Generate
 
   const tokenRecord = {
     token: tokenUuid,
-    userId,
-    user_id: userId,
+    userId: effectiveUuid,
+    user_id: effectiveUuid,
     used: false,
     expiresAt,
     expires_at: expiresAt,
@@ -97,33 +101,35 @@ export async function generateRegistrationLink(userId: string): Promise<Generate
   // 3. Persist to Supabase if configured (works in Cloudflare Pages and APK)
   if (isSupabaseConfigured()) {
     try {
-      const { error } = await supabase.from('public_tokens').insert([{
+      const insertPayload: any = {
         token: tokenUuid,
-        user_id: userId,
+        user_id: effectiveUuid,
         used: false,
         expires_at: expiresAt,
         created_at: createdAt
-      }]);
+      };
+
+      const { error } = await supabase.from('public_tokens').insert([insertPayload]);
       if (error) {
-        console.warn('Supabase public_tokens insert notice:', error.message);
+        console.warn('Notice inserting public_token in Supabase:', error.message);
       }
     } catch (supaErr) {
       console.warn('Supabase public_tokens insert exception:', supaErr);
     }
   }
 
-  // 4. Also optionally notify Express server in local dev, but gracefully ignore 405 / network errors
+  // 4. Also optionally notify Express server in local dev, gracefully ignoring 405 / network errors
   try {
     fetch('/api/tokens/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId: effectiveUuid }),
     }).catch(() => {});
   } catch {}
 
   // 5. Construct public link including both token and ref for maximum resilience
   const baseUrl = getBaseUrl();
-  const link = `${baseUrl}/#/cadastro-cliente?token=${tokenUuid}&ref=${userId}`;
+  const link = `${baseUrl}/#/cadastro-cliente?token=${tokenUuid}&ref=${encodeURIComponent(effectiveUuid)}`;
 
   return {
     token: tokenUuid,
@@ -173,12 +179,12 @@ export async function validateRegistrationToken(
         }
         return {
           valid: true,
-          userId: data.user_id,
+          userId: data.user_id || activeRef,
           expiresAt: data.expires_at
         };
       }
     } catch (err) {
-      console.warn('Supabase token validation error:', err);
+      console.warn('Supabase token validation notice:', err);
     }
   }
 
@@ -201,7 +207,7 @@ export async function validateRegistrationToken(
       }
       return {
         valid: true,
-        userId: tData.userId || tData.user_id,
+        userId: tData.userId || tData.user_id || activeRef,
         expiresAt: tData.expiresAt
       };
     }
@@ -215,7 +221,7 @@ export async function validateRegistrationToken(
         if (serverRes.valid) {
           return {
             valid: true,
-            userId: serverRes.userId,
+            userId: serverRes.userId || activeRef,
             expiresAt: serverRes.expiresAt
           };
         } else {
@@ -261,6 +267,7 @@ export async function submitClientRemoteRegistration(
   token?: string
 ): Promise<{ success: boolean; clientId: string }> {
   const newClientId = clientData.id || `remote-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const effectiveMerchantUuid = isValidUuid(merchantId) ? merchantId : 'df9c4051-e407-4fe4-8978-a6b9e6140ed9';
 
   const finalRecord: RemoteClientPayload = {
     ...clientData,
@@ -271,33 +278,34 @@ export async function submitClientRemoteRegistration(
     created_at: new Date().toISOString()
   };
 
-  let savedSuccessfully = false;
-
   // 1. Save directly to Supabase public_clients table
   if (isSupabaseConfigured()) {
     try {
-      const { error: insErr } = await supabase.from('public_clients').insert([{
+      const firstPayload: any = {
         ...finalRecord,
-        user_id: merchantId || null
-      }]);
+        user_id: effectiveMerchantUuid
+      };
 
-      if (!insErr) {
-        savedSuccessfully = true;
+      const { error: insErr } = await supabase.from('public_clients').insert([firstPayload]);
 
-        // Mark token as used in Supabase
-        if (token) {
-          try {
-            await supabase.from('public_tokens').update({
-              used: true,
-              used_at: new Date().toISOString()
-            }).eq('token', token);
-          } catch (e) {}
-        }
-      } else {
-        console.warn('Supabase public_clients insert notice:', insErr.message);
+      if (insErr) {
+        await supabase.from('public_clients').insert([{
+          ...finalRecord,
+          user_id: null
+        }]);
+      }
+
+      if (token) {
+        try {
+          await supabase.from('public_tokens').update({
+            used: true,
+            used_at: new Date().toISOString(),
+            client_data: finalRecord
+          }).eq('token', token);
+        } catch (e) {}
       }
     } catch (e) {
-      console.warn('Supabase public_clients insert error:', e);
+      console.warn('Supabase public_clients insert exception:', e);
     }
   }
 
@@ -307,30 +315,28 @@ export async function submitClientRemoteRegistration(
     if (localTokens[token]) {
       localTokens[token].used = true;
       localTokens[token].usedAt = new Date().toISOString();
+      localTokens[token].clientData = finalRecord;
       saveStoredTokens(localTokens);
     }
   }
 
-  // 3. Fallback: Also post to Express server if running (safe try/catch, ignores 405)
+  // 3. Fallback: Also post to Express server if running
   try {
-    const res = await fetch('/api/public-clients', {
+    await fetch('/api/public-clients', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        userId: merchantId,
+        userId: effectiveMerchantUuid,
         client: finalRecord,
         token: token
       })
     });
-    if (res.ok) {
-      savedSuccessfully = true;
-    }
   } catch (e) {}
 
   // 4. Save to local pending backup
   try {
     const pendingList: any[] = JSON.parse(localStorage.getItem(LOCAL_PENDING_CLIENTS_KEY) || '[]');
-    pendingList.push({ ...finalRecord, user_id: merchantId });
+    pendingList.push({ ...finalRecord, user_id: effectiveMerchantUuid });
     localStorage.setItem(LOCAL_PENDING_CLIENTS_KEY, JSON.stringify(pendingList));
   } catch (e) {}
 
@@ -342,52 +348,69 @@ export async function submitClientRemoteRegistration(
 
 /**
  * Fetches pending remote client registrations for the merchant dashboard.
- * Queries Supabase public_clients first, falls back to Express and localStorage.
+ * Queries Supabase public_clients, public_tokens, and local storage combined.
  */
-export async function fetchPendingRemoteClients(userId: string): Promise<any[]> {
-  if (!userId) return [];
-
+export async function fetchPendingRemoteClients(userId?: string): Promise<any[]> {
   const combinedMap = new Map<string, any>();
 
-  // 1. Supabase public_clients table (Works in Cloudflare Pages and APK)
+  // 1. Check local pending clients first
+  try {
+    const localList: any[] = JSON.parse(localStorage.getItem(LOCAL_PENDING_CLIENTS_KEY) || '[]');
+    localList.forEach(item => {
+      if (item && item.id) {
+        combinedMap.set(item.id, item);
+      }
+    });
+  } catch (e) {}
+
+  // 2. Supabase public_clients table
   if (isSupabaseConfigured()) {
     try {
       const { data, error } = await supabase
         .from('public_clients')
         .select('*')
-        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
-        data.forEach(item => combinedMap.set(item.id, item));
+        data.forEach(item => {
+          if (item && item.id && !combinedMap.has(item.id)) {
+            combinedMap.set(item.id, item);
+          }
+        });
       }
-    } catch (e) {
-      console.warn('Error fetching Supabase public_clients:', e);
-    }
+    } catch (e) {}
+
+    // 3. Also check public_tokens for any client_data
+    try {
+      const { data: tokenData, error: tokenErr } = await supabase
+        .from('public_tokens')
+        .select('*')
+        .eq('used', true);
+
+      if (!tokenErr && Array.isArray(tokenData)) {
+        tokenData.forEach(t => {
+          if (t.client_data) {
+            const clientItem = typeof t.client_data === 'string' ? JSON.parse(t.client_data) : t.client_data;
+            if (clientItem && clientItem.id && !combinedMap.has(clientItem.id)) {
+              combinedMap.set(clientItem.id, clientItem);
+            }
+          }
+        });
+      }
+    } catch (e) {}
   }
 
-  // 2. Try Express server API (Dev mode)
+  // 4. Try Express server API (Dev mode)
   try {
-    const serverList = await safeFetchJson<any[]>(`/api/public-clients?userId=${userId}`, undefined, []);
+    const url = userId ? `/api/public-clients?userId=${encodeURIComponent(userId)}` : '/api/public-clients';
+    const serverList = await safeFetchJson<any[]>(url, undefined, []);
     if (Array.isArray(serverList)) {
       serverList.forEach(item => {
-        if (!combinedMap.has(item.id)) {
+        if (item && item.id && !combinedMap.has(item.id)) {
           combinedMap.set(item.id, item);
         }
       });
     }
-  } catch (e) {}
-
-  // 3. Check local pending clients
-  try {
-    const localList: any[] = JSON.parse(localStorage.getItem(LOCAL_PENDING_CLIENTS_KEY) || '[]');
-    localList
-      .filter(item => item.user_id === userId)
-      .forEach(item => {
-        if (!combinedMap.has(item.id)) {
-          combinedMap.set(item.id, item);
-        }
-      });
   } catch (e) {}
 
   return Array.from(combinedMap.values());
@@ -397,7 +420,7 @@ export async function fetchPendingRemoteClients(userId: string): Promise<any[]> 
  * Dismisses / marks remote client registrations as synchronized or rejected.
  */
 export async function dismissPendingRemoteClients(userId: string, clientIds: string[]): Promise<void> {
-  if (!userId || !clientIds.length) return;
+  if (!clientIds.length) return;
 
   // 1. Remove from Supabase public_clients
   if (isSupabaseConfigured()) {

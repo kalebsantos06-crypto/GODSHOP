@@ -1,3 +1,5 @@
+import { getBaseUrl } from './utils/url';
+
 /**
  * Centralized Configuration for Godshop
  * Handles production settings, Supabase keys, and public app URL.
@@ -10,22 +12,5 @@ export const config = {
 };
 
 export const getAppBaseUrl = (): string => {
-  if (typeof window === 'undefined') return 'https://godshop.pages.dev';
-  let url = window.location.href.split('#')[0].split('?')[0].replace(/\/$/, '');
-  
-  if (
-    url.includes('localhost') ||
-    url.includes('127.0.0.1') ||
-    url.startsWith('capacitor:') ||
-    url.startsWith('file:') ||
-    !url.startsWith('http')
-  ) {
-    return 'https://godshop.pages.dev';
-  }
-
-  // Remove AI Studio preview container prefixes if present in production or share links
-  if (url.includes('ais-dev-')) {
-    url = url.replace('ais-dev-', 'ais-pre-');
-  }
-  return url;
+  return getBaseUrl();
 };

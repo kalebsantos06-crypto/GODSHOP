@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getBaseUrl, copyToClipboard } from '../utils/url';
+import { getBaseUrl, copyToClipboard, shareContent, getCustomAppDomain } from '../utils/url';
 import { 
   generateRegistrationLink, 
   fetchPendingRemoteClients, 
   dismissPendingRemoteClients 
 } from '../services/clientLinkService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
-import { Plus, Trash2, Phone, Edit2, MessageCircle, Link as LinkIcon, Copy, Check, Mail, FileText, MapPin, Eye, Shield, Laptop, Calendar, User, Info, Smartphone, FileSpreadsheet, X, Sparkles, ZoomIn, ZoomOut, RotateCw, Printer, Download, CreditCard, ExternalLink, Lock, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Phone, Edit2, MessageCircle, Link as LinkIcon, Copy, Check, Mail, FileText, MapPin, Eye, Shield, Laptop, Calendar, User, Info, Smartphone, FileSpreadsheet, X, Sparkles, ZoomIn, ZoomOut, RotateCw, Printer, Download, CreditCard, ExternalLink, Lock, RefreshCw, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
 import WhatsAppStatusModal from '../components/WhatsAppStatusModal';
 import { WhatsAppStatusType } from '../lib/whatsappUtils';
 import { useAuth } from '../types/AuthContext';
+import { cn } from '../lib/utils';
 
 export default function Clients() {
   const { user } = useAuth();
@@ -21,6 +23,9 @@ export default function Clients() {
   const [editingClient, setEditingClient] = useState<any>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [generatedLinkUrl, setGeneratedLinkUrl] = useState('');
+  const [isGeneratingLink, setIsGeneratingLink] = useState(false);
 
   // WhatsApp Status Modal States
   const [statusModalOpen, setStatusModalOpen] = useState(false);
@@ -344,20 +349,38 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
   };
 
   // Fetch pending remote registrations (Works on Cloudflare Pages, APK, and Node)
-  const { data: pendingRemote = [], refetch: refetchPending } = useQuery({
+  const { data: pendingRemote = [], refetch: refetchPending, isFetching: isFetchingPending } = useQuery({
     queryKey: ['pendingRemote', user?.id],
     queryFn: async () => {
-      if (!user?.id) return [];
       try {
-        return await fetchPendingRemoteClients(user.id);
+        return await fetchPendingRemoteClients(user?.id);
       } catch (e) {
         console.warn('Could not fetch pending remote clients:', e);
         return [];
       }
     },
-    enabled: !!user?.id,
-    refetchInterval: 10000, // auto-refetch every 10 seconds to catch remote registrations
+    enabled: true,
+    refetchInterval: 5000, // auto-refetch every 5 seconds to catch remote registrations
   });
+
+  // Real-time synchronization for new client registrations via Supabase
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const channel = supabase
+        .channel('realtime_public_clients_list')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'public_clients' }, () => {
+          refetchPending();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch (e) {
+      console.warn('Realtime subscription notice:', e);
+    }
+  }, [refetchPending]);
 
   const approveRemoteMutation = useMutation({
     mutationFn: async (remoteClient: any) => {
@@ -366,9 +389,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       await db.clients.create(cleanClient);
       
       // 2. Mark as synchronized and remove from pending (Cloudflare Pages, APK, Supabase)
-      if (user?.id) {
-        await dismissPendingRemoteClients(user.id, [remoteId]);
-      }
+      await dismissPendingRemoteClients(user?.id || 'admin', [remoteId]);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clients'] });
@@ -383,9 +404,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
 
   const rejectRemoteMutation = useMutation({
     mutationFn: async (remoteClientId: string) => {
-      if (user?.id) {
-        await dismissPendingRemoteClients(user.id, [remoteClientId]);
-      }
+      await dismissPendingRemoteClients(user?.id || 'admin', [remoteClientId]);
     },
     onSuccess: () => {
       refetchPending();
@@ -398,20 +417,26 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
   });
 
   const handleCopyLink = async () => {
-    if (!user?.id) return;
+    const effectiveUserId = user?.id || 'admin-godshop';
+    setIsGeneratingLink(true);
     try {
-      const result = await generateRegistrationLink(user.id);
+      const result = await generateRegistrationLink(effectiveUserId);
+      setGeneratedLinkUrl(result.link);
+      setShowLinkModal(true);
+
       const copiedSuccess = await copyToClipboard(result.link);
       if (copiedSuccess) {
         setCopied(true);
         toast.success('Link único gerado e copiado! (Válido por 1 uso / 24h)');
         setTimeout(() => setCopied(false), 3000);
       } else {
-        toast.success(`Link gerado: ${result.link}`);
+        toast.info('Link gerado! Você pode copiá-lo ou compartilhá-lo abaixo.');
       }
     } catch (err: any) {
       console.error('Erro ao gerar link de cadastro:', err);
       toast.error(err?.message || 'Erro ao gerar link de cadastro.');
+    } finally {
+      setIsGeneratingLink(false);
     }
   };
   
@@ -541,9 +566,15 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <button
             onClick={handleCopyLink}
+            disabled={isGeneratingLink}
             className="flex-1 sm:flex-none border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 px-4 py-2 rounded-md flex items-center justify-center gap-2 text-sm font-medium transition-colors cursor-pointer"
           >
-            {copied ? (
+            {isGeneratingLink ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin text-emerald-400" />
+                Gerando Link...
+              </>
+            ) : copied ? (
               <>
                 <Check className="h-4 w-4 text-emerald-500" />
                 Link Copiado!
@@ -551,7 +582,12 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
             ) : (
               <>
                 <LinkIcon className="h-4 w-4" />
-                Link de Cadastro Externo
+                Gerar Link de Cadastro
+                {pendingRemote.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-emerald-500 text-black">
+                    {pendingRemote.length}
+                  </span>
+                )}
               </>
             )}
           </button>
@@ -569,6 +605,123 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
         </div>
       </div>
 
+      {/* Modal para Visualizar / Copiar e Enviar Link de Cadastro Externo */}
+      {showLinkModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-card border border-border w-full max-w-lg rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-border/50 pb-3">
+              <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
+                <LinkIcon className="h-5 w-5 text-emerald-400" />
+                Link Único de Cadastro de Cliente
+              </h3>
+              <button
+                onClick={() => setShowLinkModal(false)}
+                className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Envie este link seguro para o cliente preencher os dados e assinar digitalmente. O cadastro aparecerá diretamente no seu aplicativo e painel assim que enviado:
+            </p>
+
+            <div className="p-3 rounded-xl bg-background border border-input font-mono text-xs break-all text-emerald-400 select-all">
+              {generatedLinkUrl}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={async () => {
+                  const success = await copyToClipboard(generatedLinkUrl);
+                  if (success) {
+                    setCopied(true);
+                    toast.success('Link copiado com sucesso!');
+                    setTimeout(() => setCopied(false), 2500);
+                  }
+                }}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
+              >
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {copied ? 'Copiado!' : 'Copiar Link'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const message = `Olá! Por favor, acesse o link seguro abaixo para realizar o seu cadastro na GODSHOP:\n\n${generatedLinkUrl}`;
+                  const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+                  window.open(waUrl, '_blank');
+                }}
+                className="bg-[#25D366] hover:bg-[#20ba59] text-black font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
+              >
+                <MessageCircle className="h-4 w-4" />
+                WhatsApp
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const shared = await shareContent({
+                    title: 'Cadastro de Cliente - GODSHOP',
+                    text: 'Olá! Acesse o link seguro abaixo para realizar o seu cadastro na GODSHOP:\n' + generatedLinkUrl,
+                    url: generatedLinkUrl,
+                    dialogTitle: 'Compartilhar Link de Cadastro'
+                  });
+                  if (shared) {
+                    toast.success('Menu de compartilhamento aberto!');
+                  }
+                }}
+                className="bg-muted hover:bg-muted/80 text-foreground font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                <Share2 className="h-4 w-4" />
+                Compartilhar
+              </button>
+            </div>
+
+            <div className="p-2.5 rounded-lg bg-muted/20 border border-border/40 text-[11px] text-muted-foreground flex items-center justify-between">
+              <span>Domínio: <strong className="text-foreground">{getCustomAppDomain() || 'https://godshop.pages.dev'}</strong></span>
+              <a href="#/settings?tab=backup" className="text-emerald-400 font-semibold hover:underline">
+                Alterar em Configurações
+              </a>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-border/50 text-[11px] text-muted-foreground">
+              <span>Válido por 1 uso / 24 horas</span>
+              <button
+                type="button"
+                onClick={() => setShowLinkModal(false)}
+                className="text-xs font-semibold text-foreground hover:underline cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Aviso de Modo Local no APK (se Supabase não estiver configurado) */}
+      {!isSupabaseConfigured() && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-300">
+          <div className="flex items-center gap-2.5">
+            <Info className="h-5 w-5 text-amber-400 shrink-0" />
+            <div>
+              <p className="font-bold text-amber-400">Aplicativo em Modo Local / Nuvem Desconectada</p>
+              <p className="text-muted-foreground text-[11px] mt-0.5">
+                Para que os cadastros preenchidos pelos seus clientes no Cloudflare apareçam automaticamente aqui no seu APK, conecte o Supabase em <strong>Configurações &gt; Backup &amp; Nuvem</strong>.
+              </p>
+            </div>
+          </div>
+          <a
+            href="#/settings?tab=backup"
+            className="whitespace-nowrap px-3 py-1.5 rounded-lg bg-amber-500 text-black font-bold text-[11px] hover:bg-amber-400 transition"
+          >
+            Conectar Nuvem
+          </a>
+        </div>
+      )}
+
       {/* Seção de Solicitações de Cadastro Remoto */}
       {pendingRemote.length > 0 && (
         <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-5 shadow-sm space-y-4 animate-fade-in">
@@ -580,7 +733,16 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
               </span>
               Solicitações de Cadastro Remoto ({pendingRemote.length})
             </h2>
-            <span className="text-xs text-emerald-500 opacity-80">Recebidos via link externo</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => refetchPending()}
+                title="Atualizar solicitações pendentes"
+                className="p-1 rounded-md text-emerald-400 hover:bg-emerald-500/10 transition cursor-pointer"
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", isFetchingPending && "animate-spin")} />
+              </button>
+              <span className="text-xs text-emerald-500 opacity-80">Recebidos via link externo</span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
