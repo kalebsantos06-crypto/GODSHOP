@@ -1,6 +1,3 @@
-import { Clipboard } from '@capacitor/clipboard';
-import { Share } from '@capacitor/share';
-
 /**
  * Utility functions for URL formatting, Clipboard operations, and Sharing,
  * optimized for Android Capacitor APK, Cloudflare Pages, iOS Safari, and WebViews.
@@ -58,6 +55,28 @@ export const getBaseUrl = (): string => {
   return url;
 };
 
+// Helper for dynamic Capacitor Clipboard plugin
+const getCapacitorClipboard = async () => {
+  try {
+    // @ts-ignore
+    const mod = await import('@capacitor/clipboard');
+    return mod?.Clipboard || null;
+  } catch {
+    return null;
+  }
+};
+
+// Helper for dynamic Capacitor Share plugin
+const getCapacitorShare = async () => {
+  try {
+    // @ts-ignore
+    const mod = await import('@capacitor/share');
+    return mod?.Share || null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Copies text to clipboard with Capacitor native plugin support,
  * modern Clipboard API, and DOM fallback for Android APK and browsers.
@@ -67,8 +86,11 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
 
   // 1. Capacitor Native Clipboard (Android APK & iOS)
   try {
-    await Clipboard.write({ string: text });
-    return true;
+    const Clipboard = await getCapacitorClipboard();
+    if (Clipboard) {
+      await Clipboard.write({ string: text });
+      return true;
+    }
   } catch (capErr) {
     // Fall through to web clipboard
   }
@@ -135,9 +157,12 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
 export const readFromClipboard = async (): Promise<string> => {
   // 1. Capacitor Native Clipboard
   try {
-    const result = await Clipboard.read();
-    if (result && typeof result.value === 'string' && result.value) {
-      return result.value;
+    const Clipboard = await getCapacitorClipboard();
+    if (Clipboard) {
+      const result = await Clipboard.read();
+      if (result && typeof result.value === 'string' && result.value) {
+        return result.value;
+      }
     }
   } catch (capErr) {
     // Fall through
@@ -167,15 +192,17 @@ export const shareContent = async (options: {
 }): Promise<boolean> => {
   // 1. Capacitor Native Share
   try {
-    await Share.share({
-      title: options.title || 'GODSHOP',
-      text: options.text || '',
-      url: options.url,
-      dialogTitle: options.dialogTitle || 'Compartilhar'
-    });
-    return true;
+    const Share = await getCapacitorShare();
+    if (Share) {
+      await Share.share({
+        title: options.title || 'GODSHOP',
+        text: options.text || '',
+        url: options.url,
+        dialogTitle: options.dialogTitle || 'Compartilhar'
+      });
+      return true;
+    }
   } catch (capErr: any) {
-    // If user cancelled, return true as it was handled
     if (capErr?.message?.includes('canceled') || capErr?.message?.includes('cancelled')) {
       return true;
     }
