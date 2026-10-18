@@ -764,36 +764,51 @@ export default function Settings() {
       // 1. Android APK (Capacitor native platform)
       if (Capacitor.isNativePlatform()) {
         try {
-          const result = await Filesystem.writeFile({
+          // Use Documents directory if available, falling back to Cache or ExternalStorage
+          let targetDir = Directory.Documents;
+          try {
+            await Filesystem.writeFile({
+              path: fileName,
+              data: jsonStr,
+              directory: targetDir,
+              encoding: Encoding.UTF8,
+              recursive: true
+            });
+          } catch (docErr) {
+            targetDir = Directory.ExternalStorage || Directory.Cache;
+            await Filesystem.writeFile({
+              path: fileName,
+              data: jsonStr,
+              directory: targetDir,
+              encoding: Encoding.UTF8,
+              recursive: true
+            });
+          }
+
+          const fileUri = await Filesystem.getUri({
             path: fileName,
-            data: jsonStr,
-            directory: Directory.Cache,
-            encoding: Encoding.UTF8
+            directory: targetDir
           });
 
           setShowBackupCodeModal(true);
 
           try {
-            const importFn = new Function('specifier', 'return import(specifier);');
-            const Share = await importFn('@capacitor/share').then((m: any) => m?.Share).catch(() => null);
-            if (Share && result.uri) {
+            const { Share } = await import('@capacitor/share');
+            if (Share && fileUri?.uri) {
               await Share.share({
                 title: 'Backup GODSHOP',
-                text: 'Arquivo de backup do sistema GODSHOP (.json)',
-                files: [result.uri],
-                dialogTitle: 'Salvar ou Compartilhar Backup'
+                text: 'Arquivo de backup do sistema GODSHOP (.json). Escolha "Salvar em Arquivos" para escolher a pasta do seu celular.',
+                url: fileUri.uri,
+                dialogTitle: 'Salvar ou Baixar Backup do GODSHOP'
               });
-              toast.success('Backup gerado! Escolha "Salvar em Arquivos" para salvar no seu aparelho.');
+              toast.success('Backup gerado! Toque em "Salvar em Arquivos" para escolher onde salvar no celular.');
               return;
             }
-          } catch (shareFileErr) {}
+          } catch (shareFileErr) {
+            console.warn('Capacitor Share file error:', shareFileErr);
+          }
 
-          await shareContent({
-            title: 'Backup GODSHOP',
-            text: 'Backup do sistema GODSHOP gerado com sucesso.',
-            dialogTitle: 'Salvar Arquivo de Backup'
-          });
-          toast.success(`Backup gerado e pronto para salvar no seu aparelho!`);
+          toast.success(`Backup salvo na pasta de Documentos do seu celular!`);
           return;
         } catch (fsErr: any) {
           console.warn('Capacitor Filesystem write error:', fsErr);
