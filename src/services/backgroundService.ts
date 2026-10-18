@@ -1,13 +1,11 @@
-/**
- * Background Service for Android Capacitor APK and Desktop Executable (.exe)
- * Ensures continuous operation, background sync, wake lock, and prevents OS sleep/suspend.
- */
-
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { NativeSettings, AndroidSettings } from 'capacitor-native-settings';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { backupService } from './backupService';
 
 const STORAGE_KEY_BG_ENABLED = 'godshop_background_mode_enabled';
+const LAST_BACKUP_KEY = 'godshop_last_auto_backup_date';
 
 class BackgroundService {
   private isEnabled: boolean = true;
@@ -45,15 +43,16 @@ class BackgroundService {
     }
   }
 
-  /**
-   * Initializes background listeners, Capacitor appStateChange handlers,
-   * and starts keep-alive mechanisms.
-   */
   public async init(): Promise<void> {
     if (this.isInitialized) return;
     this.isInitialized = true;
 
     console.log('[BackgroundService] Initializing background execution engine (APK & Desktop)...');
+
+    // Registrar tarefa de backup diário
+    this.registerSyncTask(async () => {
+      await this.runAutoBackup();
+    });
 
     // 1. Listen for Capacitor App state changes (Android APK foreground <-> background)
     if (Capacitor.isNativePlatform()) {
@@ -77,7 +76,6 @@ class BackgroundService {
         // Prevent Android back button from completely terminating app when in root
         App.addListener('backButton', ({ canGoBack }) => {
           if (!canGoBack) {
-            // Minimizes app to background instead of killing process
             App.minimizeApp();
           }
         });
@@ -102,6 +100,47 @@ class BackgroundService {
       });
     }
   }
+
+  private async runAutoBackup(): Promise<void> {
+    const lastBackupStr = localStorage.getItem(LAST_BACKUP_KEY);
+    const now = Date.now();
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+    if (lastBackupStr && now - parseInt(lastBackupStr) < TWENTY_FOUR_HOURS) {
+      return; // Backup já realizado hoje
+    }
+
+    console.log('[BackgroundService] Iniciando backup automático diário...');
+    try {
+      const data = await backupService.exportData();
+      const jsonStr = JSON.stringify(data, null, 2);
+      const fileName = `backup_diario_godshop_${new Date().toISOString().slice(0, 10)}.json`;
+
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const status = await Filesystem.checkPermissions();
+          if (status.publicStorage === 'granted') {
+            await Filesystem.writeFile({
+              path: fileName,
+              data: jsonStr,
+              directory: Directory.Documents,
+              encoding: Encoding.UTF8,
+              recursive: true
+            });
+            localStorage.setItem(LAST_BACKUP_KEY, now.toString());
+            console.log('[BackgroundService] Backup diário salvo com sucesso no dispositivo.');
+          }
+        } catch (fsErr) {
+          console.warn('[BackgroundService] Erro ao salvar backup automático:', fsErr);
+        }
+      }
+    } catch (err) {
+      console.error('[BackgroundService] Falha no backup automático:', err);
+    }
+  }
+  
+  // ... (keep alive methods remain unchanged)
+
 
   /**
    * Register a callback to be executed on background sync ticks

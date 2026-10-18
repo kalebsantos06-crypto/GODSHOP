@@ -765,6 +765,16 @@ export default function Settings() {
       // 1. Android APK (Capacitor native platform) - Save to device Documents folder directly
       if (Capacitor.isNativePlatform()) {
         try {
+          // Solicitar permissão de escrita
+          const status = await Filesystem.checkPermissions();
+          if (status.publicStorage !== 'granted') {
+            const request = await Filesystem.requestPermissions();
+            if (request.publicStorage !== 'granted') {
+              toast.error('Permissão de armazenamento negada pelo usuário.');
+              return;
+            }
+          }
+
           let targetDir = Directory.Documents;
           try {
             await Filesystem.writeFile({
@@ -2115,10 +2125,10 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* Modal para Baixar e Salvar Arquivo de Backup no Aparelho */}
+              {/* Modal para Baixar e Salvar Arquivo de Backup no Aparelho com Escolha de Local */}
               {showBackupCodeModal && (
                 <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-                  <div className="bg-card border border-border w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
+                  <div className="bg-card border border-border w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
                     <div className="flex items-center justify-between border-b border-border/50 pb-3">
                       <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
                         <Folder className="h-5 w-5 text-emerald-400" />
@@ -2134,25 +2144,59 @@ export default function Settings() {
 
                     <div className="space-y-3 text-xs text-muted-foreground leading-relaxed">
                       <p>
-                        Seu arquivo de backup <strong className="text-foreground">backup_sistema_godshop_{new Date().toISOString().slice(0, 10)}.json</strong> foi gerado com sucesso.
+                        Configure o nome e o local onde o arquivo de backup será guardado no seu dispositivo:
                       </p>
-                      <p>
-                        Toque no botão abaixo para escolher a pasta no seu celular ou computador onde deseja salvar o arquivo de segurança.
-                      </p>
+
+                      <div className="space-y-2 pt-1">
+                        <label className="block text-[11px] font-semibold text-foreground">
+                          Nome do Arquivo (.json)
+                        </label>
+                        <input
+                          type="text"
+                          id="backup-filename-input"
+                          defaultValue={`backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`}
+                          className="w-full p-2.5 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5 pt-1">
+                        <label className="block text-[11px] font-semibold text-foreground">
+                          Local de Salvamento no Aparelho
+                        </label>
+                        <select
+                          id="backup-location-select"
+                          defaultValue="Documents"
+                          className="w-full p-2.5 rounded-xl bg-background border border-input text-xs font-medium text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                        >
+                          <option value="Documents">📁 Pasta Documentos (Recomendado)</option>
+                          <option value="ExternalStorage">💾 Armazenamento Interno / Downloads</option>
+                          <option value="Cache">⚡ Cache Temporário</option>
+                        </select>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          No Android APK, após tocar em salvar, o sistema abrirá o seletor para você confirmar ou escolher outra pasta.
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="space-y-2 pt-2">
+                    <div className="space-y-2 pt-3 border-t border-border/50">
                       <button
                         type="button"
                         onClick={async () => {
-                          const fileName = `backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`;
+                          const fileNameInput = document.getElementById('backup-filename-input') as HTMLInputElement;
+                          const locationSelect = document.getElementById('backup-location-select') as HTMLSelectElement;
                           
+                          const customFileName = fileNameInput?.value?.trim() || `backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`;
+                          const locationChoice = locationSelect?.value || 'Documents';
+
                           // 1. If running on native Capacitor (Android APK)
                           if (Capacitor.isNativePlatform()) {
                             try {
-                              const targetDir = Directory.ExternalStorage || Directory.Documents;
+                              let targetDir = Directory.Documents;
+                              if (locationChoice === 'ExternalStorage') targetDir = Directory.ExternalStorage || Directory.Documents;
+                              if (locationChoice === 'Cache') targetDir = Directory.Cache;
+
                               await Filesystem.writeFile({
-                                path: fileName,
+                                path: customFileName,
                                 data: backupJsonCode,
                                 directory: targetDir,
                                 encoding: Encoding.UTF8,
@@ -2160,7 +2204,7 @@ export default function Settings() {
                               });
 
                               const fileUri = await Filesystem.getUri({
-                                path: fileName,
+                                path: customFileName,
                                 directory: targetDir
                               });
 
@@ -2168,56 +2212,32 @@ export default function Settings() {
                               if (Share && fileUri?.uri) {
                                 await Share.share({
                                   title: 'Salvar Arquivo de Backup GODSHOP',
-                                  text: 'Selecione "Salvar em Arquivos" para escolher a pasta no seu celular onde o backup será guardado.',
+                                  text: 'Toque em "Salvar em Arquivos" para confirmar a pasta escolhida.',
                                   url: fileUri.uri,
-                                  dialogTitle: 'Salvar Backup no Aparelho'
+                                  dialogTitle: 'Salvar Arquivo no Aparelho'
                                 });
-                                toast.success('Escolha "Salvar em Arquivos" para salvar no local desejado!');
+                                toast.success('Escolha "Salvar em Arquivos" para confirmar o local!');
+                                setShowBackupCodeModal(false);
                                 return;
                               }
                             } catch (nativeErr: any) {
-                              console.warn('Native ExternalStorage error, trying cache/documents:', nativeErr);
-                              try {
-                                await Filesystem.writeFile({
-                                  path: fileName,
-                                  data: backupJsonCode,
-                                  directory: Directory.Documents,
-                                  encoding: Encoding.UTF8,
-                                  recursive: true
-                                });
-                                const fileUri2 = await Filesystem.getUri({
-                                  path: fileName,
-                                  directory: Directory.Documents
-                                });
-                                const { Share } = await import('@capacitor/share');
-                                if (Share && fileUri2?.uri) {
-                                  await Share.share({
-                                    title: 'Salvar Arquivo de Backup GODSHOP',
-                                    url: fileUri2.uri,
-                                    dialogTitle: 'Salvar Backup'
-                                  });
-                                }
-                                toast.success('Backup salvo na pasta de Documentos!');
-                                return;
-                              } catch (e2: any) {
-                                toast.error('Erro ao salvar no celular: ' + (e2?.message || e2));
-                              }
+                              console.warn('Native save with location error:', nativeErr);
                             }
                           }
 
-                          // 2. Browser / FileSaver fallback
+                          // 2. Browser / FileSaver fallback with custom filename
                           try {
                             const blob = new Blob([backupJsonCode], { type: 'application/json' });
                             const { saveAs } = await import('file-saver');
-                            saveAs(blob, fileName);
-                            toast.success('Arquivo baixado com sucesso!');
+                            saveAs(blob, customFileName);
+                            toast.success(`Arquivo ${customFileName} baixado com sucesso!`);
                             setShowBackupCodeModal(false);
                           } catch (e) {
                             const blob = new Blob([backupJsonCode], { type: 'application/json' });
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
                             a.href = url;
-                            a.download = fileName;
+                            a.download = customFileName;
                             document.body.appendChild(a);
                             a.click();
                             setTimeout(() => {
@@ -2226,14 +2246,14 @@ export default function Settings() {
                                 URL.revokeObjectURL(url);
                               } catch (err) {}
                             }, 1000);
-                            toast.success('Arquivo baixado com sucesso!');
+                            toast.success(`Arquivo ${customFileName} baixado com sucesso!`);
                             setShowBackupCodeModal(false);
                           }
                         }}
                         className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
                       >
                         <Download className="h-4 w-4" />
-                        Salvar e Escolher Local no Aparelho
+                        Confirmar e Salvar Arquivo
                       </button>
 
                       <button
