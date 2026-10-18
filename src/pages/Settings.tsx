@@ -758,13 +758,13 @@ export default function Settings() {
       const jsonStr = JSON.stringify(data, null, 2);
       const fileName = `backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`;
 
-      // Always populate the code state and open modal so the user can easily view, copy, or share
+      // Always populate the code state and open modal so the user can easily view, copy, or save
       setBackupJsonCode(jsonStr);
+      setShowBackupCodeModal(true);
 
-      // 1. Android APK (Capacitor native platform)
+      // 1. Android APK (Capacitor native platform) - Save to device Documents folder directly
       if (Capacitor.isNativePlatform()) {
         try {
-          // Use Documents directory if available, falling back to Cache or ExternalStorage
           let targetDir = Directory.Documents;
           try {
             await Filesystem.writeFile({
@@ -790,42 +790,34 @@ export default function Settings() {
             directory: targetDir
           });
 
-          setShowBackupCodeModal(true);
-
           try {
             const { Share } = await import('@capacitor/share');
             if (Share && fileUri?.uri) {
               await Share.share({
                 title: 'Backup GODSHOP',
-                text: 'Arquivo de backup do sistema GODSHOP (.json). Escolha "Salvar em Arquivos" para escolher a pasta do seu celular.',
+                text: 'Arquivo de backup do sistema GODSHOP (.json). Salve no seu aparelho.',
                 url: fileUri.uri,
-                dialogTitle: 'Salvar ou Baixar Backup do GODSHOP'
+                dialogTitle: 'Salvar Arquivo de Backup'
               });
-              toast.success('Backup gerado! Toque em "Salvar em Arquivos" para escolher onde salvar no celular.');
-              return;
             }
           } catch (shareFileErr) {
             console.warn('Capacitor Share file error:', shareFileErr);
           }
 
-          toast.success(`Backup salvo na pasta de Documentos do seu celular!`);
+          toast.success('Backup gerado e salvo na memória do seu celular! Use o modal para gerenciar.');
           return;
         } catch (fsErr: any) {
           console.warn('Capacitor Filesystem write error:', fsErr);
         }
       }
 
-      // 2. Web Share API fallback (Mobile browsers, Chrome, Safari)
-      setShowBackupCodeModal(true);
-
-      // 3. FileSaver / Blob fallback
+      // 3. FileSaver / Blob fallback for browsers
       try {
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const { saveAs } = await import('file-saver');
         saveAs(blob, fileName);
-        toast.success('Cópia de segurança (.json) exportada com sucesso!');
+        toast.success('Arquivo de backup baixado com sucesso!');
       } catch (saveErr) {
-        // 4. Standard <a> click fallback
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -839,7 +831,7 @@ export default function Settings() {
             URL.revokeObjectURL(url);
           } catch (e) {}
         }, 1000);
-        toast.success('Cópia de segurança (.json) baixada com sucesso!');
+        toast.success('Arquivo de backup baixado com sucesso!');
       }
     } catch (err: any) {
       toast.error('Erro ao exportar backup: ' + (err?.message || err));
@@ -2123,14 +2115,14 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* Modal para Visualizar / Copiar Código de Backup Gerado */}
+              {/* Modal para Baixar e Salvar Arquivo de Backup no Aparelho */}
               {showBackupCodeModal && (
                 <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-                  <div className="bg-card border border-border w-full max-w-xl rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+                  <div className="bg-card border border-border w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-150">
                     <div className="flex items-center justify-between border-b border-border/50 pb-3">
                       <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
-                        <Database className="h-5 w-5 text-emerald-400" />
-                        Código de Segurança do Backup
+                        <Folder className="h-5 w-5 text-emerald-400" />
+                        Salvar Backup no Aparelho
                       </h3>
                       <button
                         onClick={() => setShowBackupCodeModal(false)}
@@ -2140,73 +2132,116 @@ export default function Settings() {
                       </button>
                     </div>
 
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Este é o código completo dos seus dados. Você pode copiar para o celular, enviar pelo WhatsApp ou colar em outro dispositivo para restaurar tudo instantaneamente:
-                    </p>
-
-                    <div className="relative">
-                      <textarea
-                        readOnly
-                        rows={7}
-                        value={backupJsonCode}
-                        onClick={(e) => e.currentTarget.select()}
-                        className="w-full p-3 rounded-xl bg-background border border-input text-[11px] font-mono text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none select-all resize-none"
-                      />
+                    <div className="space-y-3 text-xs text-muted-foreground leading-relaxed">
+                      <p>
+                        Seu arquivo de backup <strong className="text-foreground">backup_sistema_godshop_{new Date().toISOString().slice(0, 10)}.json</strong> foi gerado com sucesso.
+                      </p>
+                      <p>
+                        Toque no botão abaixo para escolher a pasta no seu celular ou computador onde deseja salvar o arquivo de segurança.
+                      </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                    <div className="space-y-2 pt-2">
                       <button
                         type="button"
                         onClick={async () => {
-                          const success = await copyToClipboard(backupJsonCode);
-                          if (success) {
-                            toast.success('Código do backup copiado com sucesso!');
-                          } else {
-                            toast.error('Não foi possível copiar automaticamente. Selecione o texto acima.');
+                          const fileName = `backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`;
+                          
+                          // 1. If running on native Capacitor (Android APK)
+                          if (Capacitor.isNativePlatform()) {
+                            try {
+                              const targetDir = Directory.ExternalStorage || Directory.Documents;
+                              await Filesystem.writeFile({
+                                path: fileName,
+                                data: backupJsonCode,
+                                directory: targetDir,
+                                encoding: Encoding.UTF8,
+                                recursive: true
+                              });
+
+                              const fileUri = await Filesystem.getUri({
+                                path: fileName,
+                                directory: targetDir
+                              });
+
+                              const { Share } = await import('@capacitor/share');
+                              if (Share && fileUri?.uri) {
+                                await Share.share({
+                                  title: 'Salvar Arquivo de Backup GODSHOP',
+                                  text: 'Selecione "Salvar em Arquivos" para escolher a pasta no seu celular onde o backup será guardado.',
+                                  url: fileUri.uri,
+                                  dialogTitle: 'Salvar Backup no Aparelho'
+                                });
+                                toast.success('Escolha "Salvar em Arquivos" para salvar no local desejado!');
+                                return;
+                              }
+                            } catch (nativeErr: any) {
+                              console.warn('Native ExternalStorage error, trying cache/documents:', nativeErr);
+                              try {
+                                await Filesystem.writeFile({
+                                  path: fileName,
+                                  data: backupJsonCode,
+                                  directory: Directory.Documents,
+                                  encoding: Encoding.UTF8,
+                                  recursive: true
+                                });
+                                const fileUri2 = await Filesystem.getUri({
+                                  path: fileName,
+                                  directory: Directory.Documents
+                                });
+                                const { Share } = await import('@capacitor/share');
+                                if (Share && fileUri2?.uri) {
+                                  await Share.share({
+                                    title: 'Salvar Arquivo de Backup GODSHOP',
+                                    url: fileUri2.uri,
+                                    dialogTitle: 'Salvar Backup'
+                                  });
+                                }
+                                toast.success('Backup salvo na pasta de Documentos!');
+                                return;
+                              } catch (e2: any) {
+                                toast.error('Erro ao salvar no celular: ' + (e2?.message || e2));
+                              }
+                            }
+                          }
+
+                          // 2. Browser / FileSaver fallback
+                          try {
+                            const blob = new Blob([backupJsonCode], { type: 'application/json' });
+                            const { saveAs } = await import('file-saver');
+                            saveAs(blob, fileName);
+                            toast.success('Arquivo baixado com sucesso!');
+                            setShowBackupCodeModal(false);
+                          } catch (e) {
+                            const blob = new Blob([backupJsonCode], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = fileName;
+                            document.body.appendChild(a);
+                            a.click();
+                            setTimeout(() => {
+                              try {
+                                if (a.parentNode) a.parentNode.removeChild(a);
+                                URL.revokeObjectURL(url);
+                              } catch (err) {}
+                            }, 1000);
+                            toast.success('Arquivo baixado com sucesso!');
+                            setShowBackupCodeModal(false);
                           }
                         }}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
+                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg"
                       >
-                        <Copy className="h-3.5 w-3.5" />
-                        Copiar Código
+                        <Download className="h-4 w-4" />
+                        Salvar e Escolher Local no Aparelho
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const shared = await shareContent({
-                            title: 'Backup GODSHOP',
-                            text: 'Código de Backup GODSHOP:\n' + backupJsonCode.substring(0, 1500) + (backupJsonCode.length > 1500 ? '... [completo no arquivo]' : ''),
-                            dialogTitle: 'Compartilhar Código de Backup'
-                          });
-                          if (!shared) {
-                            const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent('Código de Backup GODSHOP:\n' + backupJsonCode.substring(0, 1500) + (backupJsonCode.length > 1500 ? '... [completo no arquivo]' : ''))}`;
-                            window.open(waUrl, '_blank');
-                          }
-                        }}
-                        className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        <Share2 className="h-3.5 w-3.5" />
-                        Compartilhar
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleExport}
-                        className="bg-muted hover:bg-muted/80 text-foreground font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                        Baixar Arquivo
-                      </button>
-                    </div>
-
-                    <div className="flex justify-end pt-2 border-t border-border/50">
                       <button
                         type="button"
                         onClick={() => setShowBackupCodeModal(false)}
-                        className="px-4 py-2 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50 cursor-pointer"
+                        className="w-full bg-muted hover:bg-muted/80 text-foreground font-semibold py-2.5 px-4 rounded-xl text-xs transition cursor-pointer"
                       >
-                        Concluído
+                        Cancelar
                       </button>
                     </div>
                   </div>
