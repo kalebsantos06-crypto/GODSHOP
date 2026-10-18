@@ -181,8 +181,26 @@ export default function Login() {
     setIsLoading(true);
     persistUserPreference(effectiveEmail);
 
-    // If Supabase is not configured, seamlessly enter via secure local state
+    // If Supabase is not configured, validate against secure local credentials store
     if (!isSupabaseConfigured) {
+      try {
+        const credsStr = localStorage.getItem('godshop_credentials') || '{}';
+        const creds = JSON.parse(credsStr);
+        const normalizedEmail = effectiveEmail.toLowerCase();
+        
+        if (creds[normalizedEmail]) {
+          if (creds[normalizedEmail] !== password) {
+            toast.error('Senha incorreta! Por favor, verifique sua senha.');
+            setIsLoading(false);
+            return;
+          }
+        } else {
+          // First time logging in with this email offline, save password credentials
+          creds[normalizedEmail] = password;
+          localStorage.setItem('godshop_credentials', JSON.stringify(creds));
+        }
+      } catch (e) {}
+
       await enterOfflineMode(effectiveEmail);
       toast.success('Bem-vindo ao GODSHOP!');
       db.pullFromCloud().catch(console.warn);
@@ -198,12 +216,8 @@ export default function Login() {
           password,
         });
         if (error) {
-          console.warn('Supabase signup notice:', error);
-          toast.info('Acessando em modo seguro local...');
-          await enterOfflineMode(effectiveEmail);
-          db.pullFromCloud().catch(console.warn);
+          toast.error(error.message || 'Erro ao realizar cadastro.');
           setIsLoading(false);
-          navigate('/');
           return;
         } else {
           toast.success('Cadastro realizado com sucesso!');
@@ -213,38 +227,28 @@ export default function Login() {
             db.pullFromCloud().catch(console.warn);
             navigate('/');
           } else {
-            await enterOfflineMode(effectiveEmail);
-            navigate('/');
+            toast.error('Erro ao efetuar login após cadastro.');
           }
         }
       } catch (err: any) {
-        console.warn('Supabase exception:', err);
-        await enterOfflineMode(effectiveEmail);
+        toast.error(err?.message || 'Erro ao processar cadastro.');
         setIsLoading(false);
-        navigate('/');
       }
     } else {
       try {
         const { error } = await login(effectiveEmail, password);
         if (error) {
-          console.warn('Supabase login returned error, applying fallback:', error);
-          await enterOfflineMode(effectiveEmail);
-          toast.success('Acesso realizado com sucesso!');
-          db.pullFromCloud().catch(console.warn);
+          toast.error(error.message || 'E-mail ou senha incorretos.');
           setIsLoading(false);
-          navigate('/');
+          return;
         } else {
           setIsLoading(false);
           db.pullFromCloud().catch(console.warn);
           navigate('/');
         }
       } catch (err: any) {
-        console.warn('Supabase login exception, falling back:', err);
-        await enterOfflineMode(effectiveEmail);
-        toast.success('Acesso realizado com sucesso!');
-        db.pullFromCloud().catch(console.warn);
+        toast.error('Erro ao realizar login. Verifique suas credenciais.');
         setIsLoading(false);
-        navigate('/');
       }
     }
   };

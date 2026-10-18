@@ -2117,6 +2117,20 @@ async function startServer() {
         console.error('Server error:', err);
       }
     });
+
+    // Ensure the background desktop executable process stays alive continuously
+    process.on('uncaughtException', (err) => {
+      console.error('[Background Daemon] Uncaught exception safely handled:', err);
+    });
+
+    process.on('unhandledRejection', (reason) => {
+      console.error('[Background Daemon] Unhandled rejection safely handled:', reason);
+    });
+
+    // Periodic keep-alive heartbeat for background event loop
+    setInterval(() => {
+      // Keep event loop active
+    }, 60000);
   }
 }
 

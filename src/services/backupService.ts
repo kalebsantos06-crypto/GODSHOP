@@ -1,6 +1,7 @@
 import { db, getCurrentUserId } from './db';
 import { supabase } from '../lib/supabase';
 import { Client, Supplier, iPhone, Console, Sale, PriceTableItem } from '../types';
+import { validateAndParseBackup, BackupValidationResult } from './backupValidator';
 
 export interface BackupData {
   version: number;
@@ -128,19 +129,34 @@ export const backupService = {
     };
   },
 
+  // Validate backup data and return diagnosis
+  validateBackup: (input: string | object): BackupValidationResult => {
+    return validateAndParseBackup(input);
+  },
+
   // Import JSON backup data and reconstruct all entities and relations WITHOUT DUPLICATING
-  importData: async (backup: any): Promise<{ success: boolean; message: string; details: string[] }> => {
+  importData: async (backup: any): Promise<{ success: boolean; message: string; details: string[]; summary?: any }> => {
     const details: string[] = [];
-    if (!backup || !backup.data) {
+
+    // 1. Run deep validation and normalization on incoming backup
+    const validation = validateAndParseBackup(backup);
+    if (!validation.isValid || !validation.normalizedData) {
       return {
         success: false,
-        message: 'Formato de arquivo inválido. O arquivo de backup deve conter um objeto "data".',
-        details
+        message: validation.error || 'Código ou arquivo de backup inválido.',
+        details: [
+          ...(validation.errorDetails ? [validation.errorDetails] : []),
+          ...validation.warnings
+        ]
       };
     }
 
+    if (validation.warnings.length > 0) {
+      details.push(...validation.warnings.map(w => `⚠️ ${w}`));
+    }
+
     try {
-      const data = backup.data;
+      const data = validation.normalizedData.data;
       const userId = await getCurrentUserId().catch(() => null);
 
       // 1. Process and restore custom payments dictionary
@@ -252,10 +268,16 @@ export const backupService = {
         }));
       }
 
+      const summary = validation.summary;
+      const countMsg = summary
+        ? `${summary.totalRecords} registros recuperados (${summary.clients} clientes, ${summary.sales} vendas, ${summary.iphones + summary.consoles} aparelhos).`
+        : 'Seus dados foram preservados e duplicatas foram unificadas.';
+
       return {
         success: true,
-        message: 'Backup restaurado com sucesso! Seus dados foram preservados e duplicatas foram unificadas.',
-        details
+        message: `Backup restaurado com sucesso! ${countMsg}`,
+        details,
+        summary
       };
     } catch (error: any) {
       console.error('Fatal error during backup import:', error);

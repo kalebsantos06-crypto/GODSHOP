@@ -27,6 +27,25 @@ export class ErrorBoundary extends Component<Props, State> {
       errorStr.includes('not a child') ||
       errorStr.includes('notfounderror');
 
+    const isDynamicImportError =
+      errorStr.includes('dynamically imported module') ||
+      errorStr.includes('failed to fetch dynamically imported module');
+
+    // Handle dynamic chunk import failure (e.g. after code update or dev server refresh)
+    if (isDynamicImportError) {
+      console.warn('Dynamic import error caught in ErrorBoundary:', error);
+      try {
+        const lastReload = sessionStorage.getItem('last_dyn_import_reload');
+        const now = Date.now();
+        if (!lastReload || now - Number(lastReload) > 10000) {
+          sessionStorage.setItem('last_dyn_import_reload', String(now));
+          window.location.reload();
+          return { hasError: false, error: null };
+        }
+      } catch (e) {}
+      return { hasError: true, error };
+    }
+
     const isNetworkFetchError =
       errorStr.includes('failed to fetch') ||
       errorStr.includes('networkerror') ||
@@ -49,6 +68,22 @@ export class ErrorBoundary extends Component<Props, State> {
       errorStr.includes('insertbefore') || 
       errorStr.includes('not a child') ||
       errorStr.includes('notfounderror');
+
+    const isDynamicImportError =
+      errorStr.includes('dynamically imported module') ||
+      errorStr.includes('failed to fetch dynamically imported module');
+
+    if (isDynamicImportError) {
+      try {
+        const lastReload = sessionStorage.getItem('last_dyn_import_reload');
+        const now = Date.now();
+        if (!lastReload || now - Number(lastReload) > 10000) {
+          sessionStorage.setItem('last_dyn_import_reload', String(now));
+          window.location.reload();
+          return;
+        }
+      } catch (e) {}
+    }
 
     const isNetworkFetchError =
       errorStr.includes('failed to fetch') ||

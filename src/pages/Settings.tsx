@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Upload, LogOut, Image as ImageIcon, Smartphone, Database, Download, FileJson, Search, 
-  Trash2, Plus, Sun, Moon, Cloud, ShieldAlert, User, LogIn, MessageSquare, Send, Play, 
+  Trash2, Plus, Sun, Moon, Cloud, ShieldAlert, ShieldCheck, User, Users, UserCheck, LogIn, MessageSquare, Send, Play, 
   CheckCircle2, AlertTriangle, RefreshCw, Settings as SettingsIcon, FileText, Layers, Bot, ChevronRight, Check,
-  Copy, ClipboardPaste, Sparkles, Folder, Eye, EyeOff, Share2, ExternalLink
+  Copy, ClipboardPaste, Sparkles, Folder, Eye, EyeOff, Share2, ExternalLink, Building2, CreditCard, MapPin, Lock, KeyRound,
+  Mail, Phone, Shield, Activity, Power
 } from 'lucide-react';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
 import { backupService } from '../services/backupService';
+import { backgroundService } from '../services/backgroundService';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '../lib/utils';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -53,14 +55,260 @@ export default function Settings() {
   const [isTestingSupa, setIsTestingSupa] = useState(false);
   const [isSavingSupa, setIsSavingSupa] = useState(false);
 
+  // Password change state
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showOldPass, setShowOldPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+
+  // Live backup code validation memo
+  const pasteValidation = useMemo(() => {
+    if (!pasteJsonText.trim()) return null;
+    return backupService.validateBackup(pasteJsonText);
+  }, [pasteJsonText]);
+
+  const [isBgRunning, setIsBgRunning] = useState(() => backgroundService.isBackgroundEnabled());
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!oldPassword || !newPassword || !confirmNewPassword) {
+      toast.error('Preencha a senha antiga, a nova senha e a confirmação.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error('As novas senhas não coincidem.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast.error('A nova senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    // Verify old password against local credentials store
+    try {
+      const userEmail = user?.email || localStorage.getItem('godshop_saved_email') || 'admin@godshop.com';
+      const credsStr = localStorage.getItem('godshop_credentials') || '{}';
+      const creds = JSON.parse(credsStr);
+      const normalizedEmail = userEmail.toLowerCase();
+      if (creds[normalizedEmail] && creds[normalizedEmail] !== oldPassword) {
+        toast.error('A senha antiga informada está incorreta.');
+        return;
+      }
+    } catch (e) {}
+
+    setIsChangingPassword(true);
+    try {
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) {
+          throw new Error(error.message);
+        }
+      }
+
+      try {
+        const userEmail = user?.email || localStorage.getItem('godshop_saved_email') || 'admin@godshop.com';
+        const credsStr = localStorage.getItem('godshop_credentials') || '{}';
+        const creds = JSON.parse(credsStr);
+        creds[userEmail.toLowerCase()] = newPassword;
+        localStorage.setItem('godshop_credentials', JSON.stringify(creds));
+      } catch (e) {}
+
+      toast.success('Senha alterada com sucesso!');
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (msg.toLowerCase().includes('different from the old password')) {
+        toast.error('A nova senha deve ser diferente da senha anterior.');
+      } else {
+        toast.error('Erro ao alterar senha: ' + (msg || err));
+      }
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  // User Profile registration state (fidelização cadastral)
+  const [profileData, setProfileData] = useState(() => {
+    try {
+      const stored = localStorage.getItem('godshop_user_profile');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return {
+      fullName: localStorage.getItem('auto_attendant_name') || 'Kaleb dos Santos Gonçalves',
+      storeName: 'GODSHOP',
+      email: user?.email || localStorage.getItem('godshop_saved_email') || 'kalebsantos06@gmail.com',
+      phone: localStorage.getItem('auto_store_phone') || '(32) 99963-4583',
+      document: '130.369.426-37',
+      role: 'Proprietário / Administrador',
+      pixKey: '13036942637',
+      cityState: 'Carangola - MG',
+      registeredAt: new Date().toLocaleDateString('pt-BR')
+    };
+  });
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  // System users registry state
+  const [registeredUsers, setRegisteredUsers] = useState<any[]>(() => {
+    try {
+      const stored = localStorage.getItem('godshop_system_users');
+      if (stored) {
+        const list = JSON.parse(stored);
+        if (Array.isArray(list) && list.length > 0) return list;
+      }
+    } catch {}
+    const defaultUser = {
+      id: user?.id || 'usr-master-admin',
+      name: localStorage.getItem('auto_attendant_name') || 'Kaleb dos Santos Gonçalves',
+      email: (user?.email || localStorage.getItem('godshop_saved_email') || 'kalebsantos06@gmail.com').toLowerCase(),
+      phone: localStorage.getItem('auto_store_phone') || '(32) 99963-4583',
+      role: 'Administrador',
+      status: 'Ativo',
+      created_at: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem('godshop_system_users', JSON.stringify([defaultUser]));
+    } catch {}
+    return [defaultUser];
+  });
+
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPhone, setNewUserPhone] = useState('');
+  const [newUserRole, setNewUserRole] = useState('Vendedor');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
+  const [isAddingUser, setIsAddingUser] = useState(false);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingProfile(true);
+    try {
+      localStorage.setItem('godshop_user_profile', JSON.stringify(profileData));
+      
+      if (profileData.fullName) {
+        localStorage.setItem('auto_attendant_name', profileData.fullName);
+        setAttendantName(profileData.fullName);
+      }
+      if (profileData.phone) {
+        localStorage.setItem('auto_store_phone', profileData.phone);
+        setStorePhone(profileData.phone);
+      }
+      if (profileData.pixKey) {
+        const pixFormatted = `Chave Pix: ${profileData.pixKey}\nNome: ${profileData.fullName || 'GODSHOP'}`;
+        localStorage.setItem('auto_pix_info', pixFormatted);
+        setPixInfo(pixFormatted);
+      }
+
+      try {
+        if (user?.id) {
+          fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.id,
+              settings: {
+                user_profile: profileData,
+                auto_attendant_name: profileData.fullName,
+                auto_store_phone: profileData.phone
+              }
+            })
+          }).catch(() => {});
+        }
+      } catch {}
+
+      toast.success('Cadastro do usuário fidelizado e salvo com sucesso!');
+    } catch (err: any) {
+      toast.error('Erro ao salvar cadastro: ' + err.message);
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const handleRegisterNewUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserName.trim() || !newUserEmail.trim()) {
+      toast.error('Nome e E-mail são obrigatórios.');
+      return;
+    }
+    if (newUserPassword && newUserPassword.length < 6) {
+      toast.error('A senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    setIsAddingUser(true);
+    try {
+      const newUserRecord = {
+        id: `usr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        name: newUserName.trim(),
+        email: newUserEmail.toLowerCase().trim(),
+        phone: newUserPhone.trim(),
+        role: newUserRole,
+        status: 'Ativo',
+        created_at: new Date().toISOString()
+      };
+
+      const updated = [...registeredUsers, newUserRecord];
+      setRegisteredUsers(updated);
+      localStorage.setItem('godshop_system_users', JSON.stringify(updated));
+
+      if (newUserPassword) {
+        try {
+          const credsStr = localStorage.getItem('godshop_credentials') || '{}';
+          const creds = JSON.parse(credsStr);
+          creds[newUserRecord.email] = newUserPassword;
+          localStorage.setItem('godshop_credentials', JSON.stringify(creds));
+        } catch {}
+      }
+
+      try {
+        fetch('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...newUserRecord, password: newUserPassword })
+        }).catch(() => {});
+      } catch {}
+
+      toast.success(`Usuário ${newUserRecord.name} cadastrado com sucesso!`);
+      setShowAddUserModal(false);
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserPhone('');
+      setNewUserRole('Vendedor');
+      setNewUserPassword('');
+    } catch (err: any) {
+      toast.error('Erro ao cadastrar usuário: ' + err.message);
+    } finally {
+      setIsAddingUser(false);
+    }
+  };
+
+  const handleDeleteUser = (idToDelete: string, name: string) => {
+    if (registeredUsers.length <= 1) {
+      toast.error('Não é possível excluir o único usuário administrador.');
+      return;
+    }
+    const filtered = registeredUsers.filter(u => u.id !== idToDelete);
+    setRegisteredUsers(filtered);
+    localStorage.setItem('godshop_system_users', JSON.stringify(filtered));
+    toast.success(`Registro do usuário ${name} removido.`);
+  };
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('app_theme') as 'light' | 'dark') || 'dark';
   });
 
   // Navigation tab for settings
-  const [activeTab, setActiveTab] = useState<'geral' | 'backup' | 'automacao'>(() => {
+  const [activeTab, setActiveTab] = useState<'geral' | 'usuario' | 'backup' | 'automacao'>(() => {
     const tabParam = searchParams.get('tab');
+    if (tabParam === 'usuario') return 'usuario';
     if (tabParam === 'automacao') return 'automacao';
     if (tabParam === 'backup') return 'backup';
     return 'geral';
@@ -69,7 +317,9 @@ export default function Settings() {
   // Sync tab state when URL parameters change
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam === 'automacao') {
+    if (tabParam === 'usuario') {
+      setActiveTab('usuario');
+    } else if (tabParam === 'automacao') {
       setActiveTab('automacao');
     } else if (tabParam === 'backup') {
       setActiveTab('backup');
@@ -514,23 +764,39 @@ export default function Settings() {
       // 1. Android APK (Capacitor native platform)
       if (Capacitor.isNativePlatform()) {
         try {
-          await Filesystem.writeFile({
+          const result = await Filesystem.writeFile({
             path: fileName,
             data: jsonStr,
-            directory: Directory.Documents,
+            directory: Directory.Cache,
             encoding: Encoding.UTF8
           });
 
           setShowBackupCodeModal(true);
+
+          try {
+            const importFn = new Function('specifier', 'return import(specifier);');
+            const Share = await importFn('@capacitor/share').then((m: any) => m?.Share).catch(() => null);
+            if (Share && result.uri) {
+              await Share.share({
+                title: 'Backup GODSHOP',
+                text: 'Arquivo de backup do sistema GODSHOP (.json)',
+                files: [result.uri],
+                dialogTitle: 'Salvar ou Compartilhar Backup'
+              });
+              toast.success('Backup gerado! Escolha "Salvar em Arquivos" para salvar no seu aparelho.');
+              return;
+            }
+          } catch (shareFileErr) {}
+
           await shareContent({
             title: 'Backup GODSHOP',
             text: 'Backup do sistema GODSHOP gerado com sucesso.',
-            dialogTitle: 'Compartilhar ou Salvar Arquivo de Backup'
+            dialogTitle: 'Salvar Arquivo de Backup'
           });
-          toast.success(`Backup salvo na pasta Documentos (${fileName}) e pronto para copiar ou compartilhar!`);
+          toast.success(`Backup gerado e pronto para salvar no seu aparelho!`);
           return;
         } catch (fsErr: any) {
-          console.warn('Capacitor Filesystem write error, falling back to Web APIs:', fsErr);
+          console.warn('Capacitor Filesystem write error:', fsErr);
         }
       }
 
@@ -599,10 +865,27 @@ export default function Settings() {
       try {
         const content = event.target?.result as string;
         if (!content || !content.trim()) {
-          throw new Error('O arquivo selecionado está vazio.');
+          toast.error('O arquivo selecionado está vazio.');
+          return;
         }
-        const json = JSON.parse(content);
-        const result = await backupService.importData(json);
+
+        // Validação robusta de sintaxe e estrutura
+        const validation = backupService.validateBackup(content);
+        if (!validation.isValid) {
+          toast.error(validation.error || 'Arquivo de backup inválido ou corrompido', {
+            description: validation.errorDetails,
+            duration: 9000
+          });
+          return;
+        }
+
+        if (validation.warnings.length > 0) {
+          toast.info('Compatibilidade ajustada:', {
+            description: validation.warnings[0]
+          });
+        }
+
+        const result = await backupService.importData(validation.normalizedData);
         if (result.success) {
           toast.success(result.message);
           queryClient.invalidateQueries();
@@ -612,10 +895,13 @@ export default function Settings() {
             window.location.reload();
           }, 600);
         } else {
-          toast.error(result.message);
+          toast.error(result.message, {
+            description: result.details?.[0],
+            duration: 8000
+          });
         }
       } catch (err: any) {
-        toast.error('Arquivo de backup corrompido ou inválido: ' + err.message);
+        toast.error('Falha ao processar arquivo de backup: ' + err.message);
       } finally {
         setIsImporting(false);
         if (targetInput) targetInput.value = '';
@@ -636,8 +922,23 @@ export default function Settings() {
 
     setIsImporting(true);
     try {
-      const json = JSON.parse(pasteJsonText.trim());
-      const result = await backupService.importData(json);
+      const validation = backupService.validateBackup(pasteJsonText);
+      if (!validation.isValid) {
+        toast.error(validation.error || 'Código de backup inválido ou corrompido', {
+          description: validation.errorDetails,
+          duration: 10000
+        });
+        setIsImporting(false);
+        return;
+      }
+
+      if (validation.warnings.length > 0) {
+        toast.info('Compatibilidade do código ajustada:', {
+          description: validation.warnings[0]
+        });
+      }
+
+      const result = await backupService.importData(validation.normalizedData);
       if (result.success) {
         toast.success(result.message);
         queryClient.invalidateQueries();
@@ -649,7 +950,10 @@ export default function Settings() {
           window.location.reload();
         }, 600);
       } else {
-        toast.error(result.message);
+        toast.error(result.message, {
+          description: result.details?.[0],
+          duration: 8000
+        });
       }
     } catch (err: any) {
       toast.error('Código de backup inválido ou corrompido: ' + err.message);
@@ -761,6 +1065,18 @@ export default function Settings() {
           >
             <SettingsIcon className="h-3.5 w-3.5" />
             Geral & Design
+          </button>
+          <button
+            onClick={() => setActiveTab('usuario')}
+            className={cn(
+              "px-4 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
+              activeTab === 'usuario' 
+                ? "bg-white text-black shadow-lg" 
+                : "text-muted-foreground hover:text-white"
+            )}
+          >
+            <UserCheck className="h-3.5 w-3.5" />
+            Dados do Usuário & Senha
           </button>
           <button
             onClick={() => setActiveTab('backup')}
@@ -942,6 +1258,82 @@ export default function Settings() {
               </div>
             </div>
 
+            {/* Card: Execução Contínua em Segundo Plano (APK & Executável) */}
+            <div className="bg-card border border-emerald-500/20 rounded-xl p-6 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-lg font-semibold flex items-center gap-2 text-foreground">
+                    <Activity className="h-5 w-5 text-emerald-400 animate-pulse" />
+                    Execução em Segundo Plano
+                  </h2>
+                  <span className={cn(
+                    "text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1",
+                    isBgRunning
+                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                      : "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                  )}>
+                    <span className={cn("h-1.5 w-1.5 rounded-full", isBgRunning ? "bg-emerald-400 animate-ping" : "bg-zinc-500")} />
+                    {isBgRunning ? 'Ativo' : 'Desativado'}
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Permite que o aplicativo Android (APK) e o executável para computador continuem sincronizando vendas, clientes e notificações mesmo minimizados ou com a tela desligada.
+                </p>
+
+                <div className="space-y-2.5 text-xs text-muted-foreground bg-muted/20 p-3.5 rounded-xl border border-border/50 mb-4">
+                  <div className="flex items-start gap-2">
+                    <span className="font-bold text-foreground">📱 No Celular (APK):</span>
+                    <span>Mantém a sincronização de cadastros remotos e notificações de cobrança rodando sem ser pausado pelo Android.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="font-bold text-foreground">💻 No Computador (.exe):</span>
+                    <span>O sistema continua atendendo e sincronizando silenciosamente em segundo plano na bandeja do sistema.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2 mt-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !isBgRunning;
+                    setIsBgRunning(next);
+                    backgroundService.setBackgroundEnabled(next);
+                    if (next) {
+                      toast.success('Modo segundo plano ativado! O sistema continuará sincronizando minimizado.');
+                    } else {
+                      toast.info('Modo segundo plano desativado.');
+                    }
+                  }}
+                  className={cn(
+                    "w-full py-2.5 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm",
+                    isBgRunning
+                      ? "bg-emerald-500 text-black hover:bg-emerald-600"
+                      : "bg-muted text-foreground hover:bg-muted/80"
+                  )}
+                >
+                  <Power className="h-4 w-4" />
+                  {isBgRunning ? 'Desativar Segundo Plano' : 'Ativar Execução em Segundo Plano'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const opened = await backgroundService.openAndroidBatterySettings();
+                    if (!opened) {
+                      toast.info('Para garantir que o Android nunca pause o app: vá em Configurações do Celular > Aplicativos > GODSHOP > Bateria > selecione "Sem Restrições".');
+                    } else {
+                      toast.success('Abrindo configurações do aplicativo no Android...');
+                    }
+                  }}
+                  className="w-full bg-white/5 hover:bg-white/10 text-muted-foreground hover:text-foreground py-2 px-3 rounded-xl text-[11px] font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer border border-border/50"
+                >
+                  <Smartphone className="h-3.5 w-3.5 text-emerald-400" />
+                  Configurar Bateria sem Restrições (Android)
+                </button>
+              </div>
+            </div>
+
             {/* Logout/Session Card */}
             <div className="bg-card border border-white/10 rounded-xl p-6 shadow-sm flex flex-col justify-between">
               <div>
@@ -962,6 +1354,549 @@ export default function Settings() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* RENDER TAB: DADOS DO USUÁRIO & SENHA */}
+      {activeTab === 'usuario' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          
+          {/* Card 1: Painel do Usuário com Cadastros Básicos (Fidelização do Cadastro) */}
+          <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-4">
+              <div>
+                <h3 className="text-base font-bold flex items-center gap-2 text-foreground">
+                  <UserCheck className="h-5 w-5 text-emerald-400" />
+                  Painel do Usuário & Cadastro da Empresa (Fidelização Cadastral)
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Mantenha os cadastros básicos do titular e da loja fidelizados para recibos, notas, WhatsApp e identificação no sistema.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                  Cadastro Ativo & Fidelizado
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1 flex items-center gap-1.5">
+                    <User className="h-3.5 w-3.5 text-muted-foreground" />
+                    Nome do Titular / Responsável
+                  </label>
+                  <input
+                    type="text"
+                    value={profileData.fullName}
+                    onChange={(e) => setProfileData({ ...profileData, fullName: e.target.value })}
+                    placeholder="Ex: Kaleb dos Santos Gonçalves"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1 flex items-center gap-1.5">
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                    Nome da Loja / Empresa
+                  </label>
+                  <input
+                    type="text"
+                    value={profileData.storeName}
+                    onChange={(e) => setProfileData({ ...profileData, storeName: e.target.value })}
+                    placeholder="Ex: GODSHOP"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1 flex items-center gap-1.5">
+                    <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                    E-mail de Acesso Principal
+                  </label>
+                  <input
+                    type="email"
+                    value={profileData.email}
+                    onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                    placeholder="seuemail@exemplo.com"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1 flex items-center gap-1.5">
+                    <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                    Telefone / WhatsApp Comercial
+                  </label>
+                  <input
+                    type="text"
+                    value={profileData.phone}
+                    onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                    placeholder="(32) 99963-4583"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1 flex items-center gap-1.5">
+                    <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
+                    CPF ou CNPJ
+                  </label>
+                  <input
+                    type="text"
+                    value={profileData.document}
+                    onChange={(e) => setProfileData({ ...profileData, document: e.target.value })}
+                    placeholder="000.000.000-00"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1 flex items-center gap-1.5">
+                    <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                    Cargo / Perfil de Acesso
+                  </label>
+                  <select
+                    value={profileData.role}
+                    onChange={(e) => setProfileData({ ...profileData, role: e.target.value })}
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="Proprietário / Administrador">Proprietário / Administrador</option>
+                    <option value="Gerente Geral">Gerente Geral</option>
+                    <option value="Vendedor Responsável">Vendedor Responsável</option>
+                    <option value="Financeiro / Operacional">Financeiro / Operacional</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1 flex items-center gap-1.5">
+                    <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+                    Chave Pix Padrão da Loja
+                  </label>
+                  <input
+                    type="text"
+                    value={profileData.pixKey}
+                    onChange={(e) => setProfileData({ ...profileData, pixKey: e.target.value })}
+                    placeholder="Telefone, CNPJ ou Aleatória"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1 flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                    Cidade / Estado (UF)
+                  </label>
+                  <input
+                    type="text"
+                    value={profileData.cityState}
+                    onChange={(e) => setProfileData({ ...profileData, cityState: e.target.value })}
+                    placeholder="Carangola - MG"
+                    className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border/50">
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                  Data de Registro: <strong className="text-foreground">{profileData.registeredAt}</strong>
+                </span>
+                <button
+                  type="submit"
+                  disabled={isSavingProfile}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition cursor-pointer"
+                >
+                  <Check className="h-4 w-4" />
+                  {isSavingProfile ? 'Salvando...' : 'Salvar e Fidelizar Cadastro'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Card 2: Painel de Alteração de Senha & Segurança */}
+          <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-3">
+              <div>
+                <h3 className="text-base font-bold flex items-center gap-2 text-foreground">
+                  <Lock className="h-5 w-5 text-blue-500" />
+                  Painel de Alteração de Senha & Segurança
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Atualize sua senha de acesso ao sistema com validação da senha anterior e segurança reforçada.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPasswordModal(true)}
+                className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer self-start sm:self-center"
+              >
+                <Eye className="h-4 w-4" />
+                Ver Dados & Senha Atual
+              </button>
+            </div>
+
+            <form onSubmit={handlePasswordChange} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Senha Antiga
+                </label>
+                <div className="relative">
+                  <input
+                    type={showOldPass ? "text" : "password"}
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                    placeholder="Sua senha atual"
+                    className="w-full p-2.5 pr-10 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOldPass(!showOldPass)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    {showOldPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Nova Senha
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPass ? "text" : "password"}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    className="w-full p-2.5 pr-10 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPass(!showNewPass)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    {showNewPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-foreground mb-1">
+                  Confirmar Nova Senha
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPass ? "text" : "password"}
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    placeholder="Repita a nova senha"
+                    className="w-full p-2.5 pr-10 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPass(!showConfirmPass)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    {showConfirmPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <button
+                  type="submit"
+                  disabled={isChangingPassword}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg transition cursor-pointer"
+                >
+                  {isChangingPassword ? (
+                    <>
+                      <div className="h-3.5 w-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      Alterando...
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="h-4 w-4" />
+                      Atualizar Senha
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Card 3: Registros de Usuários do Sistema (Gestão de Operadores & Equipe) */}
+          <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-3">
+              <div>
+                <h3 className="text-base font-bold flex items-center gap-2 text-foreground">
+                  <Users className="h-5 w-5 text-indigo-400" />
+                  Registros de Usuários & Operadores da Equipe ({registeredUsers.length})
+                </h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Gerencie todos os operadores, vendedores e administradores cadastrados com permissão de login no sistema.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddUserModal(true)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer self-start sm:self-center shadow-sm"
+              >
+                <Plus className="h-4 w-4" />
+                Novo Registro de Usuário
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-border/50 text-muted-foreground">
+                    <th className="py-2.5 px-3 font-semibold">Nome</th>
+                    <th className="py-2.5 px-3 font-semibold">E-mail de Acesso</th>
+                    <th className="py-2.5 px-3 font-semibold">Telefone</th>
+                    <th className="py-2.5 px-3 font-semibold">Cargo / Função</th>
+                    <th className="py-2.5 px-3 font-semibold">Status</th>
+                    <th className="py-2.5 px-3 font-semibold text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {registeredUsers.map((regUser) => (
+                    <tr key={regUser.id} className="hover:bg-muted/20 transition">
+                      <td className="py-2.5 px-3 font-semibold text-foreground flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-full bg-indigo-500/10 text-indigo-400 font-bold flex items-center justify-center text-xs">
+                          {regUser.name.charAt(0).toUpperCase()}
+                        </div>
+                        {regUser.name}
+                      </td>
+                      <td className="py-2.5 px-3 font-mono text-muted-foreground">{regUser.email}</td>
+                      <td className="py-2.5 px-3 text-muted-foreground">{regUser.phone || '—'}</td>
+                      <td className="py-2.5 px-3">
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full text-[10px] font-bold border",
+                          regUser.role === 'Administrador' 
+                            ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                            : "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                        )}>
+                          {regUser.role}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          {regUser.status || 'Ativo'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        {registeredUsers.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(regUser.id, regUser.name)}
+                            className="text-muted-foreground hover:text-destructive p-1 rounded-lg transition cursor-pointer"
+                            title="Remover Usuário"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Modal: Cadastro de Novo Usuário do Sistema */}
+          {showAddUserModal && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-card border border-border w-full max-w-md rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+                <div className="flex items-center justify-between border-b border-border/50 pb-3">
+                  <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
+                    <Plus className="h-5 w-5 text-indigo-400" />
+                    Novo Registro de Usuário / Operador
+                  </h3>
+                  <button
+                    onClick={() => setShowAddUserModal(false)}
+                    className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <form onSubmit={handleRegisterNewUser} className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1">
+                      Nome Completo
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newUserName}
+                      onChange={(e) => setNewUserName(e.target.value)}
+                      placeholder="Ex: João da Silva"
+                      className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1">
+                      E-mail de Acesso / Login
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      placeholder="joao@godshop.com"
+                      className="w-full p-2.5 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Telefone / WhatsApp
+                      </label>
+                      <input
+                        type="text"
+                        value={newUserPhone}
+                        onChange={(e) => setNewUserPhone(e.target.value)}
+                        placeholder="(32) 99999-0000"
+                        className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-foreground mb-1">
+                        Cargo / Função
+                      </label>
+                      <select
+                        value={newUserRole}
+                        onChange={(e) => setNewUserRole(e.target.value)}
+                        className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
+                      >
+                        <option value="Vendedor">Vendedor</option>
+                        <option value="Gerente">Gerente</option>
+                        <option value="Atendente">Atendente</option>
+                        <option value="Administrador">Administrador</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1">
+                      Senha Inicial de Acesso (Mínimo 6 caracteres)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewUserPassword ? "text" : "password"}
+                        required
+                        value={newUserPassword}
+                        onChange={(e) => setNewUserPassword(e.target.value)}
+                        placeholder="Digite a senha do usuário"
+                        className="w-full p-2.5 pr-10 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                      >
+                        {showNewUserPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-border/50">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddUserModal(false)}
+                      className="px-4 py-2 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50 cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isAddingUser}
+                      className="px-5 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-md"
+                    >
+                      {isAddingUser ? 'Salvando...' : 'Cadastrar Usuário'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal de Dados Básicos e Visualização de Senha */}
+          {showPasswordModal && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-card border border-border w-full max-w-md rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+                <div className="flex items-center justify-between border-b border-border/50 pb-3">
+                  <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
+                    <User className="h-5 w-5 text-blue-500" />
+                    Dados Básicos do Usuário & Senha
+                  </h3>
+                  <button
+                    onClick={() => setShowPasswordModal(false)}
+                    className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div className="p-3 rounded-xl bg-muted/30 border border-border/50 space-y-2">
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-bold">Titular Cadastrado:</span>
+                      <span className="font-semibold text-foreground">{profileData.fullName}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-bold">Empresa / Loja:</span>
+                      <span className="font-semibold text-foreground">{profileData.storeName}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-bold">E-mail / Usuário:</span>
+                      <span className="font-mono font-semibold text-foreground">{user?.email || profileData.email || 'admin@godshop.com'}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-bold">ID do Usuário:</span>
+                      <span className="font-mono text-muted-foreground text-[11px]">{user?.id || 'Modo Local / Offline'}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase font-bold">Status de Conexão:</span>
+                      <span className="font-semibold text-emerald-400">{isOfflineMode ? 'Modo Offline (Local)' : 'Conectado (Supabase)'}</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 space-y-1.5">
+                    <span className="text-blue-400 font-bold block text-[11px]">Senha Atual em Cache:</span>
+                    <div className="flex items-center justify-between font-mono bg-background/80 p-2 rounded-lg border border-border">
+                      <span className="text-foreground">
+                        {(() => {
+                          try {
+                            const email = user?.email || profileData.email || localStorage.getItem('godshop_saved_email') || 'admin@godshop.com';
+                            const creds = JSON.parse(localStorage.getItem('godshop_credentials') || '{}');
+                            return creds[email.toLowerCase()] || '••••••••';
+                          } catch {
+                            return '••••••••';
+                          }
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2 border-t border-border/50">
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordModal(false)}
+                    className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1310,10 +2245,60 @@ export default function Settings() {
                       rows={6}
                       value={pasteJsonText}
                       onChange={(e) => setPasteJsonText(e.target.value)}
-                      placeholder='Cole aqui o código do backup (ex: {"version": 1, "data": {...}})'
+                      placeholder='Cole aqui o código do backup (ex: {"version": 2, "timestamp": "...", "data": {...}})'
                       style={{ WebkitUserSelect: 'text', userSelect: 'text' }}
-                      className="w-full p-3 rounded-xl bg-background border border-input text-xs font-mono text-foreground focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                      className={cn(
+                        "w-full p-3 rounded-xl bg-background border text-xs font-mono text-foreground focus:outline-none resize-none transition",
+                        pasteValidation
+                          ? pasteValidation.isValid
+                            ? "border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/30"
+                            : "border-red-500/50 focus:ring-2 focus:ring-red-500/30"
+                          : "border-input focus:ring-2 focus:ring-blue-500"
+                      )}
                     />
+
+                    {/* Live Validation Feedback Card */}
+                    {pasteValidation && (
+                      <div className="animate-in fade-in duration-200">
+                        {pasteValidation.isValid && pasteValidation.summary ? (
+                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs space-y-1.5">
+                            <div className="font-bold text-emerald-400 flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                                Integridade Verificada (GODSHOP v{pasteValidation.summary.version})
+                              </span>
+                              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold">
+                                {pasteValidation.summary.totalRecords} itens
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px] text-muted-foreground pt-1 border-t border-emerald-500/20">
+                              <div>• <strong className="text-foreground">{pasteValidation.summary.clients}</strong> Clientes</div>
+                              <div>• <strong className="text-foreground">{pasteValidation.summary.sales}</strong> Vendas</div>
+                              <div>• <strong className="text-foreground">{pasteValidation.summary.iphones + pasteValidation.summary.consoles}</strong> Estoque</div>
+                              <div>• <strong className="text-foreground">{pasteValidation.summary.suppliers}</strong> Fornecedores</div>
+                            </div>
+                            {pasteValidation.warnings.length > 0 && (
+                              <div className="text-amber-400 text-[10px] pt-0.5 flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3 shrink-0" />
+                                <span>{pasteValidation.warnings[0]}</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs space-y-1.5">
+                            <div className="font-bold text-red-400 flex items-center gap-1.5">
+                              <AlertTriangle className="h-4 w-4 shrink-0 text-red-400" />
+                              {pasteValidation.error || 'Código corrompido ou incompleto'}
+                            </div>
+                            {pasteValidation.errorDetails && (
+                              <p className="text-muted-foreground text-[11px] leading-relaxed whitespace-pre-line pl-5">
+                                {pasteValidation.errorDetails}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between gap-2 pt-2">
                       {pasteJsonText ? (
@@ -1336,7 +2321,7 @@ export default function Settings() {
                         </button>
                         <button
                           type="button"
-                          disabled={isImporting || !pasteJsonText.trim()}
+                          disabled={isImporting || !pasteValidation?.isValid}
                           onClick={handlePasteBackupSubmit}
                           className="px-5 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 shadow-lg disabled:opacity-50 cursor-pointer"
                         >

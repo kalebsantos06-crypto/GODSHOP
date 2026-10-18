@@ -13,26 +13,62 @@ import { db } from './services/db';
 import { AuthProvider } from './types/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { initRealtimeSync } from './services/realtime';
+import { backgroundService } from './services/backgroundService';
 
-// Lazy load route pages for maximum startup performance & minimal memory usage
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Inventory = lazy(() => import('./pages/Inventory'));
-const Sales = lazy(() => import('./pages/Sales'));
-const ConsolesStock = lazy(() => import('./pages/ConsolesStock'));
-const GiftsAndAccessories = lazy(() => import('./pages/GiftsAndAccessories'));
-const Invoices = lazy(() => import('./pages/Invoices'));
-const Clients = lazy(() => import('./pages/Clients'));
-const Suppliers = lazy(() => import('./pages/Suppliers'));
-const GuaranteeNote = lazy(() => import('./pages/GuaranteeNote'));
-const PriceTable = lazy(() => import('./pages/PriceTable'));
-const Settings = lazy(() => import('./pages/Settings'));
-const UsersPage = lazy(() => import('./pages/Users'));
-const OfferTagGenerator = lazy(() => import('./pages/OfferTagGenerator'));
-const Notes = lazy(() => import('./pages/Notes'));
-const Login = lazy(() => import('./pages/Login'));
-const FiscalHub = lazy(() => import('./pages/fiscal/FiscalHub'));
-const ClientSignature = lazy(() => import('./pages/ClientSignature'));
-const ClientRemoteRegister = lazy(() => import('./pages/ClientRemoteRegister'));
+// Resilient dynamic page loader: auto-retries on network drop or dev server refresh
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    try {
+      return await factory();
+    } catch (error: any) {
+      const errorMsg = String(error?.message || error || '').toLowerCase();
+      if (
+        errorMsg.includes('failed to fetch') ||
+        errorMsg.includes('dynamically imported module') ||
+        error?.name === 'TypeError'
+      ) {
+        console.warn('[lazyWithRetry] Module import failed, retrying...', error);
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        try {
+          return await factory();
+        } catch (retryErr) {
+          console.error('[lazyWithRetry] Second attempt failed, refreshing page for fresh chunks...', retryErr);
+          const lastReload = sessionStorage.getItem('last_dyn_import_reload');
+          const now = Date.now();
+          if (!lastReload || now - Number(lastReload) > 10000) {
+            sessionStorage.setItem('last_dyn_import_reload', String(now));
+            window.location.reload();
+            return new Promise(() => {});
+          }
+          throw retryErr;
+        }
+      }
+      throw error;
+    }
+  });
+}
+
+// Lazy load route pages with retry protection
+const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
+const Inventory = lazyWithRetry(() => import('./pages/Inventory'));
+const Sales = lazyWithRetry(() => import('./pages/Sales'));
+const ConsolesStock = lazyWithRetry(() => import('./pages/ConsolesStock'));
+const GiftsAndAccessories = lazyWithRetry(() => import('./pages/GiftsAndAccessories'));
+const Invoices = lazyWithRetry(() => import('./pages/Invoices'));
+const Clients = lazyWithRetry(() => import('./pages/Clients'));
+const Suppliers = lazyWithRetry(() => import('./pages/Suppliers'));
+const GuaranteeNote = lazyWithRetry(() => import('./pages/GuaranteeNote'));
+const PriceTable = lazyWithRetry(() => import('./pages/PriceTable'));
+const Settings = lazyWithRetry(() => import('./pages/Settings'));
+const UsersPage = lazyWithRetry(() => import('./pages/Users'));
+const OfferTagGenerator = lazyWithRetry(() => import('./pages/OfferTagGenerator'));
+const Notes = lazyWithRetry(() => import('./pages/Notes'));
+const Login = lazyWithRetry(() => import('./pages/Login'));
+const FiscalHub = lazyWithRetry(() => import('./pages/fiscal/FiscalHub'));
+const ClientSignature = lazyWithRetry(() => import('./pages/ClientSignature'));
+const ClientRemoteRegister = lazyWithRetry(() => import('./pages/ClientRemoteRegister'));
 
 // High performance Query Client configuration with intelligent caching
 const queryClient = new QueryClient({
@@ -151,15 +187,17 @@ function AppContent() {
     };
   }, []);
 
-  // Multi-device Cloud Sync: automated background synchronization across all devices
+  // Multi-device Cloud Sync & Background Execution Engine (APK & Desktop)
   useEffect(() => {
     let isSubscribed = true;
 
+    // Initialize background execution and listeners
+    backgroundService.init();
+
     const performSync = async () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       try {
-        // 1. Pull latest cloud data so new devices get all saved items immediately
+        // 1. Pull latest cloud data so all devices get all saved items immediately
         const pullRes = await db.pullFromCloud();
         if (pullRes.success && isSubscribed) {
           if (pullRes.hasChanged) {
@@ -177,7 +215,10 @@ function AppContent() {
     // Initial sync on app boot
     performSync();
 
-    // Fast polling interval: syncs every 12 seconds in background when online and active
+    // Register sync task to run with background keep-alive
+    const unregisterBgSync = backgroundService.registerSyncTask(performSync);
+
+    // Fast polling interval: syncs every 12 seconds in foreground or background
     const interval = setInterval(() => {
       performSync();
     }, 12000);
@@ -195,17 +236,15 @@ function AppContent() {
 
     window.addEventListener('focus', handleFocusOrActivity);
     window.addEventListener('cloud_sync_completed', handleSyncCompleted);
-    window.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        performSync();
-      }
-    });
+    window.addEventListener('visibilitychange', handleFocusOrActivity);
 
     return () => {
       isSubscribed = false;
       clearInterval(interval);
+      unregisterBgSync();
       window.removeEventListener('focus', handleFocusOrActivity);
       window.removeEventListener('cloud_sync_completed', handleSyncCompleted);
+      window.removeEventListener('visibilitychange', handleFocusOrActivity);
     };
   }, [isAuthenticated, user]);
 
