@@ -15,6 +15,7 @@ import { cn } from '../lib/utils';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 import { copyToClipboard, readFromClipboard, shareContent, getCustomAppDomain, setCustomAppDomain } from '../utils/url';
+import { checkAndRequestStoragePermission } from '../utils/permissionUtils';
 import { isSupabaseConfigured, setCustomSupabaseCredentials, supabase } from '../lib/supabase';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 import { parseLocalDate, getSaleNotifications } from '../lib/dateUtils';
@@ -756,95 +757,12 @@ export default function Settings() {
     try {
       const data = await backupService.exportData();
       const jsonStr = JSON.stringify(data, null, 2);
-      const fileName = `backup_sistema_godshop_${new Date().toISOString().slice(0, 10)}.json`;
-
-      // Always populate the code state and open modal so the user can easily view, copy, or save
+      
+      // Apenas preparar os dados e abrir o modal
       setBackupJsonCode(jsonStr);
       setShowBackupCodeModal(true);
-
-      // 1. Android APK (Capacitor native platform) - Save to device Documents folder directly
-      if (Capacitor.isNativePlatform()) {
-        try {
-          // Solicitar permissão de escrita
-          const status = await Filesystem.checkPermissions();
-          if (status.publicStorage !== 'granted') {
-            const request = await Filesystem.requestPermissions();
-            if (request.publicStorage !== 'granted') {
-              toast.error('Permissão de armazenamento negada pelo usuário.');
-              return;
-            }
-          }
-
-          let targetDir = Directory.Documents;
-          try {
-            await Filesystem.writeFile({
-              path: fileName,
-              data: jsonStr,
-              directory: targetDir,
-              encoding: Encoding.UTF8,
-              recursive: true
-            });
-          } catch (docErr) {
-            targetDir = Directory.ExternalStorage || Directory.Cache;
-            await Filesystem.writeFile({
-              path: fileName,
-              data: jsonStr,
-              directory: targetDir,
-              encoding: Encoding.UTF8,
-              recursive: true
-            });
-          }
-
-          const fileUri = await Filesystem.getUri({
-            path: fileName,
-            directory: targetDir
-          });
-
-          try {
-            const { Share } = await import('@capacitor/share');
-            if (Share && fileUri?.uri) {
-              await Share.share({
-                title: 'Backup GODSHOP',
-                text: 'Arquivo de backup do sistema GODSHOP (.json). Salve no seu aparelho.',
-                url: fileUri.uri,
-                dialogTitle: 'Salvar Arquivo de Backup'
-              });
-            }
-          } catch (shareFileErr) {
-            console.warn('Capacitor Share file error:', shareFileErr);
-          }
-
-          toast.success('Backup gerado e salvo na memória do seu celular! Use o modal para gerenciar.');
-          return;
-        } catch (fsErr: any) {
-          console.warn('Capacitor Filesystem write error:', fsErr);
-        }
-      }
-
-      // 3. FileSaver / Blob fallback for browsers
-      try {
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const { saveAs } = await import('file-saver');
-        saveAs(blob, fileName);
-        toast.success('Arquivo de backup baixado com sucesso!');
-      } catch (saveErr) {
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          try {
-            if (a.parentNode) a.parentNode.removeChild(a);
-            URL.revokeObjectURL(url);
-          } catch (e) {}
-        }, 1000);
-        toast.success('Arquivo de backup baixado com sucesso!');
-      }
     } catch (err: any) {
-      toast.error('Erro ao exportar backup: ' + (err?.message || err));
+      toast.error('Erro ao preparar exportação: ' + (err?.message || err));
     } finally {
       setIsExportingBackup(false);
     }
@@ -2125,6 +2043,38 @@ export default function Settings() {
                 </div>
               </div>
 
+              {/* Gerenciador de Backups Locais */}
+              <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm space-y-4 mt-6">
+                <h3 className="text-base font-bold flex items-center gap-2 text-foreground border-b border-border/50 pb-3">
+                  <Folder className="h-5 w-5 text-emerald-400" />
+                  Gerenciador de Backups Locais
+                </h3>
+                <div className="space-y-3">
+                  <button
+                    onClick={async () => {
+                      if (!Capacitor.isNativePlatform()) return;
+                      try {
+                        const files = await Filesystem.readdir({
+                          path: '',
+                          directory: Directory.Documents
+                        });
+                        const backups = files.files.filter(f => f.name.endsWith('.json') && f.name.includes('backup'));
+                        console.log('Backups encontrados:', backups);
+                        toast.info(`Foram encontrados ${backups.length} backups na pasta Documentos.`);
+                      } catch (e) {
+                        toast.error('Erro ao listar backups.');
+                      }
+                    }}
+                    className="w-full bg-muted/50 hover:bg-muted py-2 rounded-lg text-xs font-semibold text-foreground transition cursor-pointer"
+                  >
+                    Atualizar Lista de Backups
+                  </button>
+                  <p className="text-[10px] text-muted-foreground text-center">
+                    (Listagem funcional apenas em ambiente nativo Android/iOS)
+                  </p>
+                </div>
+              </div>
+
               {/* Modal para Baixar e Salvar Arquivo de Backup no Aparelho com Escolha de Local */}
               {showBackupCodeModal && (
                 <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
@@ -2191,9 +2141,14 @@ export default function Settings() {
                           // 1. If running on native Capacitor (Android APK)
                           if (Capacitor.isNativePlatform()) {
                             try {
+                              // Verifica permissão antes de gravar
+                              const hasPermission = await checkAndRequestStoragePermission();
+                              if (!hasPermission) return;
+
                               let targetDir = Directory.Documents;
                               if (locationChoice === 'ExternalStorage') targetDir = Directory.ExternalStorage || Directory.Documents;
                               if (locationChoice === 'Cache') targetDir = Directory.Cache;
+
 
                               await Filesystem.writeFile({
                                 path: customFileName,
