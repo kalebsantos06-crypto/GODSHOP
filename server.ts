@@ -7,6 +7,15 @@ import { GoogleGenAI } from "@google/genai";
 import { format } from "date-fns";
 import { getSaleNotifications, parseLocalDate } from "./src/lib/dateUtils";
 
+// Guard against process crashes
+process.on('uncaughtException', (err) => {
+  console.error('[Server Daemon] Uncaught exception safely handled:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Server Daemon] Unhandled rejection safely handled:', reason);
+});
+
 const app = express();
 const PORT = 3000;
 
@@ -38,108 +47,6 @@ async function supabaseQuery(table: string, userId: string) {
   }
   return [];
 }
-
-const DEFAULT_TEMPLATES = {
-  days_3_before: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsiderar. Caso precise de ajuda, estamos à disposição! 🤍",
-  day_of: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}).\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsiderar. Caso precise de ajuda, estamos à disposição! 🤍",
-  overdue: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nNotamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍"
-};
-
-async function runAutomationTask() {
-  const now = new Date();
-  console.log(`[Automation] Initiating daily check at ${now.toLocaleString('pt-BR')}`);
-  
-  const allSettings = readPublicSettings();
-  const userIds = Object.keys(allSettings);
-
-  for (const userId of userIds) {
-    const userSettings = allSettings[userId];
-    
-    if (userSettings.isFullAutoEnabled && userSettings.isWebhookEnabled && userSettings.webhookUrl) {
-      console.log(`[Automation] Processing background notifications for user: ${userId}`);
-      
-      try {
-        const sales = await supabaseQuery('sales', userId);
-        const clients = await supabaseQuery('clients', userId);
-        const iphones = await supabaseQuery('iphones', userId);
-        const consoles = await supabaseQuery('consoles', userId);
-
-        const notifications = getSaleNotifications(sales, clients, iphones, consoles);
-        // Only notify for today (0) or slightly overdue (-1) or precisely 3 days before (3)
-        const toNotify = notifications.filter(n => n.daysDiff === 0 || n.daysDiff === 3 || n.daysDiff === -1);
-
-        if (toNotify.length === 0) {
-          console.log(`[Automation] No pending notifications for user ${userId} today.`);
-          continue;
-        }
-
-        console.log(`[Automation] Found ${toNotify.length} messages to send for user ${userId}.`);
-
-        for (const item of toNotify) {
-          if (!item.clientPhone) continue;
-
-          let template = userSettings.templateDayOf || DEFAULT_TEMPLATES.day_of;
-          if (item.daysDiff === 3) template = userSettings.template3Days || DEFAULT_TEMPLATES.days_3_before;
-          if (item.daysDiff === -1) template = userSettings.templateOverdue || DEFAULT_TEMPLATES.overdue;
-
-          const dueDateObj = typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate;
-          const formattedDueDate = format(dueDateObj, 'dd/MM/yyyy');
-          const amount = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.expectedAmount);
-
-          const message = template
-            .replace(/{cliente}/g, item.clientName)
-            .replace(/{aparelho}/g, item.itemName)
-            .replace(/{parcela}/g, String(item.installmentIndex))
-            .replace(/{valor}/g, amount)
-            .replace(/{vencimento}/g, formattedDueDate)
-            .replace(/{atendente}/g, userSettings.attendantName || 'Karen')
-            .replace(/{pix}/g, userSettings.pixInfo || 'Chave Pix: 13036942637');
-
-          try {
-            const res = await fetch(userSettings.webhookUrl.trim(), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(userSettings.webhookToken ? { 'Authorization': `Bearer ${userSettings.webhookToken}` } : {})
-              },
-              body: JSON.stringify({
-                phone: item.clientPhone,
-                message,
-                clientName: item.clientName,
-                itemName: item.itemName,
-                installmentIndex: item.installmentIndex,
-                expectedAmount: item.expectedAmount,
-                dueDate: format(dueDateObj, 'yyyy-MM-dd'),
-                automationType: 'background_auto'
-              })
-            });
-
-            if (res.ok) {
-              console.log(`[Automation] Message sent successfully to ${item.clientName} for user ${userId}`);
-            } else {
-              console.error(`[Automation] Webhook failed for ${item.clientName} (User: ${userId}): Status ${res.status}`);
-            }
-          } catch (sendErr) {
-            console.error(`[Automation] Network error sending webhook for ${item.clientName} (User: ${userId})`);
-          }
-          
-          // Small delay between messages to avoid rate limits
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      } catch (err) {
-        console.error(`[Automation] Critical error processing user ${userId}:`, err);
-      }
-    }
-  }
-  console.log(`[Automation] Finished all tasks.`);
-}
-
-// Set interval to run once a day (every 24 hours)
-// We use a shorter interval check (e.g., every 6 hours) but logic inside could check last run time
-setInterval(runAutomationTask, 12 * 60 * 60 * 1000); // Every 12 hours
-
-// Run once on startup after 30 seconds
-setTimeout(runAutomationTask, 30 * 1000);
 
 app.use(express.json({ limit: "15mb" }));
 
@@ -2001,7 +1908,7 @@ app.delete("/api/users/:id", (req, res) => {
 
 // --- SETTINGS STORAGE API ---
 
-const readPublicSettings = (): Record<string, any> => {
+function readPublicSettings(): Record<string, any> {
   try {
     if (!fs.existsSync(SETTINGS_FILE)) return {};
     const content = fs.readFileSync(SETTINGS_FILE, "utf8");
@@ -2010,15 +1917,125 @@ const readPublicSettings = (): Record<string, any> => {
     console.error("Error reading public settings file:", err);
     return {};
   }
-};
+}
 
-const writePublicSettings = (data: Record<string, any>) => {
+function writePublicSettings(data: Record<string, any>) {
   try {
     atomicWriteFileSync(SETTINGS_FILE, data);
   } catch (err) {
     console.error("Error writing public settings file:", err);
   }
+}
+
+const DEFAULT_TEMPLATES = {
+  days_3_before: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsiderar. Caso precise de ajuda, estamos à disposição! 🤍",
+  day_of: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence hoje ({vencimento}).\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsiderar. Caso precise de ajuda, estamos à disposição! 🤍",
+  overdue: "Olá, {cliente}! 😊 Aqui é a {atendente}, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nNotamos que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) venceu em {vencimento} e está pendente.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n{pix}\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos aqui! 🤍"
 };
+
+async function runAutomationTask() {
+  try {
+    const now = new Date();
+    console.log(`[Automation] Initiating daily check at ${now.toLocaleString('pt-BR')}`);
+    
+    const allSettings = readPublicSettings();
+    if (!allSettings || typeof allSettings !== 'object') return;
+    const userIds = Object.keys(allSettings);
+
+    for (const userId of userIds) {
+      const userSettings = allSettings[userId];
+      if (!userSettings || typeof userSettings !== 'object') continue;
+      
+      if (userSettings.isFullAutoEnabled && userSettings.isWebhookEnabled && userSettings.webhookUrl) {
+        console.log(`[Automation] Processing background notifications for user: ${userId}`);
+        
+        try {
+          const sales = await supabaseQuery('sales', userId);
+          const clients = await supabaseQuery('clients', userId);
+          const iphones = await supabaseQuery('iphones', userId);
+          const consoles = await supabaseQuery('consoles', userId);
+
+          const notifications = getSaleNotifications(sales, clients, iphones, consoles);
+          const toNotify = notifications.filter(n => n.daysDiff === 0 || n.daysDiff === 3 || n.daysDiff === -1);
+
+          if (toNotify.length === 0) {
+            console.log(`[Automation] No pending notifications for user ${userId} today.`);
+            continue;
+          }
+
+          console.log(`[Automation] Found ${toNotify.length} messages to send for user ${userId}.`);
+
+          for (const item of toNotify) {
+            if (!item.clientPhone) continue;
+
+            let template = userSettings.templateDayOf || DEFAULT_TEMPLATES.day_of;
+            if (item.daysDiff === 3) template = userSettings.template3Days || DEFAULT_TEMPLATES.days_3_before;
+            if (item.daysDiff === -1) template = userSettings.templateOverdue || DEFAULT_TEMPLATES.overdue;
+
+            const dueDateObj = typeof item.dueDate === 'string' ? parseLocalDate(item.dueDate) : item.dueDate;
+            const formattedDueDate = format(dueDateObj, 'dd/MM/yyyy');
+            const amount = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.expectedAmount);
+
+            const message = template
+              .replace(/{cliente}/g, item.clientName)
+              .replace(/{aparelho}/g, item.itemName)
+              .replace(/{parcela}/g, String(item.installmentIndex))
+              .replace(/{valor}/g, amount)
+              .replace(/{vencimento}/g, formattedDueDate)
+              .replace(/{atendente}/g, userSettings.attendantName || 'Karen')
+              .replace(/{pix}/g, userSettings.pixInfo || 'Chave Pix: 13036942637');
+
+            try {
+              const res = await fetch(userSettings.webhookUrl.trim(), {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(userSettings.webhookToken ? { 'Authorization': `Bearer ${userSettings.webhookToken}` } : {})
+                },
+                body: JSON.stringify({
+                  phone: item.clientPhone,
+                  message,
+                  clientName: item.clientName,
+                  itemName: item.itemName,
+                  installmentIndex: item.installmentIndex,
+                  expectedAmount: item.expectedAmount,
+                  dueDate: format(dueDateObj, 'yyyy-MM-dd'),
+                  automationType: 'background_auto'
+                })
+              });
+
+              if (res.ok) {
+                console.log(`[Automation] Message sent successfully to ${item.clientName} for user ${userId}`);
+              } else {
+                console.error(`[Automation] Webhook failed for ${item.clientName} (User: ${userId}): Status ${res.status}`);
+              }
+            } catch (sendErr) {
+              console.error(`[Automation] Network error sending webhook for ${item.clientName} (User: ${userId})`);
+            }
+            
+            // Small delay between messages to avoid rate limits
+            await new Promise(r => setTimeout(r, 1000));
+          }
+        } catch (err) {
+          console.error(`[Automation] Critical error processing user ${userId}:`, err);
+        }
+      }
+    }
+    console.log(`[Automation] Finished all tasks.`);
+  } catch (err) {
+    console.error(`[Automation] Unhandled error in runAutomationTask:`, err);
+  }
+}
+
+// Set interval to run every 12 hours
+setInterval(() => {
+  runAutomationTask().catch(e => console.error('[Automation] Interval error:', e));
+}, 12 * 60 * 60 * 1000);
+
+// Run once on startup after 30 seconds
+setTimeout(() => {
+  runAutomationTask().catch(e => console.error('[Automation] Startup error:', e));
+}, 30 * 1000);
 
 // Public endpoint to fetch settings (supports optional userId)
 app.get("/api/settings", (req, res) => {
@@ -2135,7 +2152,9 @@ async function startServer() {
 }
 
 if (!process.env.VERCEL) {
-  startServer();
+  startServer().catch((err) => {
+    console.error('[Server] Fatal startup error:', err);
+  });
 }
 
 export default app;

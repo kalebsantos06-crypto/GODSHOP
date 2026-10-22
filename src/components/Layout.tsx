@@ -20,12 +20,12 @@ import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-f
 import { formatBRL } from '../lib/formatCurrency';
 import { checkNotificationPermission, requestNotificationPermission, openNotificationSettings, showNotification, scheduleBackgroundNotifications } from '../lib/pushNotifications';
 
+
 export default function Layout() {
   const queryClient = useQueryClient();
   const location = useLocation();
   const mainRef = useRef<HTMLDivElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
-  
   const { user, login, signUp, logout, isAuthenticated, isOfflineMode } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
@@ -804,6 +804,7 @@ export default function Layout() {
         </div>
 
         <div className="flex-1 flex justify-end items-center gap-1.5 sm:gap-2">
+
           {/* Notifications Bell & Dropdown */}
           {isAuthenticated && (
             <div className="relative">
@@ -1550,6 +1551,7 @@ export default function Layout() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

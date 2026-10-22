@@ -82,15 +82,6 @@ export const supabase = createClient(supabaseUrl || DEFAULT_SUPABASE_URL, supaba
     autoRefreshToken: true,
     detectSessionInUrl: true,
     storageKey: 'sb-auth-token',
-    // Implements a safe no-op lock function to prevent navigator.locks Permission/Security errors inside sandboxed iframes (such as the AI Studio preview window)
-    // which otherwise throws Lock-stolen / Lock-broken failures that can block network fetch queries.
-    // Handles any callback signature by executing the callback function passed as the last argument.
-    lock: async (...args: any[]) => {
-      const fn = args[args.length - 1];
-      if (typeof fn === 'function') {
-        return await fn();
-      }
-    }
   }
 });
 

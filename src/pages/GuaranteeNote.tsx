@@ -409,10 +409,10 @@ export default function GuaranteeNote() {
 
   useEffect(() => {
     checkSignature();
-    // Set an interval to poll signature status every 4 seconds if not signed yet
+    // Set an interval to poll signature status every 15 seconds if not signed yet
     const pollInterval = setInterval(() => {
       checkSignature();
-    }, 4000);
+    }, 15000);
     return () => {
       if (pollInterval) clearInterval(pollInterval);
     };
@@ -1408,11 +1408,21 @@ Caso tenha alguma dúvida, estamos à disposição! 👍`)}` : '#'}
 
                 <section>
                   <h2 className="text-lg font-bold border-b border-[#d1d5db] mb-3 pb-1">
-                    Detalhes do {iphone ? 'Aparelho' : (consoleItem?.category === 'tv' ? 'Televisor / TV' : (consoleItem?.category === 'rice_cooker' ? 'Eletrodoméstico' : 'Console'))}
+                    Detalhes dos Produtos da Venda
                   </h2>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    {iphone ? (
-                      <>
+                  <div className="space-y-3 text-sm">
+                    {sale.items && sale.items.length > 0 ? (
+                      sale.items.map((it, idx) => (
+                        <div key={idx} className="p-2 border border-[#d1d5db] rounded-md bg-gray-50 flex justify-between items-center">
+                          <div>
+                            <p className="font-semibold text-gray-900">{it.name}</p>
+                            <span className="text-xs uppercase text-gray-600 font-medium">{it.type} {it.quantity && it.quantity > 1 ? `(Qtd: ${it.quantity})` : ''}</span>
+                          </div>
+                          <span className="font-bold text-emerald-700">{formatBRL(it.price)}</span>
+                        </div>
+                      ))
+                    ) : iphone ? (
+                      <div className="grid grid-cols-2 gap-4 text-sm">
                         <p><span className="font-semibold">Modelo:</span> {iphone.model}</p>
                         <p><span className="font-semibold">IMEI / Serial:</span> <span className="font-mono">{iphone.imei || 'N/A'}</span></p>
                         <p><span className="font-semibold">Armazenamento:</span> {iphone.storage}</p>
@@ -1420,15 +1430,15 @@ Caso tenha alguma dúvida, estamos à disposição! 👍`)}` : '#'}
                         <p><span className="font-semibold">Cor:</span> {iphone.color}</p>
                         <p><span className="font-semibold">Condição:</span> <span>{getConditionLabel(iphone.condition)}</span></p>
                         <p><span className="font-semibold">Status:</span> {String(iphone.condition || '').startsWith('lacrado') ? 'Novo / Lacrado' : 'Seminovo / Usado'}</p>
-                      </>
+                      </div>
                     ) : (
-                      <>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
                         <p><span className="font-semibold">Modelo:</span> {consoleItem?.model}</p>
                         <p><span className="font-semibold">Versão:</span> {consoleItem?.version}</p>
                         {consoleItem?.ram && <p><span className="font-semibold">Memória RAM:</span> {consoleItem.ram}</p>}
                         <p><span className="font-semibold">Condição:</span> <span>{getConditionLabel(consoleItem?.condition)}</span></p>
                         <p><span className="font-semibold">Status:</span> {String(consoleItem?.condition || '').startsWith('lacrado') ? 'Novo / Lacrado' : 'Seminovo / Usado'}</p>
-                      </>
+                      </div>
                     )}
                   </div>
                 </section>

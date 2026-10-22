@@ -3,7 +3,11 @@ import { copyToClipboard } from '../utils/url';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
-import { Plus, FileText, Filter, Edit2, Trash2, CheckCircle2, Clock, CreditCard, Calendar, DollarSign, MessageSquare, Copy, Check, ExternalLink, RefreshCw, FileCheck } from 'lucide-react';
+import { 
+  Plus, FileText, Filter, Edit2, Trash2, CheckCircle2, Clock, CreditCard, 
+  Calendar, DollarSign, MessageSquare, Copy, Check, ExternalLink, RefreshCw, 
+  FileCheck, ShoppingCart, Smartphone, Gamepad2, Gift, Tag
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { format, isWithinInterval, startOfDay, endOfDay, addDays, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -81,6 +85,100 @@ export default function Sales() {
     queryKey: ['clients'],
     queryFn: () => db.clients.list(),
   });
+
+  const { data: gifts = [] } = useQuery({
+    queryKey: ['gifts'],
+    queryFn: () => db.gifts.list(),
+  });
+
+  const [cartItems, setCartItems] = useState<Array<{ type: 'iphone' | 'console' | 'gift' | 'accessory'; id: string; name: string; price: number; quantity?: number; cost_price?: number }>>([]);
+  const [selectedProductType, setSelectedProductType] = useState<'iphone' | 'console' | 'gift'>('iphone');
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [itemPrice, setItemPrice] = useState<number>(0);
+
+  const handleProductSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const prodId = e.target.value;
+    setSelectedProductId(prodId);
+    if (!prodId) {
+      setItemPrice(0);
+      return;
+    }
+    if (selectedProductType === 'iphone') {
+      const i = iphones.find(item => item.id === prodId);
+      if (i) setItemPrice(Number(i.sell_price || 0));
+    } else if (selectedProductType === 'console') {
+      const c = consoles.find(item => item.id === prodId);
+      if (c) setItemPrice(Number(c.sell_price || 0));
+    } else if (selectedProductType === 'gift') {
+      const g = gifts.find(item => item.id === prodId);
+      if (g) setItemPrice(Number(g.sell_price || 0));
+    }
+  };
+
+  const handleAddToCart = () => {
+    if (!selectedProductId) {
+      toast.error('Selecione um produto para adicionar à venda.');
+      return;
+    }
+    if (cartItems.some(item => item.id === selectedProductId)) {
+      toast.error('Este produto já foi adicionado ao carrinho.');
+      return;
+    }
+
+    let itemName = '';
+    let itemCost = 0;
+    let defPrice = itemPrice > 0 ? itemPrice : 0;
+
+    if (selectedProductType === 'iphone') {
+      const i = iphones.find(item => item.id === selectedProductId);
+      if (!i) return;
+      itemName = `${i.model} - ${i.storage} (${i.color})`;
+      itemCost = Number(i.buy_price || i.cost_price || 0);
+      if (!defPrice) defPrice = Number(i.sell_price || 0);
+    } else if (selectedProductType === 'console') {
+      const c = consoles.find(item => item.id === selectedProductId);
+      if (!c) return;
+      const cat = c.category === 'tv' ? 'TV' : (c.category === 'rice_cooker' ? 'Panela' : (c.category === 'outro' ? 'Eletro' : 'Console'));
+      itemName = `[${cat}] ${c.model} - ${c.version}`;
+      itemCost = Number(c.buy_price || c.cost_price || 0);
+      if (!defPrice) defPrice = Number(c.sell_price || 0);
+    } else if (selectedProductType === 'gift') {
+      const g = gifts.find(item => item.id === selectedProductId);
+      if (!g) return;
+      itemName = `[Mimo] ${g.name}`;
+      itemCost = Number(g.cost_price || 0);
+      if (!defPrice) defPrice = Number(g.sell_price || 0);
+    }
+
+    const newItem: { type: 'iphone' | 'console' | 'gift' | 'accessory'; id: string; name: string; price: number; quantity: number; cost_price: number } = {
+      type: (selectedProductType === 'gift' ? 'accessory' : selectedProductType) as any,
+      id: selectedProductId,
+      name: itemName,
+      price: defPrice,
+      quantity: 1,
+      cost_price: itemCost
+    };
+
+    const updatedCart = [...cartItems, newItem];
+    setCartItems(updatedCart);
+    setSelectedProductId('');
+    setItemPrice(0);
+
+    const total = updatedCart.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
+    setTempPrice(total);
+    toast.success(`${itemName} adicionado ao carrinho!`);
+  };
+
+  const handleRemoveFromCart = (index: number) => {
+    const itemToRemove = cartItems[index];
+    const updatedCart = cartItems.filter((_, idx) => idx !== index);
+    setCartItems(updatedCart);
+    const total = updatedCart.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0);
+    setTempPrice(total);
+    if (itemToRemove) {
+      toast.info(`${itemToRemove.name} removido do carrinho.`);
+    }
+  };
 
   const addMutation = useMutation({
     mutationFn: (newSale: any) => db.sales.create(newSale),
@@ -255,17 +353,21 @@ export default function Sales() {
 
   const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (cartItems.length === 0) {
+      toast.error('Adicione pelo menos um produto ao carrinho.');
+      return;
+    }
     const formData = new FormData(e.currentTarget);
-    const iphoneId = formData.get('iphone_id');
-    const consoleId = formData.get('console_id');
-
+    const firstIphone = cartItems.find(i => i.type === 'iphone')?.id;
+    const firstConsole = cartItems.find(i => i.type === 'console')?.id;
     const firstInstallmentDate = formData.get('first_installment_date');
 
     addMutation.mutate({
-      iphone_id: iphoneId ? iphoneId.toString() : null,
-      console_id: consoleId ? consoleId.toString() : null,
+      iphone_id: firstIphone || null,
+      console_id: firstConsole || null,
+      items: cartItems,
       client_id: formData.get('client_id'),
-      sell_price: Number(formData.get('sell_price')),
+      sell_price: tempPrice > 0 ? tempPrice : Number(formData.get('sell_price')),
       down_payment: Number(formData.get('down_payment')) || 0,
       payment_method: formData.get('payment_method'),
       installments: Number(formData.get('installments')) || 1,
@@ -279,18 +381,19 @@ export default function Sales() {
     e.preventDefault();
     if (!editingSale) return;
     const formData = new FormData(e.currentTarget);
-    const iphoneId = formData.get('iphone_id');
-    const consoleId = formData.get('console_id');
+    const firstIphone = cartItems.find(i => i.type === 'iphone')?.id;
+    const firstConsole = cartItems.find(i => i.type === 'console')?.id;
     const firstInstallmentDate = formData.get('first_installment_date');
     const cleanFirstDate = firstInstallmentDate && typeof firstInstallmentDate === 'string' && firstInstallmentDate.trim() !== '' ? firstInstallmentDate.toString().trim() : null;
 
     updateMutation.mutate({
       id: editingSale.id,
       data: {
-        iphone_id: iphoneId ? iphoneId.toString() : null,
-        console_id: consoleId ? consoleId.toString() : null,
+        iphone_id: firstIphone || null,
+        console_id: firstConsole || null,
+        items: cartItems,
         client_id: formData.get('client_id'),
-        sell_price: Number(formData.get('sell_price')),
+        sell_price: tempPrice > 0 ? tempPrice : Number(formData.get('sell_price')),
         down_payment: Number(formData.get('down_payment')) || 0,
         payment_method: formData.get('payment_method'),
         installments: Number(formData.get('installments')) || 1,
@@ -301,8 +404,8 @@ export default function Sales() {
     });
   };
 
-  const availableIphones = iphones.filter(i => i.status === 'disponivel');
-  const availableConsoles = consoles.filter(c => c.status === 'disponivel');
+  const availableIphones = iphones.filter(i => (i.status === 'disponivel' || editingSale?.iphone_id === i.id) && !cartItems.some(ci => ci.id === i.id));
+  const availableConsoles = consoles.filter(c => (c.status === 'disponivel' || editingSale?.console_id === c.id) && !cartItems.some(ci => ci.id === c.id));
 
   const filteredSales = sales.filter(sale => {
     if (!startDate || !endDate) return true;
@@ -354,6 +457,9 @@ export default function Sales() {
               setTempPrice(0);
               setTempDownPayment(0);
               setTempInstallments(1);
+              setCartItems([]);
+              setSelectedProductId('');
+              setItemPrice(0);
             }}
             className="bg-primary text-primary-foreground px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium hover:bg-primary/90"
           >
@@ -364,144 +470,313 @@ export default function Sales() {
       </div>
 
       {(isAdding || editingSale) && (
-        <div key={editingSale ? `edit-${editingSale.id}` : 'add'} className="bg-card border rounded-xl p-6 shadow-sm">
-          <h2 className="text-lg font-semibold mb-4">{editingSale ? 'Editar Venda' : 'Registrar Venda'}</h2>
-          <form onSubmit={editingSale ? handleUpdate : handleAdd} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Aparelho</label>
-              <select name="iphone_id" defaultValue={editingSale?.iphone_id} className="w-full p-2 border rounded-md bg-background">
-                <option value="">Selecione...</option>
-                {editingSale?.iphone_id && iphones.find(i => i.id === editingSale.iphone_id) && (
-                  <option value={editingSale.iphone_id}>
-                    {iphones.find(i => i.id === editingSale.iphone_id)?.model} - {iphones.find(i => i.id === editingSale.iphone_id)?.storage} (Atual)
-                  </option>
+        <div key={editingSale ? `edit-${editingSale.id}` : 'add'} className="bg-card border rounded-xl p-6 shadow-sm space-y-5">
+          <div className="flex items-center justify-between border-b border-border/50 pb-3">
+            <div>
+              <h2 className="text-lg font-bold text-foreground">
+                {editingSale ? 'Editar Venda & Produtos' : 'Registrar Nova Venda'}
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Selecione os produtos comprados pelo cliente. O valor total é calculado automaticamente.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={editingSale ? handleUpdate : handleAdd} className="space-y-6">
+            {/* Multi-Product Cart Section */}
+            <div className="bg-muted/30 border border-border/80 rounded-xl p-4 sm:p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/50 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                    <ShoppingCart className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h3 className="font-bold text-sm text-foreground">
+                      Aparelhos & Produtos da Venda ({cartItems.length} {cartItems.length === 1 ? 'item selecionado' : 'itens selecionados'})
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Adicione 1, 2, 3 ou mais celulares, consoles ou mimos para este mesmo cliente.
+                    </p>
+                  </div>
+                </div>
+
+                {cartItems.length > 0 && (
+                  <div className="flex items-center gap-2 bg-background/80 px-3 py-1.5 rounded-lg border">
+                    <span className="text-xs font-semibold text-muted-foreground">Total Produtos:</span>
+                    <span className="text-sm font-black text-emerald-500 font-mono">
+                      {formatBRL(cartItems.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0))}
+                    </span>
+                  </div>
                 )}
-                {availableIphones.map(i => (
-                  <option key={i.id} value={i.id}>{i.model} - {i.storage} ({i.color})</option>
-                ))}
-                {editingSale && iphones.filter(i => i.status === 'vendido' && i.id !== editingSale?.iphone_id).map(i => (
-                  <option key={i.id} value={i.id}>[Vendido] {i.model} - {i.storage} ({i.color})</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Eletrônico / Eletro / Console</label>
-              <select name="console_id" defaultValue={editingSale?.console_id} className="w-full p-2 border rounded-md bg-background">
-                <option value="">Selecione...</option>
-                {editingSale?.console_id && consoles.find(c => c.id === editingSale.console_id) && (
-                  <option value={editingSale.console_id}>
-                    {(() => {
-                      const c = consoles.find(item => item.id === editingSale.console_id);
-                      if (!c) return '';
-                      const cat = c.category === 'tv' ? 'TV' : (c.category === 'rice_cooker' ? 'Panela Elétrica' : (c.category === 'outro' ? 'Outro' : 'Videogame'));
-                      return `[${cat}] ${c.model} - ${c.version} (Atual)`;
-                    })()}
-                  </option>
-                )}
-                {availableConsoles.map(c => {
-                  const cat = c.category === 'tv' ? 'TV' : (c.category === 'rice_cooker' ? 'Panela Elétrica' : (c.category === 'outro' ? 'Outro' : 'Videogame'));
-                  return (
-                    <option key={c.id} value={c.id}>
-                      [{cat}] {c.model} - {c.version}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Cliente</label>
-              <select name="client_id" defaultValue={editingSale?.client_id} required className="w-full p-2 border rounded-md bg-background">
-                <option value="">Selecione...</option>
-                {clients.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Valor da Venda</label>
-              <input 
-                name="sell_price" 
-                defaultValue={editingSale?.sell_price} 
-                type="number" 
-                step="0.01" 
-                required 
-                className="w-full p-2 border rounded-md" 
-                placeholder="R$ 0,00"
-                onChange={(e) => setTempPrice(Number(e.target.value))}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Entrada</label>
-              <input 
-                name="down_payment" 
-                defaultValue={editingSale?.down_payment || 0} 
-                type="number" 
-                step="0.01" 
-                className="w-full p-2 border rounded-md" 
-                placeholder="R$ 0,00"
-                onChange={(e) => setTempDownPayment(Number(e.target.value))}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Forma de Pagamento</label>
-              <select name="payment_method" defaultValue={editingSale?.payment_method} required className="w-full p-2 border rounded-md bg-background">
-                <option value="PIX">PIX</option>
-                <option value="Dinheiro">Dinheiro</option>
-                <option value="Cartão">Cartão</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Parcelas</label>
-              <div className="flex gap-2">
-                <input 
-                  name="installments" 
-                  defaultValue={editingSale?.installments || 1} 
-                  type="number" 
-                  min="1" 
-                  max="24" 
-                  required 
-                  className="w-1/2 p-2 border rounded-md"
-                  onChange={(e) => setTempInstallments(Number(e.target.value))}
-                />
-                <select name="installment_frequency" defaultValue={editingSale?.installment_frequency || 'Mensal'} className="w-1/2 p-2 border rounded-md bg-background">
-                  <option value="Mensal">Mensal</option>
-                  <option value="Quinzenal">Quinzenal</option>
-                  <option value="Semanal">Semanal</option>
-                </select>
               </div>
-              {tempInstallments > 1 && tempPrice > 0 && (
-                <p className="text-xs text-emerald-600 font-medium mt-1">
-                  Valor por parcela: {formatBRL((tempPrice - tempDownPayment) / tempInstallments)}
-                </p>
+
+              {/* Selector Bar */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-card p-3.5 rounded-xl border border-border/50 shadow-xs">
+                {/* Category Selector */}
+                <div className="sm:col-span-3 space-y-1.5">
+                  <label className="text-xs font-bold text-foreground block">1. Tipo do Produto</label>
+                  <div className="grid grid-cols-3 gap-1 bg-muted/60 p-1 rounded-lg border">
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedProductType('iphone'); setSelectedProductId(''); setItemPrice(0); }}
+                      className={cn(
+                        "text-[11px] font-bold py-1.5 rounded transition flex items-center justify-center gap-1 cursor-pointer",
+                        selectedProductType === 'iphone' ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Smartphone className="h-3.5 w-3.5" />
+                      iPhone
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedProductType('console'); setSelectedProductId(''); setItemPrice(0); }}
+                      className={cn(
+                        "text-[11px] font-bold py-1.5 rounded transition flex items-center justify-center gap-1 cursor-pointer",
+                        selectedProductType === 'console' ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Gamepad2 className="h-3.5 w-3.5" />
+                      Games
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedProductType('gift'); setSelectedProductId(''); setItemPrice(0); }}
+                      className={cn(
+                        "text-[11px] font-bold py-1.5 rounded transition flex items-center justify-center gap-1 cursor-pointer",
+                        selectedProductType === 'gift' ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Gift className="h-3.5 w-3.5" />
+                      Mimo
+                    </button>
+                  </div>
+                </div>
+
+                {/* Product Dropdown */}
+                <div className="sm:col-span-5 space-y-1.5">
+                  <label className="text-xs font-bold text-foreground block">
+                    2. Selecionar {selectedProductType === 'iphone' ? 'iPhone / Celular' : (selectedProductType === 'console' ? 'Console / TV / Eletro' : 'Acessório / Mimo')}
+                  </label>
+                  <select
+                    value={selectedProductId}
+                    onChange={handleProductSelectChange}
+                    className="w-full p-2 rounded-lg border bg-background text-xs font-medium focus:ring-2 focus:ring-primary focus:outline-none"
+                  >
+                    <option value="">Selecione um produto do estoque...</option>
+                    {selectedProductType === 'iphone' && availableIphones.map(i => (
+                      <option key={i.id} value={i.id}>
+                        {i.model} - {i.storage} ({i.color}) — {formatBRL(Number(i.sell_price || 0))}
+                      </option>
+                    ))}
+                    {selectedProductType === 'console' && availableConsoles.map(c => {
+                      const cat = c.category === 'tv' ? 'TV' : (c.category === 'rice_cooker' ? 'Panela' : (c.category === 'outro' ? 'Eletro' : 'Console'));
+                      return (
+                        <option key={c.id} value={c.id}>
+                          [{cat}] {c.model} - {c.version} — {formatBRL(Number(c.sell_price || 0))}
+                        </option>
+                      );
+                    })}
+                    {selectedProductType === 'gift' && gifts.map(g => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} — {formatBRL(Number(g.sell_price || 0))}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Individual Item Price */}
+                <div className="sm:col-span-2 space-y-1.5">
+                  <label className="text-xs font-bold text-foreground block">3. Preço Unitário</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={itemPrice || ''}
+                    placeholder="R$ 0,00"
+                    onChange={(e) => setItemPrice(Number(e.target.value))}
+                    className="w-full p-2 rounded-lg border bg-background text-xs font-mono font-bold focus:ring-2 focus:ring-primary focus:outline-none"
+                  />
+                </div>
+
+                {/* Add to Cart Button */}
+                <div className="sm:col-span-2">
+                  <button
+                    type="button"
+                    onClick={handleAddToCart}
+                    disabled={!selectedProductId}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs py-2 px-3 rounded-lg transition cursor-pointer shadow flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="h-4 w-4" />
+                    + Adicionar à Venda
+                  </button>
+                </div>
+              </div>
+
+              {/* Cart Items List */}
+              {cartItems.length === 0 ? (
+                <div className="border border-dashed border-border/80 rounded-xl p-6 text-center text-xs text-muted-foreground bg-background/50 space-y-1">
+                  <ShoppingCart className="h-6 w-6 mx-auto mb-1 text-muted-foreground/50" />
+                  <p className="font-semibold text-foreground">Nenhum aparelho adicionado ainda</p>
+                  <p>Escolha um iPhone ou Videogame acima e clique em <strong>"+ Adicionar à Venda"</strong>. Você pode adicionar quantos itens quiser!</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                    <span>Itens Vinculados a esta Nota/Venda:</span>
+                    <span className="text-emerald-500 font-bold">{cartItems.length} aparelho(s)</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {cartItems.map((item, idx) => (
+                      <div
+                        key={`${item.id}-${idx}`}
+                        className="flex items-center justify-between p-3 rounded-xl border bg-background text-xs shadow-xs hover:border-primary/50 transition"
+                      >
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                          <span className={cn(
+                            "p-2 rounded-lg shrink-0",
+                            item.type === 'iphone' ? "bg-blue-500/10 text-blue-500" : (item.type === 'console' ? "bg-purple-500/10 text-purple-500" : "bg-amber-500/10 text-amber-500")
+                          )}>
+                            {item.type === 'iphone' ? <Smartphone className="h-4 w-4" /> : (item.type === 'console' ? <Gamepad2 className="h-4 w-4" /> : <Gift className="h-4 w-4" />)}
+                          </span>
+                          <div className="truncate">
+                            <div className="font-bold text-foreground truncate">{item.name}</div>
+                            <div className="text-[11px] font-mono text-emerald-500 font-bold">
+                              {formatBRL(item.price)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFromCart(idx)}
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition cursor-pointer shrink-0 ml-2"
+                          title="Remover produto da venda"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Data da Venda</label>
-              <input 
-                name="sale_date" 
-                type="date" 
-                defaultValue={editingSale ? format(parseLocalDate(editingSale.sale_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
-                required 
-                className="w-full p-2 border rounded-md bg-background" 
-              />
-            </div>
-            {tempInstallments > 1 && (
+
+            {/* Sale Financial and Payment Details */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Data da 1ª Parcela</label>
+                <label className="text-sm font-medium">Cliente</label>
+                <select name="client_id" defaultValue={editingSale?.client_id} required className="w-full p-2 border rounded-md bg-background">
+                  <option value="">Selecione...</option>
+                  {clients.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-sm font-medium">Valor Total da Venda</label>
+                  {cartItems.length > 0 && (
+                    <span className="text-[10px] text-emerald-500 font-bold font-mono">Calculado</span>
+                  )}
+                </div>
                 <input 
-                  name="first_installment_date" 
-                  type="date" 
-                  defaultValue={editingSale?.first_installment_date ? format(parseLocalDate(editingSale.first_installment_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
+                  name="sell_price" 
+                  value={tempPrice || ''} 
+                  type="number" 
+                  step="0.01" 
                   required 
-                  className="w-full p-2 border rounded-md bg-background" 
+                  className="w-full p-2 border rounded-md font-bold font-mono text-emerald-500" 
+                  placeholder="R$ 0,00"
+                  onChange={(e) => setTempPrice(Number(e.target.value))}
                 />
               </div>
-            )}
-            <div className="lg:col-span-4 flex justify-end gap-2 mt-2">
-              <button type="button" onClick={() => { setIsAdding(false); setEditingSale(null); }} className="bg-muted text-muted-foreground px-4 py-2 rounded-md font-medium">
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Entrada</label>
+                <input 
+                  name="down_payment" 
+                  defaultValue={editingSale?.down_payment || 0} 
+                  type="number" 
+                  step="0.01" 
+                  className="w-full p-2 border rounded-md font-mono" 
+                  placeholder="R$ 0,00"
+                  onChange={(e) => setTempDownPayment(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Forma de Pagamento</label>
+                <select name="payment_method" defaultValue={editingSale?.payment_method} required className="w-full p-2 border rounded-md bg-background">
+                  <option value="PIX">PIX</option>
+                  <option value="Dinheiro">Dinheiro</option>
+                  <option value="Cartão">Cartão</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Parcelas</label>
+                <div className="flex gap-2">
+                  <input 
+                    name="installments" 
+                    defaultValue={editingSale?.installments || 1} 
+                    type="number" 
+                    min="1" 
+                    max="24" 
+                    required 
+                    className="w-1/2 p-2 border rounded-md"
+                    onChange={(e) => setTempInstallments(Number(e.target.value))}
+                  />
+                  <select name="installment_frequency" defaultValue={editingSale?.installment_frequency || 'Mensal'} className="w-1/2 p-2 border rounded-md bg-background">
+                    <option value="Mensal">Mensal</option>
+                    <option value="Quinzenal">Quinzenal</option>
+                    <option value="Semanal">Semanal</option>
+                  </select>
+                </div>
+                {tempInstallments > 1 && tempPrice > 0 && (
+                  <p className="text-xs text-emerald-600 font-medium mt-1">
+                    Valor por parcela: {formatBRL((tempPrice - tempDownPayment) / tempInstallments)}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Data da Venda</label>
+                <input 
+                  name="sale_date" 
+                  type="date" 
+                  defaultValue={editingSale ? format(parseLocalDate(editingSale.sale_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
+                  required 
+                  className="w-full p-2 border rounded-md bg-background" 
+                  />
+              </div>
+
+              {tempInstallments > 1 && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Data da 1ª Parcela</label>
+                  <input 
+                    name="first_installment_date" 
+                    type="date" 
+                    defaultValue={editingSale?.first_installment_date ? format(parseLocalDate(editingSale.first_installment_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')} 
+                    required 
+                    className="w-full p-2 border rounded-md bg-background" 
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-border/50">
+              <button 
+                type="button" 
+                onClick={() => { setIsAdding(false); setEditingSale(null); setCartItems([]); }} 
+                className="bg-muted hover:bg-muted/80 text-muted-foreground px-4 py-2 rounded-md font-medium transition cursor-pointer"
+              >
                 Cancelar
               </button>
-              <button type="submit" className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-medium">
+              <button 
+                type="submit" 
+                disabled={cartItems.length === 0}
+                className="bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground px-5 py-2 rounded-md font-bold transition cursor-pointer shadow"
+              >
                 {editingSale ? 'Atualizar Venda' : 'Confirmar Venda'}
               </button>
             </div>
@@ -627,7 +902,18 @@ export default function Sales() {
                       <span className="text-sm font-medium">{format(parseLocalDate(sale.sale_date), 'dd/MM/yyyy')}</span>
                     </td>
                     <td className="px-4 py-3 font-medium">
-                      {iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${consoleObj.category === 'tv' ? '[TV] ' : (consoleObj.category === 'rice_cooker' ? '[Panela] ' : (consoleObj.category === 'outro' ? '[Eletro] ' : ''))}${consoleObj.model} - ${consoleObj.version}` : 'N/A')}
+                      {sale.items && Array.isArray(sale.items) && sale.items.length > 0 ? (
+                        <div className="space-y-1">
+                          <span className="text-[10px] bg-primary/10 text-primary font-bold px-1.5 py-0.5 rounded mr-1.5 inline-block">
+                            {sale.items.length} {sale.items.length === 1 ? 'aparelho' : 'aparelhos'}
+                          </span>
+                          <span className="text-sm font-semibold text-foreground">
+                            {sale.items.map(it => it.name).join(' + ')}
+                          </span>
+                        </div>
+                      ) : (
+                        iphone ? `${iphone.model} ${iphone.storage}` : (consoleObj ? `${consoleObj.category === 'tv' ? '[TV] ' : (consoleObj.category === 'rice_cooker' ? '[Panela] ' : (consoleObj.category === 'outro' ? '[Eletro] ' : ''))}${consoleObj.model} - ${consoleObj.version}` : 'N/A')
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
@@ -769,6 +1055,37 @@ export default function Sales() {
                             setTempPrice(sale.sell_price);
                             setTempDownPayment(sale.down_payment || 0);
                             setTempInstallments(sale.installments || 1);
+                            if (sale.items && Array.isArray(sale.items) && sale.items.length > 0) {
+                              setCartItems(sale.items);
+                            } else {
+                              const existingItems = [];
+                              if (sale.iphone_id) {
+                                const found = iphones.find(i => i.id === sale.iphone_id);
+                                if (found) {
+                                  existingItems.push({
+                                    type: 'iphone' as const,
+                                    id: found.id,
+                                    name: `iPhone ${found.model} - ${found.storage} (${found.color})`,
+                                    price: Number(sale.sell_price),
+                                    quantity: 1,
+                                    cost_price: Number(found.buy_price || 0)
+                                  });
+                                }
+                              } else if (sale.console_id) {
+                                const found = consoles.find(c => c.id === sale.console_id);
+                                if (found) {
+                                  existingItems.push({
+                                    type: 'console' as const,
+                                    id: found.id,
+                                    name: `[Console] ${found.model} - ${found.version}`,
+                                    price: Number(sale.sell_price),
+                                    quantity: 1,
+                                    cost_price: Number(found.buy_price || 0)
+                                  });
+                                }
+                              }
+                              setCartItems(existingItems);
+                            }
                             window.scrollTo({ top: 0, behavior: 'smooth' });
                           }}
                           className="text-muted-foreground hover:text-foreground transition-colors p-1"

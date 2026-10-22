@@ -101,41 +101,112 @@ class BackgroundService {
     }
   }
 
-  private async runAutoBackup(): Promise<void> {
+  public isAutoBackupEnabled(): boolean {
+    try {
+      const stored = localStorage.getItem('godshop_auto_backup_enabled');
+      return stored !== null ? stored === 'true' : true;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  public setAutoBackupEnabled(enabled: boolean): void {
+    try {
+      localStorage.setItem('godshop_auto_backup_enabled', String(enabled));
+    } catch (e) {}
+  }
+
+  public getLastAutoBackupDate(): string | null {
+    try {
+      const ts = localStorage.getItem(LAST_BACKUP_KEY);
+      if (!ts) return null;
+      return new Date(parseInt(ts)).toLocaleString('pt-BR');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  public async runAutoBackup(force: boolean = false): Promise<{ success: boolean; message: string; fileName?: string }> {
+    if (!force && !this.isAutoBackupEnabled()) {
+      return { success: false, message: 'Backup automático desativado pelo usuário.' };
+    }
+
     const lastBackupStr = localStorage.getItem(LAST_BACKUP_KEY);
     const now = Date.now();
     const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
 
-    if (lastBackupStr && now - parseInt(lastBackupStr) < TWENTY_FOUR_HOURS) {
-      return; // Backup já realizado hoje
+    if (!force && lastBackupStr && now - parseInt(lastBackupStr) < TWENTY_FOUR_HOURS) {
+      return { success: true, message: 'Backup diário já realizado nas últimas 24 horas.' };
     }
 
-    console.log('[BackgroundService] Iniciando backup automático diário...');
+    console.log('[BackgroundService] Executando backup diário...');
     try {
       const data = await backupService.exportData();
       const jsonStr = JSON.stringify(data, null, 2);
-      const fileName = `backup_diario_godshop_${new Date().toISOString().slice(0, 10)}.json`;
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const fileName = `backup_diario_godshop_${dateStr}.json`;
 
+      let savedNative = false;
       if (Capacitor.isNativePlatform()) {
         try {
-          const status = await Filesystem.checkPermissions();
-          if (status.publicStorage === 'granted') {
+          let hasPermission = true;
+          try {
+            const status = await Filesystem.checkPermissions();
+            if (status.publicStorage !== 'granted') {
+              const req = await Filesystem.requestPermissions();
+              hasPermission = req.publicStorage === 'granted';
+            }
+          } catch (pErr) {}
+
+          await Filesystem.writeFile({
+            path: fileName,
+            data: jsonStr,
+            directory: Directory.Documents,
+            encoding: Encoding.UTF8,
+            recursive: true
+          });
+          savedNative = true;
+          console.log('[BackgroundService] Backup diário salvo no armazenamento local Documents.');
+        } catch (fsErr) {
+          console.warn('[BackgroundService] Falha ao salvar em Documents, tentando Cache:', fsErr);
+          try {
             await Filesystem.writeFile({
               path: fileName,
               data: jsonStr,
-              directory: Directory.Documents,
+              directory: Directory.Cache,
               encoding: Encoding.UTF8,
               recursive: true
             });
-            localStorage.setItem(LAST_BACKUP_KEY, now.toString());
-            console.log('[BackgroundService] Backup diário salvo com sucesso no dispositivo.');
+            savedNative = true;
+          } catch (cacheErr) {
+            console.error('[BackgroundService] Erro definitivo ao gravar no filesystem:', cacheErr);
           }
-        } catch (fsErr) {
-          console.warn('[BackgroundService] Erro ao salvar backup automático:', fsErr);
         }
       }
-    } catch (err) {
+
+      // Salvar nos metadados de backups locais
+      const { localBackupStorage } = await import('./localBackupStorage');
+      localBackupStorage.saveMetadata({
+        id: `auto_${Date.now()}`,
+        name: fileName,
+        path: fileName,
+        createdAt: new Date().toISOString(),
+        sizeBytes: new Blob([jsonStr]).size,
+        isAuto: true,
+        content: jsonStr
+      });
+
+      localStorage.setItem(LAST_BACKUP_KEY, now.toString());
+      return {
+        success: true,
+        message: savedNative 
+          ? `Backup diário salvo na pasta Documentos (${fileName})`
+          : `Backup diário gerado com sucesso (${fileName})`,
+        fileName
+      };
+    } catch (err: any) {
       console.error('[BackgroundService] Falha no backup automático:', err);
+      return { success: false, message: err?.message || 'Falha ao executar backup automático.' };
     }
   }
   
@@ -205,10 +276,10 @@ class BackgroundService {
   private startKeepAlive(): void {
     if (this.keepAliveInterval) return;
 
-    // Heartbeat every 15 seconds
+    // Heartbeat every 60 seconds
     this.keepAliveInterval = setInterval(() => {
       this.triggerSync();
-    }, 15000);
+    }, 60000);
 
     // Setup silent audio keep-alive upon first user gesture
     const enableSilentAudio = () => {

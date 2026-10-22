@@ -218,14 +218,19 @@ function AppContent() {
     // Register sync task to run with background keep-alive
     const unregisterBgSync = backgroundService.registerSyncTask(performSync);
 
-    // Fast polling interval: syncs every 12 seconds in foreground or background
+    // Fast polling interval: syncs every 60 seconds in foreground or background
     const interval = setInterval(() => {
       performSync();
-    }, 12000);
+    }, 60000);
 
-    // Sync immediately when user switches tabs, clicks window, or unlocks their phone
+    // Sync immediately when user switches tabs, clicks window, or unlocks their phone (throttled)
+    let lastFocusSync = 0;
     const handleFocusOrActivity = () => {
-      performSync();
+      const now = Date.now();
+      if (now - lastFocusSync > 30000) { // Only sync if at least 30s passed
+        performSync();
+        lastFocusSync = now;
+      }
     };
     
     const handleSyncCompleted = (e: any) => {

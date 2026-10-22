@@ -347,6 +347,23 @@ export const db = {
     lastKnownUserIdFromRows = null;
   },
   getBuyPrice: (sale: any, iphonesList: any[] = [], consolesList: any[] = []) => {
+    if (sale?.items && Array.isArray(sale.items) && sale.items.length > 0) {
+      let totalBuy = 0;
+      for (const item of sale.items) {
+        if (item.cost_price !== undefined && item.cost_price !== null) {
+          totalBuy += Number(item.cost_price || 0) * (item.quantity || 1);
+        } else if (item.type === 'iphone') {
+          const iphone = iphonesList.find((i: any) => i.id === item.id) || getLocalData('iphones').find((i: any) => i.id === item.id);
+          totalBuy += Number(iphone?.buy_price || iphone?.cost_price || 0);
+        } else if (item.type === 'console') {
+          const consoleItem = consolesList.find((c: any) => c.id === item.id) || getLocalData('consoles').find((c: any) => c.id === item.id);
+          totalBuy += Number(consoleItem?.buy_price || consoleItem?.cost_price || 0);
+        } else {
+          totalBuy += Number(item.price || 0) * (item.quantity || 1);
+        }
+      }
+      return totalBuy;
+    }
     let buyPrice = Number(sale?.buy_price || sale?.cost_price || sale?.product_buy_price || 0);
     const resolvedIphoneId = sale?.iphone_id || (
       sale?.id === '7ab8846f-1d26-4591-908c-b8fa6742edfb' || (sale?.client_name || sale?.client?.name || '').toLowerCase().includes('paula')
@@ -1986,7 +2003,24 @@ export const db = {
           newItem = { ...insertData };
         }
         
-        // 2. Update iPhone status to 'vendido'
+        // 2. Update item statuses to 'vendido'
+        const saleItems = data.items || [];
+        for (const item of saleItems) {
+          if (item.type === 'iphone' && item.id) {
+            try {
+              let iQuery = supabase.from('iphones').update({ status: 'vendido', updated_at: nowIso }).eq('id', item.id);
+              if (userId) iQuery = iQuery.eq('user_id', userId);
+              await iQuery;
+            } catch (e) {}
+          } else if (item.type === 'console' && item.id) {
+            try {
+              let cQuery = supabase.from('consoles').update({ status: 'vendido', updated_at: nowIso }).eq('id', item.id);
+              if (userId) cQuery = cQuery.eq('user_id', userId);
+              await cQuery;
+            } catch (e) {}
+          }
+        }
+
         if (data.iphone_id) {
           let iphoneQuery = supabase.from('iphones').update({ status: 'vendido', updated_at: nowIso }).eq('id', data.iphone_id);
           if (userId) iphoneQuery = iphoneQuery.eq('user_id', userId);
@@ -1994,7 +2028,6 @@ export const db = {
           if (iphoneError) throw iphoneError;
         }
         
-        // 3. Update Console status to 'vendido'
         if (data.console_id) {
           let consoleQuery = supabase.from('consoles').update({ status: 'vendido', updated_at: nowIso }).eq('id', data.console_id);
           if (userId) consoleQuery = consoleQuery.eq('user_id', userId);
@@ -2011,18 +2044,33 @@ export const db = {
           updated_at: nowIso,
           first_installment_date: data.first_installment_date, 
           installments_paid: data.installments_paid || 0,
-          custom_payments: data.custom_payments
+          custom_payments: data.custom_payments,
+          items: data.items
         };
         setLocalData('sales', [...localSales, localNewItem]);
 
+        const localIphones = getLocalData('iphones');
+        const localConsoles = getLocalData('consoles');
+        let updatedIphones = [...localIphones];
+        let updatedConsoles = [...localConsoles];
+
+        for (const item of saleItems) {
+          if (item.type === 'iphone' && item.id) {
+            updatedIphones = updatedIphones.map(i => i.id === item.id ? { ...i, status: 'vendido', updated_at: nowIso } : i);
+          } else if (item.type === 'console' && item.id) {
+            updatedConsoles = updatedConsoles.map(c => c.id === item.id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
+          }
+        }
+
         if (data.iphone_id) {
-          const localIphones = getLocalData('iphones');
-          setLocalData('iphones', localIphones.map(i => i.id === data.iphone_id ? { ...i, status: 'vendido', updated_at: nowIso } : i));
+          updatedIphones = updatedIphones.map(i => i.id === data.iphone_id ? { ...i, status: 'vendido', updated_at: nowIso } : i);
         }
         if (data.console_id) {
-          const localConsoles = getLocalData('consoles');
-          setLocalData('consoles', localConsoles.map(c => c.id === data.console_id ? { ...c, status: 'vendido', updated_at: nowIso } : c));
+          updatedConsoles = updatedConsoles.map(c => c.id === data.console_id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
         }
+
+        setLocalData('iphones', updatedIphones);
+        setLocalData('consoles', updatedConsoles);
         
         cloudApi.upsertItem('sales', localNewItem).catch(err => console.warn('[Cloud Upsert Sale] Warn:', err));
         return localNewItem as Sale;

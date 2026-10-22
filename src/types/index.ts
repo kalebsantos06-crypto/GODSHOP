@@ -74,10 +74,20 @@ export interface Console {
   category?: string;
 }
 
+export interface SaleItem {
+  type: 'iphone' | 'console' | 'gift' | 'accessory';
+  id: string;
+  name: string;
+  price: number;
+  quantity?: number;
+  cost_price?: number;
+}
+
 export interface Sale {
   id: string;
   iphone_id?: string;
   console_id?: string;
+  items?: SaleItem[];
   client_id: string;
   client_name?: string;
   client?: any;

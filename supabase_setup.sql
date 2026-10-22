@@ -483,5 +483,24 @@ CREATE POLICY "Permitir fallback áudios públicos" ON note_audio
   USING (true)
   WITH CHECK (true);
 
+-- ==========================================
+-- 13. TABELA DE CONFIGURAÇÕES (app_settings)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Permitir acesso total ao próprio usuário" ON app_settings;
+CREATE POLICY "Permitir acesso total ao próprio usuário" ON app_settings
+  FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+
 
 

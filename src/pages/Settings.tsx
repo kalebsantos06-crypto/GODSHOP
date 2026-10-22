@@ -4,7 +4,7 @@ import {
   Trash2, Plus, Sun, Moon, Cloud, ShieldAlert, ShieldCheck, User, Users, UserCheck, LogIn, MessageSquare, Send, Play, 
   CheckCircle2, AlertTriangle, RefreshCw, Settings as SettingsIcon, FileText, Layers, Bot, ChevronRight, Check,
   Copy, ClipboardPaste, Sparkles, Folder, Eye, EyeOff, Share2, ExternalLink, Building2, CreditCard, MapPin, Lock, KeyRound,
-  Mail, Phone, Shield, Activity, Power
+  Mail, Phone, Shield, Activity, Power, Pencil, RotateCcw, X, Filter, MessageCircle, Clock, Sliders
 } from 'lucide-react';
 import { useAuth } from '../types/AuthContext';
 import { toast } from 'sonner';
@@ -17,14 +17,20 @@ import { Capacitor } from '@capacitor/core';
 import { copyToClipboard, readFromClipboard, shareContent, getCustomAppDomain, setCustomAppDomain } from '../utils/url';
 import { checkAndRequestStoragePermission } from '../utils/permissionUtils';
 import { isSupabaseConfigured, setCustomSupabaseCredentials, supabase } from '../lib/supabase';
+import { getSetting } from '../services/settingsService';
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 import { parseLocalDate, getSaleNotifications } from '../lib/dateUtils';
-import { DEFAULT_STATUS_TEMPLATES, dispatchWebhookMessage, WebhookProvider } from '../lib/whatsappUtils';
+import { DEFAULT_STATUS_TEMPLATES, dispatchWebhookMessage, WebhookProvider, testWebhookConnection } from '../lib/whatsappUtils';
 import { formatBRL } from '../lib/formatCurrency';
 import { useSearchParams } from 'react-router-dom';
 
 import { db } from '../services/db';
 import StorageExplorer from '../components/StorageExplorer';
+import { LocalBackupManager } from '../components/LocalBackupManager';
+import { localBackupStorage } from '../services/localBackupStorage';
+import TemplatesTab from '../components/settings/TemplatesTab';
+import SystemTab from '../components/settings/SystemTab';
+import DeviceLinkSection from '../components/DeviceLinkSection';
 
 const DEFAULT_TEMPLATES = {
   days_3_before: "Olá, {cliente}! 😊 Aqui é a Karen, assistente virtual da GODSHOP. (Esta é uma mensagem automática)\n\nPassando para lembrar que a sua {parcela}ª parcela de {valor} (referente ao {aparelho}) vence no dia {vencimento}.\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\nChave Pix (Celular/Telefone): 13036942637\nNome: Kaleb dos Santos Gonçalves\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍",
@@ -42,6 +48,8 @@ export default function Settings() {
   const [isRestoring, setIsRestoring] = useState(false);
   const [isStorageExplorerOpen, setIsStorageExplorerOpen] = useState(false);
   const [showPasteModal, setShowPasteModal] = useState(false);
+  const [showTestWebhookModal, setShowTestWebhookModal] = useState(false);
+  const [testPhone, setTestPhone] = useState('');
   const [pasteJsonText, setPasteJsonText] = useState('');
   const [isCopyingBackup, setIsCopyingBackup] = useState(false);
   const [isExportingBackup, setIsExportingBackup] = useState(false);
@@ -141,10 +149,10 @@ export default function Settings() {
       if (stored) return JSON.parse(stored);
     } catch {}
     return {
-      fullName: localStorage.getItem('auto_attendant_name') || 'Kaleb dos Santos Gonçalves',
+      fullName: 'Kaleb dos Santos Gonçalves',
       storeName: 'GODSHOP',
-      email: user?.email || localStorage.getItem('godshop_saved_email') || 'kalebsantos06@gmail.com',
-      phone: localStorage.getItem('auto_store_phone') || '(32) 99963-4583',
+      email: user?.email || '',
+      phone: '',
       document: '130.369.426-37',
       role: 'Proprietário / Administrador',
       pixKey: '13036942637',
@@ -152,6 +160,24 @@ export default function Settings() {
       registeredAt: new Date().toLocaleDateString('pt-BR')
     };
   });
+
+  useEffect(() => {
+    if (user) {
+      const loadSettings = async () => {
+        const attendantName = await getSetting('auto_attendant_name', user.id);
+        const savedEmail = await getSetting('godshop_saved_email', user.id);
+        const storePhone = await getSetting('auto_store_phone', user.id);
+        
+        setProfileData(prev => ({
+          ...prev,
+          fullName: attendantName || prev.fullName,
+          email: user.email || savedEmail || prev.email,
+          phone: storePhone || prev.phone
+        }));
+      };
+      loadSettings();
+    }
+  }, [user]);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // System users registry state
@@ -306,12 +332,15 @@ export default function Settings() {
     return (localStorage.getItem('app_theme') as 'light' | 'dark') || 'dark';
   });
 
-  // Navigation tab for settings
-  const [activeTab, setActiveTab] = useState<'geral' | 'usuario' | 'backup' | 'automacao'>(() => {
+  // Navigation tab for settings (Categories)
+  const [activeTab, setActiveTab] = useState<'geral' | 'usuario' | 'templates' | 'automacao' | 'backup' | 'sistema' | 'pareamento'>(() => {
     const tabParam = searchParams.get('tab');
     if (tabParam === 'usuario') return 'usuario';
+    if (tabParam === 'templates' || tabParam === 'modelos') return 'templates';
     if (tabParam === 'automacao') return 'automacao';
     if (tabParam === 'backup') return 'backup';
+    if (tabParam === 'sistema') return 'sistema';
+    if (tabParam === 'pareamento') return 'pareamento';
     return 'geral';
   });
 
@@ -320,14 +349,22 @@ export default function Settings() {
     const tabParam = searchParams.get('tab');
     if (tabParam === 'usuario') {
       setActiveTab('usuario');
+    } else if (tabParam === 'templates' || tabParam === 'modelos') {
+      setActiveTab('templates');
     } else if (tabParam === 'automacao') {
       setActiveTab('automacao');
     } else if (tabParam === 'backup') {
       setActiveTab('backup');
+    } else if (tabParam === 'sistema') {
+      setActiveTab('sistema');
+    } else if (tabParam === 'pareamento') {
+      setActiveTab('pareamento');
     } else if (tabParam === 'geral') {
       setActiveTab('geral');
     }
   }, [searchParams]);
+
+  const [templateSearchQuery, setTemplateSearchQuery] = useState('');
 
   // Automation states
   const [webhookUrl, setWebhookUrl] = useState(() => localStorage.getItem('auto_webhook_url') || '');
@@ -349,6 +386,247 @@ export default function Settings() {
   const [templateOrderDelivered, setTemplateOrderDelivered] = useState(() => localStorage.getItem('auto_template_order_delivered') || DEFAULT_STATUS_TEMPLATES.order_delivered);
   const [templateGuaranteeSent, setTemplateGuaranteeSent] = useState(() => localStorage.getItem('auto_template_guarantee_sent') || DEFAULT_STATUS_TEMPLATES.guarantee_sent);
   const [templateOrderThankYou, setTemplateOrderThankYou] = useState(() => localStorage.getItem('auto_template_order_thank_you') || DEFAULT_STATUS_TEMPLATES.order_thank_you);
+  const [templateOrderSettled, setTemplateOrderSettled] = useState(() => localStorage.getItem('auto_template_order_settled') || DEFAULT_STATUS_TEMPLATES.order_settled);
+
+  // Controle de edição individual por card de modelo: { [id]: boolean }
+  const [editingTemplates, setEditingTemplates] = useState<{ [key: string]: boolean }>({});
+  // Filtro de subcategoria de modelos (Todos, Etapas de Pedido, Carnê & Vencimento)
+  const [templateCategoryFilter, setTemplateCategoryFilter] = useState<'all' | 'pedidos' | 'cobranca'>('all');
+  // Filtro de subcategorias da aba de automação
+  const [automationSectionFilter, setAutomationSectionFilter] = useState<'all' | 'gateway' | 'atendimento' | 'templates' | 'fila' | 'historico'>('all');
+
+  const toggleEditTemplate = (id: string) => {
+    setEditingTemplates(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleSaveSingleTemplate = async (id: string, storageKey: string, value: string, title: string) => {
+    localStorage.setItem(storageKey, value);
+    setEditingTemplates(prev => ({ ...prev, [id]: false }));
+    toast.success(`Modelo "${title}" salvo com sucesso! 💾`);
+
+    if (user?.id) {
+      try {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            settings: { [storageKey]: value }
+          })
+        });
+      } catch (e) {
+        console.warn('Erro ao sincronizar modelo individual:', e);
+      }
+    }
+  };
+
+  const handleResetSingleTemplate = (id: string, setter: (val: string) => void, defaultVal: string, title: string) => {
+    setter(defaultVal);
+    toast.info(`Modelo "${title}" restaurado para o padrão original.`);
+  };
+
+  const handleInsertTag = (setter: (val: string) => void, currentVal: string, tag: string) => {
+    setter(currentVal + ' ' + tag);
+    toast.info(`Tag ${tag} inserida no modelo!`);
+  };
+
+  const setAllTemplatesEditMode = (editing: boolean) => {
+    const updated: { [key: string]: boolean } = {};
+    const ids = [
+      'registration', 'client_remote_confirmation', 'order_confirmed', 'order_preparing',
+      'order_ready', 'order_on_way', 'order_delivered', 'guarantee_sent', 'order_thank_you',
+      'order_settled', 'days_3_before', 'day_of', 'overdue'
+    ];
+    ids.forEach(id => { updated[id] = editing; });
+    setEditingTemplates(updated);
+    if (!editing) {
+      saveAutomationSettings();
+      toast.success('Todos os modelos foram salvos com sucesso!');
+    } else {
+      toast.info('Modo de edição habilitado para todos os modelos.');
+    }
+  };
+
+  // Structured list of all message templates
+  const messageTemplatesList = useMemo(() => [
+    {
+      id: 'registration',
+      step: 'Etapa 1',
+      title: 'Boas-Vindas & Cadastro Concluído',
+      subtitle: 'Enviado pelo Atendente ao Cliente após realizar o cadastro',
+      category: 'pedidos' as const,
+      value: templateRegistration,
+      setter: setTemplateRegistration,
+      storageKey: 'auto_template_registration',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.registration,
+      supportedTags: ['{cliente}', '{atendente}']
+    },
+    {
+      id: 'client_remote_confirmation',
+      step: 'Confirmação',
+      title: 'Confirmação Enviada pelo Cliente (Link de Cadastro)',
+      subtitle: 'Disparada pelo cliente pelo botão WhatsApp na página externa de cadastro',
+      category: 'pedidos' as const,
+      value: templateClientRemoteConfirm,
+      setter: setTemplateClientRemoteConfirm,
+      storageKey: 'auto_template_client_remote_confirmation',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.client_remote_confirmation,
+      supportedTags: ['{cliente}', '{cpf}', '{telefone}', '{cidade}', '{uf}']
+    },
+    {
+      id: 'order_confirmed',
+      step: 'Etapa 2',
+      title: 'Pedido Confirmado & Pagamento Aprovado',
+      subtitle: 'Aviso imediato de aprovação de compra e registro do pedido',
+      category: 'pedidos' as const,
+      value: templateOrderConfirmed,
+      setter: setTemplateOrderConfirmed,
+      storageKey: 'auto_template_order_confirmed',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.order_confirmed,
+      supportedTags: ['{cliente}', '{aparelho}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'order_preparing',
+      step: 'Etapa 3',
+      title: 'Testes Técnicos & Preparação do Aparelho',
+      subtitle: 'Informa que o aparelho está sendo inspecionado e higienizado',
+      category: 'pedidos' as const,
+      value: templateOrderPreparing,
+      setter: setTemplateOrderPreparing,
+      storageKey: 'auto_template_order_preparing',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.order_preparing,
+      supportedTags: ['{cliente}', '{aparelho}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'order_ready',
+      step: 'Etapa 4',
+      title: 'Embalado & Pronto para Envio (Expedição)',
+      subtitle: 'Notifica que o pacote foi lacrado e aguarda envio/coleta',
+      category: 'pedidos' as const,
+      value: templateOrderReady,
+      setter: setTemplateOrderReady,
+      storageKey: 'auto_template_order_ready',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.order_ready,
+      supportedTags: ['{cliente}', '{aparelho}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'order_on_way',
+      step: 'Etapa 5',
+      title: 'Despachado & Em Rota de Entrega',
+      subtitle: 'Informa código/saída para entrega no endereço do comprador',
+      category: 'pedidos' as const,
+      value: templateOrderOnWay,
+      setter: setTemplateOrderOnWay,
+      storageKey: 'auto_template_order_on_way',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.order_on_way,
+      supportedTags: ['{cliente}', '{aparelho}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'order_delivered',
+      step: 'Etapa 6',
+      title: 'Pedido Entregue com Sucesso',
+      subtitle: 'Confirmação de recebimento do aparelho pelo cliente',
+      category: 'pedidos' as const,
+      value: templateOrderDelivered,
+      setter: setTemplateOrderDelivered,
+      storageKey: 'auto_template_order_delivered',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.order_delivered,
+      supportedTags: ['{cliente}', '{aparelho}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'guarantee_sent',
+      step: 'Etapa 7',
+      title: 'Termo de Garantia Oficial Ativado',
+      subtitle: 'Disponibilização da nota de garantia formal e digital',
+      category: 'pedidos' as const,
+      value: templateGuaranteeSent,
+      setter: setTemplateGuaranteeSent,
+      storageKey: 'auto_template_guarantee_sent',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.guarantee_sent,
+      supportedTags: ['{cliente}', '{aparelho}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'order_thank_you',
+      step: 'Etapa 8',
+      title: 'Agradecimento & Pós-Venda VIP',
+      subtitle: 'Mensagem de fidelização e encerramento cordial',
+      category: 'pedidos' as const,
+      value: templateOrderThankYou,
+      setter: setTemplateOrderThankYou,
+      storageKey: 'auto_template_order_thank_you',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.order_thank_you,
+      supportedTags: ['{cliente}', '{aparelho}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'order_settled',
+      step: 'Quitação',
+      title: 'Declaração de Quitação Total de Débito',
+      subtitle: 'Comprovante oficial de que todas as parcelas e débitos foram quitados',
+      category: 'pedidos' as const,
+      value: templateOrderSettled,
+      setter: setTemplateOrderSettled,
+      storageKey: 'auto_template_order_settled',
+      defaultVal: DEFAULT_STATUS_TEMPLATES.order_settled,
+      supportedTags: ['{cliente}', '{aparelho}', '{valor}']
+    },
+    {
+      id: 'days_3_before',
+      step: 'Aviso Prévio',
+      title: 'Lembrete Prévio de Carnê (Faltando 3 Dias)',
+      subtitle: 'Aviso amigável com chave PIX antes do vencimento da parcela',
+      category: 'cobranca' as const,
+      value: template3Days,
+      setter: setTemplate3Days,
+      storageKey: 'auto_template_3_days',
+      defaultVal: DEFAULT_TEMPLATES.days_3_before,
+      supportedTags: ['{cliente}', '{aparelho}', '{parcela}', '{valor}', '{vencimento}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'day_of',
+      step: 'Hoje',
+      title: 'Lembrete no Dia do Vencimento (Hoje)',
+      subtitle: 'Alerta disparado no dia exato do vencimento do carnê',
+      category: 'cobranca' as const,
+      value: templateDayOf,
+      setter: setTemplateDayOf,
+      storageKey: 'auto_template_day_of',
+      defaultVal: DEFAULT_TEMPLATES.day_of,
+      supportedTags: ['{cliente}', '{aparelho}', '{parcela}', '{valor}', '{vencimento}', '{atendente}', '{pix}']
+    },
+    {
+      id: 'overdue',
+      step: 'Em Atraso',
+      title: 'Alerta de Parcela Atrasada (Vencido e Pendente)',
+      subtitle: 'Cobrança atenciosa com chave PIX para regularização de débitos',
+      category: 'cobranca' as const,
+      value: templateOverdue,
+      setter: setTemplateOverdue,
+      storageKey: 'auto_template_overdue',
+      defaultVal: DEFAULT_TEMPLATES.overdue,
+      supportedTags: ['{cliente}', '{aparelho}', '{parcela}', '{valor}', '{vencimento}', '{atendente}', '{pix}']
+    }
+  ], [
+    templateRegistration, templateClientRemoteConfirm, templateOrderConfirmed, templateOrderPreparing,
+    templateOrderReady, templateOrderOnWay, templateOrderDelivered, templateGuaranteeSent,
+    templateOrderThankYou, templateOrderSettled, template3Days, templateDayOf, templateOverdue
+  ]);
+
+  const filteredTemplates = useMemo(() => {
+    return messageTemplatesList.filter(tmpl => {
+      if (templateCategoryFilter === 'pedidos' && tmpl.category !== 'pedidos') return false;
+      if (templateCategoryFilter === 'cobranca' && tmpl.category !== 'cobranca') return false;
+      
+      if (templateSearchQuery.trim()) {
+        const q = templateSearchQuery.toLowerCase();
+        const matchesTitle = tmpl.title.toLowerCase().includes(q);
+        const matchesSubtitle = tmpl.subtitle.toLowerCase().includes(q);
+        const matchesValue = tmpl.value.toLowerCase().includes(q);
+        const matchesStep = tmpl.step.toLowerCase().includes(q);
+        return matchesTitle || matchesSubtitle || matchesValue || matchesStep;
+      }
+      return true;
+    });
+  }, [messageTemplatesList, templateCategoryFilter, templateSearchQuery]);
 
   // Attendant, Store Phone and Pix Configuration
   const [attendantName, setAttendantName] = useState(() => localStorage.getItem('auto_attendant_name') || 'Karen');
@@ -431,6 +709,7 @@ export default function Settings() {
     localStorage.setItem('auto_template_order_delivered', templateOrderDelivered);
     localStorage.setItem('auto_template_guarantee_sent', templateGuaranteeSent);
     localStorage.setItem('auto_template_order_thank_you', templateOrderThankYou);
+    localStorage.setItem('auto_template_order_settled', templateOrderSettled);
     localStorage.setItem('auto_attendant_name', attendantName);
     localStorage.setItem('auto_store_phone', storePhone);
     localStorage.setItem('auto_pix_info', pixInfo);
@@ -560,6 +839,30 @@ export default function Settings() {
       setSendingStatuses(prev => ({ ...prev, [item.id]: 'success' }));
       addLog(item, 'success', 'whatsapp_web');
       toast.success(`WhatsApp aberto para ${item.clientName}!`);
+    }
+  };
+
+  const handleTestWebhook = () => {
+    setShowTestWebhookModal(true);
+  };
+
+  const handleTestWebhookSubmit = async () => {
+    if (!testPhone) {
+      toast.error('Digite um número válido para teste.');
+      return;
+    }
+    
+    console.log('[Settings] Iniciando teste para:', testPhone);
+    setShowTestWebhookModal(false);
+    try {
+      await saveAutomationSettings(); // Garante que localStorage esteja atualizado
+      
+      const toastId = toast.loading('Testando conexão...');
+      await testWebhookConnection(testPhone);
+      toast.success('Conexão testada com sucesso! Verifique seu WhatsApp.', { id: toastId });
+    } catch (err: any) {
+      console.error('[Settings] Erro no teste do Webhook:', err);
+      toast.error('Erro na conexão: ' + (err?.message || err), { duration: 5000 });
     }
   };
 
@@ -979,6 +1282,34 @@ export default function Settings() {
     setIsStorageExplorerOpen(true);
   };
 
+  const handleFixDuplicates = async () => {
+    try {
+      const { fixDuplicates } = await import('../services/fixDuplicates');
+      const toastId = toast.loading('Procurando e corrigindo duplicatas...');
+      const res = await fixDuplicates();
+      if (res.success) {
+        toast.success(`Correção concluída! Clientes fundidos: ${res.clientsFixed}, Vendas apagadas: ${res.salesFixed}`, { id: toastId });
+        queryClient.invalidateQueries();
+      } else {
+        toast.error('Erro ao corrigir duplicatas', { id: toastId });
+      }
+    } catch (e: any) {
+      toast.error('Erro fatal: ' + e.message);
+    }
+  };
+
+  const handleSeedExample = async () => {
+    try {
+      toast.promise(db.autoSeed(), {
+        loading: 'Carregando dados de exemplo...',
+        success: 'Dados de exemplo carregados!',
+        error: 'Erro ao carregar dados de exemplo'
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center border-b border-white/5 pb-4">
@@ -987,12 +1318,12 @@ export default function Settings() {
           <p className="text-sm text-muted-foreground mt-1">Gerencie a aparência, backups e automação de mensagens do sistema GODSHOP.</p>
         </div>
 
-        {/* Tab switcher buttons */}
+        {/* Category switcher bar */}
         <div className="flex flex-wrap p-1 bg-muted/20 border border-white/5 rounded-xl gap-1">
           <button
             onClick={() => setActiveTab('geral')}
             className={cn(
-              "px-4 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
               activeTab === 'geral' 
                 ? "bg-white text-black shadow-lg" 
                 : "text-muted-foreground hover:text-white"
@@ -1004,19 +1335,54 @@ export default function Settings() {
           <button
             onClick={() => setActiveTab('usuario')}
             className={cn(
-              "px-4 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
               activeTab === 'usuario' 
                 ? "bg-white text-black shadow-lg" 
                 : "text-muted-foreground hover:text-white"
             )}
           >
             <UserCheck className="h-3.5 w-3.5" />
-            Dados do Usuário & Senha
+            Usuários & Equipe
+          </button>
+          <button
+            onClick={() => setActiveTab('templates')}
+            className={cn(
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer relative",
+              activeTab === 'templates' 
+                ? "bg-white text-black shadow-lg" 
+                : "text-muted-foreground hover:text-white"
+            )}
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Modelos & Templates
+            <span className={cn(
+              "text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ml-0.5",
+              activeTab === 'templates' ? "bg-black text-white" : "bg-white/10 text-muted-foreground"
+            )}>
+              {messageTemplatesList.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('automacao')}
+            className={cn(
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer relative",
+              activeTab === 'automacao' 
+                ? "bg-white text-black shadow-lg" 
+                : "text-muted-foreground hover:text-white"
+            )}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            Automação WhatsApp
+            {pendingNotifications.length > 0 && (
+              <span className="bg-emerald-500 text-black font-black text-[9px] h-4 w-4 rounded-full flex items-center justify-center animate-pulse border border-zinc-950 ml-0.5">
+                {pendingNotifications.length}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('backup')}
             className={cn(
-              "px-4 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
               activeTab === 'backup' 
                 ? "bg-white text-black shadow-lg" 
                 : "text-muted-foreground hover:text-white"
@@ -1026,21 +1392,28 @@ export default function Settings() {
             Backup & Nuvem
           </button>
           <button
-            onClick={() => setActiveTab('automacao')}
+            onClick={() => setActiveTab('sistema')}
             className={cn(
-              "px-4 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer relative",
-              activeTab === 'automacao' 
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
+              activeTab === 'sistema' 
                 ? "bg-white text-black shadow-lg" 
                 : "text-muted-foreground hover:text-white"
             )}
           >
-            <MessageSquare className="h-3.5 w-3.5" />
-            Automação WhatsApp
-            {pendingNotifications.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-emerald-500 text-black font-black text-[9px] h-4 w-4 rounded-full flex items-center justify-center animate-pulse border border-zinc-950">
-                {pendingNotifications.length}
-              </span>
+            <Sliders className="h-3.5 w-3.5" />
+            Sistema & Manutenção
+          </button>
+          <button
+            onClick={() => setActiveTab('pareamento')}
+            className={cn(
+              "px-3.5 py-2 rounded-lg text-xs font-bold transition duration-200 flex items-center gap-1.5 cursor-pointer",
+              activeTab === 'pareamento' 
+                ? "bg-white text-black shadow-lg" 
+                : "text-muted-foreground hover:text-white"
             )}
+          >
+            <Smartphone className="h-3.5 w-3.5" />
+            Vínculo de Dispositivos
           </button>
         </div>
       </div>
@@ -2043,36 +2416,14 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* Gerenciador de Backups Locais */}
-              <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm space-y-4 mt-6">
-                <h3 className="text-base font-bold flex items-center gap-2 text-foreground border-b border-border/50 pb-3">
-                  <Folder className="h-5 w-5 text-emerald-400" />
-                  Gerenciador de Backups Locais
-                </h3>
-                <div className="space-y-3">
-                  <button
-                    onClick={async () => {
-                      if (!Capacitor.isNativePlatform()) return;
-                      try {
-                        const files = await Filesystem.readdir({
-                          path: '',
-                          directory: Directory.Documents
-                        });
-                        const backups = files.files.filter(f => f.name.endsWith('.json') && f.name.includes('backup'));
-                        console.log('Backups encontrados:', backups);
-                        toast.info(`Foram encontrados ${backups.length} backups na pasta Documentos.`);
-                      } catch (e) {
-                        toast.error('Erro ao listar backups.');
-                      }
-                    }}
-                    className="w-full bg-muted/50 hover:bg-muted py-2 rounded-lg text-xs font-semibold text-foreground transition cursor-pointer"
-                  >
-                    Atualizar Lista de Backups
-                  </button>
-                  <p className="text-[10px] text-muted-foreground text-center">
-                    (Listagem funcional apenas em ambiente nativo Android/iOS)
-                  </p>
-                </div>
+              {/* Gerenciador Visual de Backups Locais e Backup Diário */}
+              <div className="mt-6">
+                <LocalBackupManager 
+                  onRequestManualBackup={handleExport}
+                  onBackupRestored={() => {
+                    queryClient.invalidateQueries();
+                  }}
+                />
               </div>
 
               {/* Modal para Baixar e Salvar Arquivo de Backup no Aparelho com Escolha de Local */}
@@ -2163,6 +2514,16 @@ export default function Settings() {
                                 directory: targetDir
                               });
 
+                              localBackupStorage.saveMetadata({
+                                id: `manual_${Date.now()}`,
+                                name: customFileName,
+                                path: customFileName,
+                                createdAt: new Date().toISOString(),
+                                sizeBytes: new Blob([backupJsonCode]).size,
+                                isAuto: false,
+                                content: backupJsonCode
+                              });
+
                               const { Share } = await import('@capacitor/share');
                               if (Share && fileUri?.uri) {
                                 await Share.share({
@@ -2179,6 +2540,17 @@ export default function Settings() {
                               console.warn('Native save with location error:', nativeErr);
                             }
                           }
+
+                          // Register metadata for local manager
+                          localBackupStorage.saveMetadata({
+                            id: `manual_${Date.now()}`,
+                            name: customFileName,
+                            path: customFileName,
+                            createdAt: new Date().toISOString(),
+                            sizeBytes: new Blob([backupJsonCode]).size,
+                            isAuto: false,
+                            content: backupJsonCode
+                          });
 
                           // 2. Browser / FileSaver fallback with custom filename
                           try {
@@ -2363,6 +2735,56 @@ export default function Settings() {
                           )}
                         </button>
                       </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal para Testar Conexão Webhook */}
+              {showTestWebhookModal && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-card border border-border w-full max-w-sm rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+                    <div className="flex items-center justify-between border-b border-border/50 pb-3">
+                      <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
+                        <Play className="h-5 w-5 text-blue-500" />
+                        Testar Webhook
+                      </h3>
+                      <button
+                        onClick={() => setShowTestWebhookModal(false)}
+                        className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <p className="text-xs text-muted-foreground">
+                        Insira o número de celular (com DDD, ex: 32999998888) para enviar uma mensagem de teste:
+                      </p>
+                      <input
+                        type="text"
+                        value={testPhone}
+                        onChange={(e) => setTestPhone(e.target.value)}
+                        placeholder="32999998888"
+                        className="w-full p-2.5 rounded-xl bg-background border border-input text-xs text-foreground focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowTestWebhookModal(false)}
+                        className="px-4 py-2 rounded-lg text-xs font-semibold text-muted-foreground hover:bg-muted/50 cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleTestWebhookSubmit}
+                        className="px-5 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-lg cursor-pointer"
+                      >
+                        Enviar Teste
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -2765,6 +3187,14 @@ export default function Settings() {
                       placeholder="Bearer token ou API key"
                       className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     />
+                    <button
+                      type="button"
+                      onClick={handleTestWebhook}
+                      className="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-2 rounded-lg transition duration-200 cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                      Testar Conexão Webhook
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -2782,165 +3212,50 @@ export default function Settings() {
               </button>
             </div>
 
-            {/* 2. MODELOS DE MENSAGEM */}
-            <div className="bg-card border rounded-xl p-5 space-y-4 shadow-sm lg:col-span-2">
-              <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-emerald-400" />
-                  <h3 className="font-bold text-sm text-foreground">Modelos de Mensagem (Templates)</h3>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  <span className="text-[9px] bg-white/5 px-2 py-0.5 rounded text-muted-foreground"><code>{'{cliente}'}</code></span>
-                  <span className="text-[9px] bg-white/5 px-2 py-0.5 rounded text-muted-foreground"><code>{'{aparelho}'}</code></span>
-                  <span className="text-[9px] bg-white/5 px-2 py-0.5 rounded text-muted-foreground"><code>{'{valor}'}</code></span>
-                  <span className="text-[9px] bg-white/5 px-2 py-0.5 rounded text-muted-foreground"><code>{'{vencimento}'}</code></span>
-                  <span className="text-[9px] bg-white/5 px-2 py-0.5 rounded text-muted-foreground"><code>{'{parcela}'}</code></span>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-3">
-                  <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-1">Status de Clientes e Pedidos</h4>
-                  <p className="text-[11px] text-muted-foreground">Personalize os modelos de WhatsApp enviados ao cadastrar clientes e atualizar o andamento de pedidos.</p>
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">✨ Etapa 1: Boas-Vindas & Cadastro Concluído (Enviado pelo Atendente ao Cliente)</span>
-                  <textarea
-                    rows={2}
-                    value={templateRegistration}
-                    onChange={(e) => setTemplateRegistration(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Olá, {cliente}! Aqui é a {atendente}... Confirmamos seu cadastro..."
-                  />
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-emerald-400 block mb-1">📱 Confirmação Enviada pelo Cliente (Botão WhatsApp no Link Externo de Cadastro)</span>
-                  <textarea
-                    rows={2}
-                    value={templateClientRemoteConfirm}
-                    onChange={(e) => setTemplateClientRemoteConfirm(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-emerald-500/30 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal text-emerald-200"
-                    placeholder="Olá! Acabei de concluir meu cadastro na GODSHOP... {cliente}..."
-                  />
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Suporta as tags: <code>{'{cliente}'}</code>, <code>{'{cpf}'}</code>, <code>{'{telefone}'}</code>, <code>{'{cidade}'}</code>, <code>{'{uf}'}</code></p>
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">💳 Etapa 2: Pedido Confirmado & Pagamento Aprovado</span>
-                  <textarea
-                    rows={2}
-                    value={templateOrderConfirmed}
-                    onChange={(e) => setTemplateOrderConfirmed(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) foi confirmado..."
-                  />
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">📦 Etapa 3: Testes Técnicos & Preparação</span>
-                  <textarea
-                    rows={2}
-                    value={templateOrderPreparing}
-                    onChange={(e) => setTemplateOrderPreparing(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) está em testes..."
-                  />
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">🎁 Etapa 4: Embalado & Pronto para Envio (Despacho)</span>
-                  <textarea
-                    rows={2}
-                    value={templateOrderReady}
-                    onChange={(e) => setTemplateOrderReady(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) está pronto para envio..."
-                  />
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">🚚 Etapa 5: Despachado & Em Rota de Entrega</span>
-                  <textarea
-                    rows={2}
-                    value={templateOrderOnWay}
-                    onChange={(e) => setTemplateOrderOnWay(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) saiu para entrega..."
-                  />
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">🎉 Etapa 6: Pedido Entregue com Sucesso</span>
-                  <textarea
-                    rows={2}
-                    value={templateOrderDelivered}
-                    onChange={(e) => setTemplateOrderDelivered(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Prezado(a) {cliente}... Seu pedido ({aparelho}) foi entregue..."
-                  />
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">🛡️ Etapa 7: Termo de Garantia Oficial Ativado</span>
-                  <textarea
-                    rows={2}
-                    value={templateGuaranteeSent}
-                    onChange={(e) => setTemplateGuaranteeSent(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Prezado(a) {cliente}... Sua garantia referente ao {aparelho}..."
-                  />
-                </div>
-
-                <div>
-                  <span className="text-xs font-bold text-foreground block mb-1">🤍 Etapa 8: Agradecimento & Pós-Venda VIP</span>
-                  <textarea
-                    rows={2}
-                    value={templateOrderThankYou}
-                    onChange={(e) => setTemplateOrderThankYou(e.target.value)}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                    placeholder="Prezado(a) {cliente}... Muito obrigado por comprar seu {aparelho}..."
-                  />
-                </div>
-
-                <div className="pt-3 border-t border-white/10">
-                  <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-3">Lembretes de Carnê e Vencimentos</h4>
-                  <div className="space-y-4">
+            {/* 2. ATALHO & STATUS DOS MODELOS DE MENSAGEM */}
+            <div className="bg-card border rounded-xl p-5 space-y-4 shadow-sm lg:col-span-2 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-emerald-400" />
                     <div>
-                      <span className="text-xs font-bold text-foreground block mb-1">Aviso Prévio (Faltando 3 Dias)</span>
-                      <textarea
-                        rows={2}
-                        value={template3Days}
-                        onChange={(e) => setTemplate3Days(e.target.value)}
-                        className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                        placeholder="Olá, {cliente}... vencendo em 3 dias..."
-                      />
-                    </div>
-
-                    <div>
-                      <span className="text-xs font-bold text-foreground block mb-1">Aviso no Dia do Vencimento</span>
-                      <textarea
-                        rows={2}
-                        value={templateDayOf}
-                        onChange={(e) => setTemplateDayOf(e.target.value)}
-                        className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                        placeholder="Olá, {cliente}... vencendo hoje..."
-                      />
-                    </div>
-
-                    <div>
-                      <span className="text-xs font-bold text-foreground block mb-1">Alerta de Atraso (Após Vencimento)</span>
-                      <textarea
-                        rows={2}
-                        value={templateOverdue}
-                        onChange={(e) => setTemplateOverdue(e.target.value)}
-                        className="w-full text-xs p-2.5 rounded-lg border dark:bg-zinc-950/50 bg-black/5 dark:border-white/10 border-black/10 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-sans leading-normal"
-                        placeholder="Olá, {cliente}... vencido e pendente..."
-                      />
+                      <h3 className="font-bold text-sm text-foreground">Modelos de Mensagem (Templates)</h3>
+                      <p className="text-[11px] text-muted-foreground">Mensagens formatadas para envio automático e manual via WhatsApp</p>
                     </div>
                   </div>
+                  <span className="text-xs px-2.5 py-1 rounded-full font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    {messageTemplatesList.length} Modelos Ativos
+                  </span>
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  <div className="p-3 bg-muted/20 border border-border/40 rounded-xl space-y-1">
+                    <span className="text-[10px] font-bold text-primary uppercase tracking-wider block">Etapas de Pedidos & Cadastro</span>
+                    <p className="text-xs text-foreground font-semibold">10 modelos configurados</p>
+                    <p className="text-[11px] text-muted-foreground">Boas-vindas, aprovação, separação, expedição, rota, entrega, garantia e quitação.</p>
+                  </div>
+                  <div className="p-3 bg-muted/20 border border-border/40 rounded-xl space-y-1">
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">Carnês & Cobranças</span>
+                    <p className="text-xs text-foreground font-semibold">3 modelos com Chave PIX</p>
+                    <p className="text-[11px] text-muted-foreground">Aviso 3 dias antes, alerta no dia do vencimento e aviso de atraso com cálculo de dias.</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Para editar o texto de cada mensagem com os botões individuais de <strong>Editar</strong> e <strong>Salvar</strong>, além de inserir tags dinâmicas como <code>{'{cliente}'}</code> e <code>{'{aparelho}'}</code>, acesse a aba dedicada de Modelos.
+                </p>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('templates')}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold text-xs py-3 px-4 rounded-xl transition duration-200 cursor-pointer shadow-sm flex items-center justify-center gap-2"
+                >
+                  <Pencil className="h-4 w-4" />
+                  Gerenciar e Editar Modelos de Mensagem ({messageTemplatesList.length})
+                  <ChevronRight className="h-4 w-4 ml-auto" />
+                </button>
               </div>
             </div>
           </div>
@@ -3140,6 +3455,35 @@ export default function Settings() {
               </div>
             )}
           </div>
+        </div>
+      )}
+      {activeTab === 'templates' && (
+        <TemplatesTab 
+          templates={messageTemplatesList}
+          attendantName={attendantName}
+          storePhone={storePhone}
+          pixInfo={pixInfo}
+          onSaveAll={saveAutomationSettings}
+        />
+      )}
+
+      {activeTab === 'sistema' && (
+        <SystemTab 
+          onFixDuplicates={handleFixDuplicates}
+          onSeedExample={handleSeedExample}
+          onRestoreOriginalNotes={async () => { toast.info('Funcionalidade de restauração em breve.'); }}
+          onOpenStorageExplorer={handleSearchStorage}
+          cloudStats={null}
+          isRestoring={false}
+          totalClients={clientsList.length}
+          totalSales={salesList.length}
+          totalInventory={iphonesList.length + consolesList.length}
+        />
+      )}
+
+      {activeTab === 'pareamento' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <DeviceLinkSection theme={currentTheme} />
         </div>
       )}
 

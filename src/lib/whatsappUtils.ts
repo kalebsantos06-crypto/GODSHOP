@@ -252,10 +252,15 @@ export async function dispatchWebhookMessage(payload: {
       message: payload.text
     };
   } else if (provider === 'evolution') {
-    // Evolution API v1/v2 text format
+    // Evolution API v2 standard format
     body = {
       number: formattedPhone,
-      text: payload.text
+      text: payload.text,
+      options: {
+        delay: 1200,
+        presence: "composing",
+        linkPreview: true
+      }
     };
   } else if (provider === 'wppconnect') {
     body = {
@@ -275,15 +280,49 @@ export async function dispatchWebhookMessage(payload: {
     };
   }
 
+  // Evolution API uses 'apikey' header primarily, but we also include Authorization Bearer for compatibility
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+
+  if (webhookToken) {
+    headers['Authorization'] = `Bearer ${webhookToken}`;
+    if (provider === 'evolution') {
+      headers['apikey'] = webhookToken;
+    }
+  }
+
+  console.log('[WhatsAppUtils] Disparando webhook:', { 
+    provider, 
+    url: webhookUrl.trim(), 
+    payload: body,
+    headers
+  });
+
   const res = await fetch(webhookUrl.trim(), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(webhookToken ? { 'Authorization': `Bearer ${webhookToken}` } : {})
-    },
+    headers,
     body: JSON.stringify(body)
   });
 
-  if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => '');
+    console.error('[WhatsAppUtils] Webhook error response:', { status: res.status, errorText });
+    throw new Error(`HTTP error! status: ${res.status} ${errorText}`);
+  }
+  
+  console.log('[WhatsAppUtils] Webhook disparado com sucesso.');
   return true;
 }
+
+/**
+ * Tests the webhook connection with a test message
+ */
+export async function testWebhookConnection(testPhone: string): Promise<boolean> {
+  return dispatchWebhookMessage({
+    phone: testPhone,
+    text: '🤖 *Teste de Conexão - GODSHOP Evolution API* \n\nSua integração com o WhatsApp via webhook foi configurada com sucesso! 🚀',
+    clientName: 'Cliente Teste'
+  });
+}
+
