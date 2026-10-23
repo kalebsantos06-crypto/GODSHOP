@@ -32,7 +32,7 @@ async function supabaseQuery(table: string, userId: string) {
   if (!supabaseUrl || !supabaseAnonKey) return [];
 
   try {
-    const response = await fetch(`${supabaseUrl}/rest/v1/${table}?user_id=eq.${userId}&select=*`, {
+    const response = await fetch(`${supabaseUrl}/rest/v1/${table}?select=*`, {
       headers: {
         'apikey': supabaseAnonKey,
         'Authorization': `Bearer ${supabaseAnonKey}`
@@ -79,6 +79,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, "public_settings.json");
 const TOKENS_FILE = path.join(DATA_DIR, "public_tokens.json");
 const USERS_FILE = path.join(DATA_DIR, "public_users.json");
 const CLOUD_DB_FILE = path.join(DATA_DIR, "cloud_database.json");
+const PAIRING_FILE = path.join(DATA_DIR, "device_pairing.json");
 
 const atomicWriteFileSync = (filePath: string, data: any) => {
   const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2)}`;
@@ -101,6 +102,9 @@ try {
   }
   if (!fs.existsSync(TOKENS_FILE)) {
     atomicWriteFileSync(TOKENS_FILE, {});
+  }
+  if (!fs.existsSync(PAIRING_FILE)) {
+    atomicWriteFileSync(PAIRING_FILE, {});
   }
   if (!fs.existsSync(CLOUD_DB_FILE)) {
     const initialCloudDb = {
@@ -1424,6 +1428,143 @@ const writePublicTokens = (data: Record<string, any>) => {
   }
 };
 
+const readPairingData = (): Record<string, any> => {
+  try {
+    if (!fs.existsSync(PAIRING_FILE)) return {};
+    const content = fs.readFileSync(PAIRING_FILE, "utf8");
+    return safeJsonParse(content, {});
+  } catch (err) {
+    console.error("Error reading pairing file:", err);
+    return {};
+  }
+};
+
+const writePairingData = (data: Record<string, any>) => {
+  try {
+    atomicWriteFileSync(PAIRING_FILE, data);
+  } catch (err) {
+    console.error("Error writing pairing file:", err);
+  }
+};
+
+// --- DEVICE PAIRING API ---
+
+// 1. Generate a pairing code (Host device)
+app.post("/api/pair/generate", async (req, res) => {
+  const { supabaseUrl, supabaseKey, serverUrl, deviceName } = req.body;
+  
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(400).json({ error: "Configurações de Supabase são obrigatórias para gerar código." });
+  }
+
+  // Generate 6-digit random code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const pairingData = readPairingData();
+
+  const pairingRecord = {
+    code,
+    supabaseUrl,
+    supabaseKey,
+    serverUrl: serverUrl || `https://${req.headers.host || 'ais-dev-vaaqegsewou44zzapwefq3-387330212853.us-west2.run.app'}`,
+    deviceName: deviceName || "Dispositivo Principal",
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 mins expiry
+    createdAt: new Date().toISOString()
+  };
+
+  pairingData[code] = pairingRecord;
+  writePairingData(pairingData);
+  console.log(`[Pairing] Generated code ${code} for device ${deviceName}`);
+
+  // Also bridge to Supabase public_sales table for universal multi-device access across any network
+  try {
+    let cleanUrl = supabaseUrl;
+    if (cleanUrl.endsWith('/rest/v1/')) cleanUrl = cleanUrl.slice(0, -9);
+    else if (cleanUrl.endsWith('/rest/v1')) cleanUrl = cleanUrl.slice(0, -8);
+
+    await fetch(`${cleanUrl}/rest/v1/public_sales`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        id: `pair_${code}`,
+        sale_data: {
+          type: 'device_pairing',
+          ...pairingRecord
+        }
+      })
+    });
+    console.log(`[Pairing] Bridged code ${code} to Supabase cloud successfully.`);
+  } catch (supaErr) {
+    console.warn('[Pairing] Supabase bridge warning:', supaErr);
+  }
+
+  res.json({ success: true, code });
+});
+
+// 2. Consume a pairing code (Client device)
+app.get("/api/pair/consume", async (req, res) => {
+  const { code } = req.query;
+  if (!code || typeof code !== "string") {
+    return res.status(400).json({ error: "Código é obrigatório." });
+  }
+
+  const pairingData = readPairingData();
+  let data = pairingData[code];
+
+  // If not found in local pairing file, check Supabase directly
+  if (!data) {
+    try {
+      const supaUrl = process.env.VITE_SUPABASE_URL || 'https://wkkjaakydjnfzayyedxy.supabase.co';
+      const supaKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+      let cleanUrl = supaUrl;
+      if (cleanUrl.endsWith('/rest/v1/')) cleanUrl = cleanUrl.slice(0, -9);
+      else if (cleanUrl.endsWith('/rest/v1')) cleanUrl = cleanUrl.slice(0, -8);
+
+      if (cleanUrl && supaKey) {
+        const supaRes = await fetch(`${cleanUrl}/rest/v1/public_sales?id=eq.pair_${code}&select=*`, {
+          headers: {
+            'apikey': supaKey,
+            'Authorization': `Bearer ${supaKey}`
+          }
+        });
+        if (supaRes.ok) {
+          const rows = await supaRes.json();
+          if (rows && rows.length > 0 && rows[0].sale_data) {
+            data = rows[0].sale_data;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Pairing] Supabase lookup warning:', e);
+    }
+  }
+
+  if (!data) {
+    return res.status(404).json({ error: "Código de pareamento inválido ou expirado." });
+  }
+
+  if (new Date(data.expiresAt) < new Date()) {
+    delete pairingData[code];
+    writePairingData(pairingData);
+    return res.status(400).json({ error: "Este código expirou. Gere um novo no dispositivo principal." });
+  }
+
+  // Code is valid! Return the config
+  console.log(`[Pairing] Code ${code} consumed successfully.`);
+
+  res.json({
+    success: true,
+    supabaseUrl: data.supabaseUrl,
+    supabaseKey: data.supabaseKey,
+    serverUrl: data.serverUrl,
+    deviceName: data.deviceName
+  });
+});
+
 // Validate Client Registration Link Token
 app.get("/api/tokens/validate", async (req, res) => {
   const { token } = req.query;
@@ -1729,7 +1870,7 @@ app.get("/api/public-clients", async (req, res) => {
 
   if (supabaseUrl && supabaseAnonKey) {
     try {
-      const response = await fetch(`${supabaseUrl}/rest/v1/public_clients?user_id=eq.${userId}&select=*&order=created_at.desc`, {
+      const response = await fetch(`${supabaseUrl}/rest/v1/public_clients?select=*&order=created_at.desc`, {
         headers: {
           'apikey': supabaseAnonKey,
           'Authorization': `Bearer ${supabaseAnonKey}`

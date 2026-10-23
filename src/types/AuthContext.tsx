@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, clearStaleAuthTokens } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
+import LoadingScreen from '../components/LoadingScreen';
 
 interface AuthContextType {
   user: User | null;
@@ -226,14 +227,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-slate-100">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-xs font-semibold tracking-wider uppercase text-slate-400">Carregando GODSHOP...</span>
-        </div>
-      </div>
-    );
+    return <LoadingScreen message="Inicializando GODSHOP..." />;
   }
 
   return (

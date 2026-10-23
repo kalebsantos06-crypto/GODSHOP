@@ -67,7 +67,7 @@ export const getCurrentUserId = async () => {
 const tryCacheUserIdFromRows = (rows: any[]) => {
   if (rows && rows.length > 0) {
     for (const row of rows) {
-      if (row && row.user_id && row.user_id !== 'dev-user-id') {
+      if (row && row.user_id ) {
         lastKnownUserIdFromRows = row.user_id;
         break;
       }
@@ -181,11 +181,43 @@ const shouldAttemptCloudFetch = (): boolean => {
   return true;
 };
 
+export const getCloudApiUrl = (endpoint: string): string => {
+  let baseUrl = '';
+  if (typeof window !== 'undefined') {
+    const customServer = localStorage.getItem('custom_cloud_server_url') || localStorage.getItem('custom_app_domain');
+    if (customServer && customServer.startsWith('http')) {
+      baseUrl = customServer.replace(/\/$/, '');
+    } else {
+      const origin = window.location.origin;
+      if (origin && origin.startsWith('http') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+        baseUrl = origin;
+      }
+    }
+  }
+  if (!baseUrl) {
+    baseUrl = 'https://ais-dev-vaaqegsewou44zzapwefq3-387330212853.us-west2.run.app';
+  }
+  return `${baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+};
+
+export const notifyDataMutation = (table: string, action: 'create' | 'update' | 'delete', item?: any) => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('device_data_mutated', { detail: { table, action, item } }));
+      broadcastLocalChange(table);
+    }
+    // Also trigger cloud push in background to keep server cloud database synchronized
+    setTimeout(() => {
+      db.pushToCloud().catch(err => console.warn('[Auto Cloud Push] Warn:', err));
+    }, 150);
+  } catch (e) {}
+};
+
 export const cloudApi = {
   fetchTable: async (table: string): Promise<any[]> => {
     if (!shouldAttemptCloudFetch()) return [];
     try {
-      const res = await fetch(`/api/cloud-db/${table}`);
+      const res = await fetch(getCloudApiUrl(`/api/cloud-db/${table}`));
       if (res.ok) {
         cloudApiAvailable = true;
         const json = await res.json();
@@ -205,7 +237,7 @@ export const cloudApi = {
     if (!shouldAttemptCloudFetch()) return;
     try {
       if (!item || !item.id) return;
-      const res = await fetch(`/api/cloud-db/${table}`, {
+      const res = await fetch(getCloudApiUrl(`/api/cloud-db/${table}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item)
@@ -221,7 +253,7 @@ export const cloudApi = {
     if (!shouldAttemptCloudFetch()) return;
     try {
       if (!id) return;
-      const res = await fetch(`/api/cloud-db/${table}/${id}`, {
+      const res = await fetch(getCloudApiUrl(`/api/cloud-db/${table}/${id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
@@ -237,7 +269,7 @@ export const cloudApi = {
     if (!shouldAttemptCloudFetch()) return;
     try {
       if (!id) return;
-      const res = await fetch(`/api/cloud-db/${table}/${id}`, {
+      const res = await fetch(getCloudApiUrl(`/api/cloud-db/${table}/${id}`), {
         method: 'DELETE'
       });
       if (res.ok) cloudApiAvailable = true;
@@ -250,7 +282,7 @@ export const cloudApi = {
   pullAll: async (): Promise<any> => {
     if (!shouldAttemptCloudFetch()) return null;
     try {
-      const res = await fetch('/api/cloud-db');
+      const res = await fetch(getCloudApiUrl('/api/cloud-db'));
       if (res.ok) {
         cloudApiAvailable = true;
         const json = await res.json();
@@ -269,7 +301,7 @@ export const cloudApi = {
   pushAll: async (data: any): Promise<any> => {
     if (!shouldAttemptCloudFetch()) return null;
     try {
-      const res = await fetch('/api/cloud-db/push', {
+      const res = await fetch(getCloudApiUrl('/api/cloud-db/push'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data })
@@ -292,7 +324,7 @@ export const cloudApi = {
   getStats: async (): Promise<any> => {
     if (!shouldAttemptCloudFetch()) return null;
     try {
-      const res = await fetch('/api/cloud-db/stats');
+      const res = await fetch(getCloudApiUrl('/api/cloud-db/stats'));
       if (res.ok) {
         cloudApiAvailable = true;
         const json = await res.json();
@@ -854,11 +886,7 @@ export const db = {
   prices: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('prices').select('*');
-        if (userId) {
-          query = query.eq('user_id', userId);
-        }
         const { data, error } = await query.order('model', { ascending: true });
         if (error) throw error;
         tryCacheUserIdFromRows(data);
@@ -871,7 +899,7 @@ export const db = {
           .map((dbItem: any) => {
             const localItem = localMap.get(dbItem.id);
             if (localItem) {
-              return { ...dbItem, ...localItem };
+              return { ...localItem, ...dbItem };
             }
             return dbItem;
           });
@@ -901,12 +929,16 @@ export const db = {
         
         const local = getLocalData('prices');
         setLocalData('prices', [...local, newItem]);
+        cloudApi.upsertItem('prices', newItem).catch(err => console.warn('[Cloud Upsert Price] Warn:', err));
+        notifyDataMutation('prices', 'create', newItem);
         return newItem as PriceTableItem;
       } catch (err: any) {
         notifyOffline(err);
         const newItem = { ...data, id } as PriceTableItem;
         const local = getLocalData('prices');
         setLocalData('prices', [...local, newItem]);
+        cloudApi.upsertItem('prices', newItem).catch(err => console.warn('[Cloud Upsert Price] Warn:', err));
+        notifyDataMutation('prices', 'create', newItem);
         return newItem;
       }
     },
@@ -941,6 +973,8 @@ export const db = {
 
         const local = getLocalData('prices');
         setLocalData('prices', local.map(item => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('prices', id, updateData).catch(err => console.warn('[Cloud Update Price] Warn:', err));
+        notifyDataMutation('prices', 'update', { id, ...data });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -948,6 +982,8 @@ export const db = {
         console.warn('Fallback updating price locally:', err);
         const local = getLocalData('prices');
         setLocalData('prices', local.map(item => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('prices', id, data).catch(err => console.warn('[Cloud Update Price] Warn:', err));
+        notifyDataMutation('prices', 'update', { id, ...data });
       }
     },
     delete: async (id: string) => {
@@ -955,12 +991,13 @@ export const db = {
       const local = getLocalData('prices');
       setLocalData('prices', local.filter(item => item.id !== id));
       cloudApi.deleteItem('prices', id).catch(err => console.warn('[Cloud Delete] Warn:', err));
+      notifyDataMutation('prices', 'delete', { id });
 
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('prices').delete().eq('id', id);
         if (userId) {
-          query = query.eq('user_id', userId);
+          query = query;
         }
         const { error } = await query;
         if (error) throw error;
@@ -973,11 +1010,7 @@ export const db = {
   iphones: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('iphones').select('*');
-        if (userId) {
-          query = query.eq('user_id', userId);
-        }
         const { data, error } = await query.order('buy_date', { ascending: false });
         if (error) throw error;
         tryCacheUserIdFromRows(data);
@@ -990,7 +1023,7 @@ export const db = {
           .map((dbItem: any) => {
             const localItem = localMap.get(dbItem.id);
             if (localItem) {
-              return { ...dbItem, ...localItem, ram: localItem.ram || dbItem.ram || '' };
+              return { ...localItem, ...dbItem, ram: dbItem.ram || localItem.ram || '' };
             }
             return dbItem;
           });
@@ -1072,12 +1105,16 @@ export const db = {
           const fallbackItem = { ...insertData } as iPhone;
           const local = getLocalData('iphones');
           setLocalData('iphones', [...local, fallbackItem]);
+          cloudApi.upsertItem('iphones', fallbackItem).catch(err => console.warn('[Cloud Upsert iPhone] Warn:', err));
+          notifyDataMutation('iphones', 'create', fallbackItem);
           return fallbackItem;
         }
 
         const itemToReturn = { ...insertData, ...newItem };
         const local = getLocalData('iphones');
         setLocalData('iphones', [...local, itemToReturn]);
+        cloudApi.upsertItem('iphones', itemToReturn).catch(err => console.warn('[Cloud Upsert iPhone] Warn:', err));
+        notifyDataMutation('iphones', 'create', itemToReturn);
         return itemToReturn as iPhone;
       } catch (err: any) {
         if (isConnectionError(err)) {
@@ -1086,6 +1123,8 @@ export const db = {
         const newItem = { ...data, id } as iPhone;
         const local = getLocalData('iphones');
         setLocalData('iphones', [...local, newItem]);
+        cloudApi.upsertItem('iphones', newItem).catch(err => console.warn('[Cloud Upsert iPhone] Warn:', err));
+        notifyDataMutation('iphones', 'create', newItem);
         return newItem;
       }
     },
@@ -1118,7 +1157,7 @@ export const db = {
           if (currentError) {
             const isColumnError = currentError.code === '42703' || currentError.message?.includes('user_id') || currentError.message?.includes('coluna') || currentError.message?.includes('column');
             if (isColumnError) {
-              const match = currentError.message?.match(/"([^"]+)"/) || currentError.message?.match(/column ['"](.+?)['"]/);
+              const match = currentError.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
               if (match && match[1]) {
                 if (!missingColumnsByTable['iphones']) missingColumnsByTable['iphones'] = new Set();
                 missingColumnsByTable['iphones'].add(match[1]);
@@ -1134,6 +1173,8 @@ export const db = {
 
         const local = getLocalData('iphones');
         setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('iphones', id, updateData).catch(err => console.warn('[Cloud Update iPhone] Warn:', err));
+        notifyDataMutation('iphones', 'update', { id, ...data });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1141,6 +1182,8 @@ export const db = {
         console.warn('Fallback updating iphone locally:', err);
         const local = getLocalData('iphones');
         setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('iphones', id, data).catch(err => console.warn('[Cloud Update iPhone] Warn:', err));
+        notifyDataMutation('iphones', 'update', { id, ...data });
       }
     },
     delete: async (id: string) => {
@@ -1148,12 +1191,13 @@ export const db = {
       const local = getLocalData('iphones');
       setLocalData('iphones', local.filter(item => item.id !== id));
       cloudApi.deleteItem('iphones', id).catch(err => console.warn('[Cloud Delete] Warn:', err));
+      notifyDataMutation('iphones', 'delete', { id });
 
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('iphones').delete().eq('id', id);
         if (userId) {
-          query = query.eq('user_id', userId);
+          query = query;
         }
         await query;
       } catch (err: any) {
@@ -1164,11 +1208,7 @@ export const db = {
   clients: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('clients').select('*');
-        if (userId) {
-          query = query.eq('user_id', userId);
-        }
         const { data, error } = await query.order('name', { ascending: true });
         if (error) throw error;
         tryCacheUserIdFromRows(data);
@@ -1289,6 +1329,8 @@ export const db = {
             const fallbackItem = { ...insertData } as Client;
             const local = getLocalData('clients');
             setLocalData('clients', [...local, fallbackItem]);
+            cloudApi.upsertItem('clients', fallbackItem).catch(err => console.warn('[Cloud Upsert Client] Warn:', err));
+            notifyDataMutation('clients', 'create', fallbackItem);
             return fallbackItem;
           }
           throw attemptError;
@@ -1297,6 +1339,8 @@ export const db = {
         const local = getLocalData('clients');
         const updatedLocal = [...local.filter(l => l.id !== newItem.id), newItem];
         setLocalData('clients', updatedLocal);
+        cloudApi.upsertItem('clients', newItem).catch(err => console.warn('[Cloud Upsert Client] Warn:', err));
+        notifyDataMutation('clients', 'create', newItem);
         return newItem as Client;
       } catch (err: any) {
         if (isConnectionError(err)) {
@@ -1321,10 +1365,15 @@ export const db = {
             item.id === localExisting.id ? { ...item, ...data } : item
           );
           setLocalData('clients', updatedLocalList);
-          return { ...localExisting, ...data } as Client;
+          const updated = { ...localExisting, ...data } as Client;
+          cloudApi.upsertItem('clients', updated).catch(err => console.warn('[Cloud Upsert Client] Warn:', err));
+          notifyDataMutation('clients', 'update', updated);
+          return updated;
         } else {
           const newItem = { ...data, id } as Client;
           setLocalData('clients', [...local, newItem]);
+          cloudApi.upsertItem('clients', newItem).catch(err => console.warn('[Cloud Upsert Client] Warn:', err));
+          notifyDataMutation('clients', 'create', newItem);
           return newItem;
         }
       }
@@ -1360,6 +1409,8 @@ export const db = {
 
         const local = getLocalData('clients');
         setLocalData('clients', local.map(item => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('clients', id, updateData).catch(err => console.warn('[Cloud Update Client] Warn:', err));
+        notifyDataMutation('clients', 'update', { id, ...data });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1367,6 +1418,8 @@ export const db = {
         console.warn('Fallback updating client locally:', err);
         const local = getLocalData('clients');
         setLocalData('clients', local.map(item => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('clients', id, data).catch(err => console.warn('[Cloud Update Client] Warn:', err));
+        notifyDataMutation('clients', 'update', { id, ...data });
       }
     },
     delete: async (id: string) => {
@@ -1374,12 +1427,13 @@ export const db = {
       const local = getLocalData('clients');
       setLocalData('clients', local.filter(item => item.id !== id));
       cloudApi.deleteItem('clients', id).catch(err => console.warn('[Cloud Delete] Warn:', err));
+      notifyDataMutation('clients', 'delete', { id });
 
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('clients').delete().eq('id', id);
         if (userId) {
-          query = query.eq('user_id', userId);
+          query = query;
         }
         await query;
       } catch (err: any) {
@@ -1390,11 +1444,7 @@ export const db = {
   suppliers: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('suppliers').select('*');
-        if (userId) {
-          query = query.eq('user_id', userId);
-        }
         const { data, error } = await query.order('name', { ascending: true });
         if (error) throw error;
         tryCacheUserIdFromRows(data);
@@ -1441,18 +1491,24 @@ export const db = {
           const fallbackItem = { ...insertData } as Supplier;
           const local = getLocalData('suppliers');
           setLocalData('suppliers', [...local, fallbackItem]);
+          cloudApi.upsertItem('suppliers', fallbackItem).catch(err => console.warn('[Cloud Upsert Supplier] Warn:', err));
+          notifyDataMutation('suppliers', 'create', fallbackItem);
           return fallbackItem;
         }
 
         const local = getLocalData('suppliers');
         const updatedLocal = [...local.filter(l => l.id !== newItem.id), newItem];
         setLocalData('suppliers', updatedLocal);
+        cloudApi.upsertItem('suppliers', newItem).catch(err => console.warn('[Cloud Upsert Supplier] Warn:', err));
+        notifyDataMutation('suppliers', 'create', newItem);
         return newItem as Supplier;
       } catch (err: any) {
         notifyOffline(err);
         const newItem = { ...data, id } as Supplier;
         const local = getLocalData('suppliers');
         setLocalData('suppliers', [...local, newItem]);
+        cloudApi.upsertItem('suppliers', newItem).catch(err => console.warn('[Cloud Upsert Supplier] Warn:', err));
+        notifyDataMutation('suppliers', 'create', newItem);
         return newItem;
       }
     },
@@ -1487,6 +1543,8 @@ export const db = {
 
         const local = getLocalData('suppliers');
         setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('suppliers', id, updateData).catch(err => console.warn('[Cloud Update Supplier] Warn:', err));
+        notifyDataMutation('suppliers', 'update', { id, ...data });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1494,6 +1552,8 @@ export const db = {
         console.warn('Fallback updating supplier locally:', err);
         const local = getLocalData('suppliers');
         setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('suppliers', id, data).catch(err => console.warn('[Cloud Update Supplier] Warn:', err));
+        notifyDataMutation('suppliers', 'update', { id, ...data });
       }
     },
     delete: async (id: string) => {
@@ -1501,12 +1561,13 @@ export const db = {
       const local = getLocalData('suppliers');
       setLocalData('suppliers', local.filter(item => item.id !== id));
       cloudApi.deleteItem('suppliers', id).catch(err => console.warn('[Cloud Delete] Warn:', err));
+      notifyDataMutation('suppliers', 'delete', { id });
 
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('suppliers').delete().eq('id', id);
         if (userId) {
-          query = query.eq('user_id', userId);
+          query = query;
         }
         await query;
       } catch (err: any) {
@@ -1517,11 +1578,7 @@ export const db = {
   consoles: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('consoles').select('*');
-        if (userId) {
-          query = query.eq('user_id', userId);
-        }
         const { data, error } = await query.order('buy_date', { ascending: false });
         if (error) throw error;
         tryCacheUserIdFromRows(data);
@@ -1534,7 +1591,7 @@ export const db = {
           .map((dbItem: any) => {
             const localItem = localMap.get(dbItem.id);
             if (localItem) {
-              return { ...dbItem, ...localItem, ram: localItem.ram || dbItem.ram || '' };
+              return { ...localItem, ...dbItem, ram: dbItem.ram || localItem.ram || '' };
             }
             return dbItem;
           });
@@ -1616,12 +1673,16 @@ export const db = {
           const fallbackItem = { ...insertData } as Console;
           const local = getLocalData('consoles');
           setLocalData('consoles', [...local, fallbackItem]);
+          cloudApi.upsertItem('consoles', fallbackItem).catch(err => console.warn('[Cloud Upsert Console] Warn:', err));
+          notifyDataMutation('consoles', 'create', fallbackItem);
           return fallbackItem;
         }
 
         const itemToReturn = { ...insertData, ...newItem };
         const local = getLocalData('consoles');
         setLocalData('consoles', [...local, itemToReturn]);
+        cloudApi.upsertItem('consoles', itemToReturn).catch(err => console.warn('[Cloud Upsert Console] Warn:', err));
+        notifyDataMutation('consoles', 'create', itemToReturn);
         return itemToReturn as Console;
       } catch (err: any) {
         if (isConnectionError(err)) {
@@ -1630,6 +1691,8 @@ export const db = {
         const newItem = { ...data, id } as Console;
         const local = getLocalData('consoles');
         setLocalData('consoles', [...local, newItem]);
+        cloudApi.upsertItem('consoles', newItem).catch(err => console.warn('[Cloud Upsert Console] Warn:', err));
+        notifyDataMutation('consoles', 'create', newItem);
         return newItem;
       }
     },
@@ -1678,6 +1741,8 @@ export const db = {
         const local = getLocalData('consoles');
         const updatedLocal = local.map(item => item.id === id ? { ...item, ...data } : item);
         setLocalData('consoles', updatedLocal);
+        cloudApi.updateItem('consoles', id, updateData).catch(err => console.warn('[Cloud Update Console] Warn:', err));
+        notifyDataMutation('consoles', 'update', { id, ...data });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1686,6 +1751,8 @@ export const db = {
         const local = getLocalData('consoles');
         const updatedLocal = local.map(item => item.id === id ? { ...item, ...data } : item);
         setLocalData('consoles', updatedLocal);
+        cloudApi.updateItem('consoles', id, data).catch(err => console.warn('[Cloud Update Console] Warn:', err));
+        notifyDataMutation('consoles', 'update', { id, ...data });
       }
     },
     delete: async (id: string) => {
@@ -1693,12 +1760,13 @@ export const db = {
       const local = getLocalData('consoles');
       setLocalData('consoles', local.filter(item => item.id !== id));
       cloudApi.deleteItem('consoles', id).catch(err => console.warn('[Cloud Delete] Warn:', err));
+      notifyDataMutation('consoles', 'delete', { id });
 
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('consoles').delete().eq('id', id);
         if (userId) {
-          query = query.eq('user_id', userId);
+          query = query;
         }
         await query;
       } catch (err: any) {
@@ -1709,11 +1777,7 @@ export const db = {
   sales: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('sales').select('*');
-        if (userId) {
-          query = query.eq('user_id', userId);
-        }
         const { data, error } = await query.order('sale_date', { ascending: false });
         if (error) throw error;
         tryCacheUserIdFromRows(data);
@@ -1865,6 +1929,7 @@ export const db = {
             return {
               ...localItem,
               ...row,
+              items: row.items || localItem?.items || [],
               signature_data: signatureData,
               signed_at: signedAt,
               signed_ip: signedIp,
@@ -1960,7 +2025,9 @@ export const db = {
       // Remove any known missing columns to avoid query failures
       if (missingColumnsByTable['sales']) {
         for (const col of missingColumnsByTable['sales']) {
-          delete insertData[col];
+          if (col !== 'items') {
+            delete insertData[col];
+          }
         }
       }
 
@@ -2005,34 +2072,30 @@ export const db = {
         
         // 2. Update item statuses to 'vendido'
         const saleItems = data.items || [];
+        console.log('Updating items status:', saleItems);
         for (const item of saleItems) {
           if (item.type === 'iphone' && item.id) {
             try {
-              let iQuery = supabase.from('iphones').update({ status: 'vendido', updated_at: nowIso }).eq('id', item.id);
-              if (userId) iQuery = iQuery.eq('user_id', userId);
-              await iQuery;
-            } catch (e) {}
+              console.log('Marking iphone as vendido:', item.id);
+              await supabase.from('iphones').update({ status: 'vendido', updated_at: nowIso }).eq('id', item.id);
+            } catch (e) {
+              console.warn(`Failed to mark iphone ${item.id} as vendido:`, e);
+            }
           } else if (item.type === 'console' && item.id) {
             try {
-              let cQuery = supabase.from('consoles').update({ status: 'vendido', updated_at: nowIso }).eq('id', item.id);
-              if (userId) cQuery = cQuery.eq('user_id', userId);
-              await cQuery;
-            } catch (e) {}
+              console.log('Marking console as vendido:', item.id);
+              await supabase.from('consoles').update({ status: 'vendido', updated_at: nowIso }).eq('id', item.id);
+            } catch (e) {
+              console.warn(`Failed to mark console ${item.id} as vendido:`, e);
+            }
+          } else if (item.type === 'accessory' && item.id) {
+            try {
+              console.log('Marking accessory as vendido:', item.id);
+              await supabase.from('gifts').update({ status: 'vendido', updated_at: nowIso }).eq('id', item.id);
+            } catch (e) {
+              console.warn(`Failed to mark accessory ${item.id} as vendido:`, e);
+            }
           }
-        }
-
-        if (data.iphone_id) {
-          let iphoneQuery = supabase.from('iphones').update({ status: 'vendido', updated_at: nowIso }).eq('id', data.iphone_id);
-          if (userId) iphoneQuery = iphoneQuery.eq('user_id', userId);
-          const { error: iphoneError } = await iphoneQuery;
-          if (iphoneError) throw iphoneError;
-        }
-        
-        if (data.console_id) {
-          let consoleQuery = supabase.from('consoles').update({ status: 'vendido', updated_at: nowIso }).eq('id', data.console_id);
-          if (userId) consoleQuery = consoleQuery.eq('user_id', userId);
-          const { error: consoleError } = await consoleQuery;
-          if (consoleError) throw consoleError;
         }
 
         // Keep local cache in sync query
@@ -2051,14 +2114,18 @@ export const db = {
 
         const localIphones = getLocalData('iphones');
         const localConsoles = getLocalData('consoles');
+        const localGifts = getLocalData('gifts');
         let updatedIphones = [...localIphones];
         let updatedConsoles = [...localConsoles];
+        let updatedGifts = [...localGifts];
 
         for (const item of saleItems) {
           if (item.type === 'iphone' && item.id) {
             updatedIphones = updatedIphones.map(i => i.id === item.id ? { ...i, status: 'vendido', updated_at: nowIso } : i);
           } else if (item.type === 'console' && item.id) {
             updatedConsoles = updatedConsoles.map(c => c.id === item.id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
+          } else if (item.type === 'accessory' && item.id) {
+            updatedGifts = updatedGifts.map(g => g.id === item.id ? { ...g, status: 'vendido', updated_at: nowIso } : g);
           }
         }
 
@@ -2071,8 +2138,10 @@ export const db = {
 
         setLocalData('iphones', updatedIphones);
         setLocalData('consoles', updatedConsoles);
+        setLocalData('gifts', updatedGifts);
         
         cloudApi.upsertItem('sales', localNewItem).catch(err => console.warn('[Cloud Upsert Sale] Warn:', err));
+        notifyDataMutation('sales', 'create', localNewItem);
         return localNewItem as Sale;
       } catch (err: any) {
         notifyOffline(err);
@@ -2082,17 +2151,38 @@ export const db = {
         const localSales = getLocalData('sales');
         setLocalData('sales', [...localSales, newItem]);
 
-        // Update status locally
-        if (data.iphone_id) {
-          const localIphones = getLocalData('iphones');
-          setLocalData('iphones', localIphones.map(i => i.id === data.iphone_id ? { ...i, status: 'vendido', updated_at: nowIso } : i));
-        }
-        if (data.console_id) {
-          const localConsoles = getLocalData('consoles');
-          setLocalData('consoles', localConsoles.map(c => c.id === data.console_id ? { ...c, status: 'vendido', updated_at: nowIso } : c));
+        // Update status locally for all sale items
+        const saleItems = data.items || [];
+        const localIphones = getLocalData('iphones');
+        const localConsoles = getLocalData('consoles');
+        const localGifts = getLocalData('gifts');
+        let updatedIphones = [...localIphones];
+        let updatedConsoles = [...localConsoles];
+        let updatedGifts = [...localGifts];
+
+        for (const item of saleItems) {
+          if (item.type === 'iphone' && item.id) {
+            updatedIphones = updatedIphones.map(i => i.id === item.id ? { ...i, status: 'vendido', updated_at: nowIso } : i);
+          } else if (item.type === 'console' && item.id) {
+            updatedConsoles = updatedConsoles.map(c => c.id === item.id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
+          } else if (item.type === 'accessory' && item.id) {
+            updatedGifts = updatedGifts.map(g => g.id === item.id ? { ...g, status: 'vendido', updated_at: nowIso } : g);
+          }
         }
 
+        if (data.iphone_id) {
+          updatedIphones = updatedIphones.map(i => i.id === data.iphone_id ? { ...i, status: 'vendido', updated_at: nowIso } : i);
+        }
+        if (data.console_id) {
+          updatedConsoles = updatedConsoles.map(c => c.id === data.console_id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
+        }
+
+        setLocalData('iphones', updatedIphones);
+        setLocalData('consoles', updatedConsoles);
+        setLocalData('gifts', updatedGifts);
+
         cloudApi.upsertItem('sales', newItem).catch(err => console.warn('[Cloud Upsert Sale] Warn:', err));
+        notifyDataMutation('sales', 'create', newItem);
         return newItem;
       }
     },
@@ -2127,7 +2217,6 @@ export const db = {
         let oldSale;
         try {
           let oldSaleQuery = supabase.from('sales').select('iphone_id, console_id').eq('id', id);
-          if (userId) oldSaleQuery = oldSaleQuery.eq('user_id', userId);
           const { data: fetchOldSale, error: getError } = await oldSaleQuery.single();
           if (getError) throw getError;
           oldSale = fetchOldSale;
@@ -2141,18 +2230,14 @@ export const db = {
           // Revert old iPhone status
           if (oldSale.iphone_id) {
             try {
-              let revertQuery = supabase.from('iphones').update({ status: 'disponivel', updated_at: nowIso }).eq('id', oldSale.iphone_id);
-              if (userId) revertQuery = revertQuery.eq('user_id', userId);
-              await revertQuery;
+              await supabase.from('iphones').update({ status: 'disponivel', updated_at: nowIso }).eq('id', oldSale.iphone_id);
             } catch (e) {
               console.warn('Could not revert iPhone status in DB:', e);
             }
           }
           // Update new iPhone status
           try {
-            let updateQuery = supabase.from('iphones').update({ status: 'vendido', updated_at: nowIso }).eq('id', data.iphone_id);
-            if (userId) updateQuery = updateQuery.eq('user_id', userId);
-            await updateQuery;
+            await supabase.from('iphones').update({ status: 'vendido', updated_at: nowIso }).eq('id', data.iphone_id);
           } catch (e) {
             console.warn('Could not update iPhone status in DB:', e);
           }
@@ -2162,18 +2247,14 @@ export const db = {
           // Revert old Console status
           if (oldSale.console_id) {
             try {
-              let revertQuery = supabase.from('consoles').update({ status: 'disponivel', updated_at: nowIso }).eq('id', oldSale.console_id);
-              if (userId) revertQuery = revertQuery.eq('user_id', userId);
-              await revertQuery;
+              await supabase.from('consoles').update({ status: 'disponivel', updated_at: nowIso }).eq('id', oldSale.console_id);
             } catch (e) {
               console.warn('Could not revert Console status in DB:', e);
             }
           }
           // Update new Console status
           try {
-            let updateQuery = supabase.from('consoles').update({ status: 'vendido', updated_at: nowIso }).eq('id', data.console_id);
-            if (userId) updateQuery = updateQuery.eq('user_id', userId);
-            await updateQuery;
+            await supabase.from('consoles').update({ status: 'vendido', updated_at: nowIso }).eq('id', data.console_id);
           } catch (e) {
             console.warn('Could not update Console status in DB:', e);
           }
@@ -2196,16 +2277,12 @@ export const db = {
         }
 
         try {
-          let salesUpdateQuery = supabase.from('sales').update(cleanDataForDb).eq('id', id);
-          if (userId) salesUpdateQuery = salesUpdateQuery.eq('user_id', userId);
-          const { error } = await salesUpdateQuery;
+          const { error } = await supabase.from('sales').update(cleanDataForDb).eq('id', id);
           if (error) {
             if (error.code === '23514' || error.message?.includes('installment_frequency')) {
               console.warn('DB constraint error on installment_frequency, retrying with Mensal for DB...');
               const retryClean = { ...cleanDataForDb, installment_frequency: 'Mensal' };
-              let retryQuery = supabase.from('sales').update(retryClean).eq('id', id);
-              if (userId) retryQuery = retryQuery.eq('user_id', userId);
-              await retryQuery;
+              await supabase.from('sales').update(retryClean).eq('id', id);
             } else if (error.code === '42703' || error.message?.includes('column')) {
               const match = error.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
               if (match && match[1]) {
@@ -2213,9 +2290,7 @@ export const db = {
                 missingColumnsByTable['sales'].add(match[1]);
                 const retryClean = { ...cleanDataForDb };
                 delete retryClean[match[1]];
-                let retryQuery = supabase.from('sales').update(retryClean).eq('id', id);
-                if (userId) retryQuery = retryQuery.eq('user_id', userId);
-                await retryQuery;
+                await supabase.from('sales').update(retryClean).eq('id', id);
               }
             } else {
               console.warn('Failed to update sale in Supabase:', error);
@@ -2250,6 +2325,7 @@ export const db = {
         }
 
         cloudApi.updateItem('sales', id, { ...data, updated_at: nowIso }).catch(err => console.warn('[Cloud Update Sale] Warn:', err));
+        notifyDataMutation('sales', 'update', { id, ...data, updated_at: nowIso });
       } catch (err: any) {
         // Fallback to local changes for ANY error to keep app functional
         console.warn('Global error in sales update, falling back to local storage:', err);
@@ -2277,40 +2353,34 @@ export const db = {
 
         setLocalData('sales', localSales.map(item => item.id === id ? { ...item, ...data, updated_at: nowIso } : item));
         cloudApi.updateItem('sales', id, { ...data, updated_at: nowIso }).catch(err => console.warn('[Cloud Update Sale] Warn:', err));
+        notifyDataMutation('sales', 'update', { id, ...data, updated_at: nowIso });
       }
     },
     delete: async (id: string) => {
       recordLocalDelete('sales', id);
       cloudApi.deleteItem('sales', id).catch(err => console.warn('[Cloud Delete] Warn:', err));
+      notifyDataMutation('sales', 'delete', { id });
 
       try {
-        const userId = await getCurrentUserId();
         // Get sale to revert iPhone/Console status
         let getSaleQuery = supabase.from('sales').select('iphone_id, console_id').eq('id', id);
-        if (userId) getSaleQuery = getSaleQuery.eq('user_id', userId);
         const { data: sale } = await getSaleQuery.single();
         
         if (sale) {
           if (sale.iphone_id) {
             try {
-              let updateQuery = supabase.from('iphones').update({ status: 'disponivel' }).eq('id', sale.iphone_id);
-              if (userId) updateQuery = updateQuery.eq('user_id', userId);
-              await updateQuery;
+              await supabase.from('iphones').update({ status: 'disponivel' }).eq('id', sale.iphone_id);
             } catch (e) {}
           }
           if (sale.console_id) {
             try {
-              let updateQuery = supabase.from('consoles').update({ status: 'disponivel' }).eq('id', sale.console_id);
-              if (userId) updateQuery = updateQuery.eq('user_id', userId);
-              await updateQuery;
+              await supabase.from('consoles').update({ status: 'disponivel' }).eq('id', sale.console_id);
             } catch (e) {}
           }
         }
         
         try {
-          let deleteQuery = supabase.from('sales').delete().eq('id', id);
-          if (userId) deleteQuery = deleteQuery.eq('user_id', userId);
-          await deleteQuery;
+          await supabase.from('sales').delete().eq('id', id);
         } catch (e) {}
 
         // Keep local cache in sync
@@ -2336,9 +2406,7 @@ export const db = {
   purchases: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('purchases').select('*');
-        if (userId) query = query.eq('user_id', userId);
         const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
         setLocalData('purchases', data || []);
@@ -2366,9 +2434,7 @@ export const db = {
   products: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('products').select('*');
-        if (userId) query = query.eq('user_id', userId);
         const { data, error } = await query.order('name');
         if (error) throw error;
         setLocalData('products', data || []);
@@ -2396,9 +2462,7 @@ export const db = {
   product_units: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('product_units').select('*');
-        if (userId) query = query.eq('user_id', userId);
         const { data, error } = await query;
         if (error) throw error;
         setLocalData('product_units', data || []);
@@ -2426,7 +2490,7 @@ export const db = {
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('product_units').update(data).eq('id', id);
-        if (userId) query = query.eq('user_id', userId);
+        if (userId) query = query;
         const { error } = await query;
         if (error) throw error;
       } catch (err: any) {
@@ -2441,7 +2505,7 @@ export const db = {
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('fiscal_documents').select('*');
-        if (userId) query = query.eq('user_id', userId);
+        if (userId) query = query;
         const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
         setLocalData('fiscal_documents', data || []);
@@ -2469,9 +2533,7 @@ export const db = {
   fiscal_configs: {
     get: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('fiscal_configs').select('*');
-        if (userId) query = query.eq('user_id', userId);
         const { data, error } = await query.maybeSingle();
         if (error) throw error;
         if (data) setLocalData('fiscal_configs', [data]);
@@ -2491,7 +2553,6 @@ export const db = {
       try {
         if (existing) {
           let query = supabase.from('fiscal_configs').update(updateData).eq('id', existing.id);
-          if (userId) query = query.eq('user_id', userId);
           await query;
         } else {
           const id = generateId();
@@ -2507,9 +2568,7 @@ export const db = {
   gifts: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('gifts').select('*');
-        if (userId) query = query.eq('user_id', userId);
         const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
         setLocalData('gifts', data || []);
@@ -2535,9 +2594,7 @@ export const db = {
     },
     update: async (id: string, data: any) => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('gifts').update(data).eq('id', id);
-        if (userId) query = query.eq('user_id', userId);
         const { error } = await query;
         if (error) throw error;
       } catch (err: any) {
@@ -2560,9 +2617,7 @@ export const db = {
   gift_purchases: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('gift_purchases').select('*');
-        if (userId) query = query.eq('user_id', userId);
         const { data, error } = await query.order('purchase_date', { ascending: false });
         if (error) throw error;
         setLocalData('gift_purchases', data || []);
@@ -2602,9 +2657,7 @@ export const db = {
   gift_dispatches: {
     list: async () => {
       try {
-        const userId = await getCurrentUserId();
         let query = supabase.from('gift_dispatches').select('*');
-        if (userId) query = query.eq('user_id', userId);
         const { data, error } = await query.order('dispatch_date', { ascending: false });
         if (error) throw error;
         setLocalData('gift_dispatches', data || []);
@@ -2644,7 +2697,7 @@ export const db = {
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('accessory_sales').select('*');
-        if (userId) query = query.eq('user_id', userId);
+        if (userId) query = query;
         const { data, error } = await query.order('sale_date', { ascending: false });
         if (error) throw error;
         setLocalData('accessory_sales', data || []);
@@ -2685,7 +2738,7 @@ export const db = {
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('product_photos').select('*');
-        if (userId) query = query.eq('user_id', userId);
+        if (userId) query = query;
         const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
         setLocalData('product_photos', data || []);
@@ -2728,7 +2781,7 @@ export const db = {
         await cloudApi.deleteItem('product_photos', id);
         const userId = await getCurrentUserId();
         if (userId) {
-          await supabase.from('product_photos').delete().eq('id', id).eq('user_id', userId);
+          await supabase.from('product_photos').delete().eq('id', id);
         }
       } catch (err: any) {
         console.warn('Fallback deleting product photo locally:', err);
@@ -2743,7 +2796,7 @@ export const db = {
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('notes').select('*');
-        if (userId) query = query.eq('user_id', userId);
+        if (userId) query = query;
         const { data, error } = await query.order('created_at', { ascending: false });
         if (error) throw error;
         setLocalData('notes', data || []);
@@ -2788,7 +2841,7 @@ export const db = {
         await cloudApi.deleteItem('notes', id);
         const userId = await getCurrentUserId();
         if (userId) {
-          await supabase.from('notes').delete().eq('id', id).eq('user_id', userId);
+          await supabase.from('notes').delete().eq('id', id);
         }
       } catch (err: any) {
         console.warn('Fallback deleting note locally:', err);
@@ -2803,7 +2856,7 @@ export const db = {
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('note_checklist_items').select('*');
-        if (userId) query = query.eq('user_id', userId);
+        if (userId) query = query;
         const { data, error } = await query.order('created_at', { ascending: true });
         if (error) throw error;
         setLocalData('note_checklist_items', data || []);
@@ -2848,7 +2901,7 @@ export const db = {
         await cloudApi.deleteItem('note_checklist_items', id);
         const userId = await getCurrentUserId();
         if (userId) {
-          await supabase.from('note_checklist_items').delete().eq('id', id).eq('user_id', userId);
+          await supabase.from('note_checklist_items').delete().eq('id', id);
         }
       } catch (err: any) {
         console.warn('Fallback deleting note checklist item locally:', err);
@@ -2863,7 +2916,7 @@ export const db = {
       try {
         const userId = await getCurrentUserId();
         let query = supabase.from('note_audio').select('*');
-        if (userId) query = query.eq('user_id', userId);
+        if (userId) query = query;
         const { data, error } = await query.order('created_at', { ascending: true });
         if (error) throw error;
         setLocalData('note_audio', data || []);
@@ -2897,7 +2950,7 @@ export const db = {
         await cloudApi.deleteItem('note_audio', id);
         const userId = await getCurrentUserId();
         if (userId) {
-          await supabase.from('note_audio').delete().eq('id', id).eq('user_id', userId);
+          await supabase.from('note_audio').delete().eq('id', id);
         }
       } catch (err: any) {
         console.warn('Fallback deleting note audio locally:', err);
@@ -2976,7 +3029,7 @@ export const db = {
         for (const id of deletedClientIds) {
           recordLocalDelete('clients', id);
           if (userId) {
-            try { await supabase.from('clients').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+            try { await supabase.from('clients').delete().eq('id', id); } catch (e) {}
           }
         }
       }
@@ -3015,7 +3068,7 @@ export const db = {
         for (const id of deletedSupplierIds) {
           recordLocalDelete('suppliers', id);
           if (userId) {
-            try { await supabase.from('suppliers').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+            try { await supabase.from('suppliers').delete().eq('id', id); } catch (e) {}
           }
         }
       }
@@ -3077,7 +3130,7 @@ export const db = {
         for (const id of deletedIphoneIds) {
           recordLocalDelete('iphones', id);
           if (userId) {
-            try { await supabase.from('iphones').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+            try { await supabase.from('iphones').delete().eq('id', id); } catch (e) {}
           }
         }
       }
@@ -3128,7 +3181,7 @@ export const db = {
         for (const id of deletedConsoleIds) {
           recordLocalDelete('consoles', id);
           if (userId) {
-            try { await supabase.from('consoles').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+            try { await supabase.from('consoles').delete().eq('id', id); } catch (e) {}
           }
         }
       }
@@ -3204,7 +3257,7 @@ export const db = {
         for (const id of deletedSaleIds) {
           recordLocalDelete('sales', id);
           if (userId) {
-            try { await supabase.from('sales').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+            try { await supabase.from('sales').delete().eq('id', id); } catch (e) {}
           }
         }
       }
@@ -3238,7 +3291,7 @@ export const db = {
         for (const id of deletedPriceIds) {
           recordLocalDelete('prices', id);
           if (userId) {
-            try { await supabase.from('prices').delete().eq('id', id).eq('user_id', userId); } catch (e) {}
+            try { await supabase.from('prices').delete().eq('id', id); } catch (e) {}
           }
         }
       }
@@ -3276,7 +3329,7 @@ export const db = {
           const { data: remoteClients, error: checkErr } = await supabase
             .from('clients')
             .select('name')
-            .eq('user_id', userId);
+            ;
           if (!checkErr && remoteClients) {
             existingClients = remoteClients;
           }
@@ -3345,7 +3398,7 @@ export const db = {
           const { data: existingClients } = await supabase
             .from('clients')
             .select('name')
-            .eq('user_id', userId || '');
+            ;
           existingNames = (existingClients || []).map(c => c.name);
         } catch (checkErr) {
           console.warn('Error checking existing clients, assuming empty list', checkErr);
@@ -3474,7 +3527,7 @@ export const db = {
                   .from('clients')
                   .select('id')
                   .eq('name', item.name)
-                  .eq('user_id', userId)
+                  
                   .maybeSingle();
                 if (existing) continue;
               }
@@ -3570,7 +3623,7 @@ export const db = {
           .ilike('name', `%${data.client_name}%`);
         
         if (userId) {
-          clientQuery = clientQuery.eq('user_id', userId);
+          clientQuery = clientQuery;
         }
 
         const { data: existingClients } = await clientQuery.limit(1);
@@ -3606,7 +3659,7 @@ export const db = {
             .eq('status', 'disponivel');
           
           if (userId) {
-            consoleQuery = consoleQuery.eq('user_id', userId);
+            consoleQuery = consoleQuery;
           }
 
           const { data: existingConsoles } = await consoleQuery.limit(1);
@@ -3633,7 +3686,7 @@ export const db = {
             .eq('status', 'disponivel');
           
           if (userId) {
-            iphoneQuery = iphoneQuery.eq('user_id', userId);
+            iphoneQuery = iphoneQuery;
           }
 
           const { data: existingIphones } = await iphoneQuery.limit(1);

@@ -64,6 +64,7 @@ export default function Invoices() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {sales.map(sale => {
+          console.log('DEBUG Invoices sale:', sale);
           const iphone = iphones.find(i => i.id === sale.iphone_id);
           const consoleItem = consoles.find(c => c.id === sale.console_id);
           const client = clients.find(c => c.id === sale.client_id);
@@ -99,7 +100,11 @@ export default function Invoices() {
                   )}
                 </div>
                 <p>
-                  <span className="font-medium">Item:</span> {iphone ? `${iphone.model} ${iphone.storage}` : (consoleItem ? `${consoleItem.model} ${consoleItem.version}` : 'N/A')}
+                  <span className="font-medium">Item(ns):</span> {
+                    sale.items && sale.items.length > 0
+                      ? sale.items.map((it: any) => it.name).join(', ')
+                      : (iphone ? `${iphone.model} ${iphone.storage}` : (consoleItem ? `${consoleItem.model} ${consoleItem.version}` : 'N/A'))
+                  }
                 </p>
                 <p><span className="font-medium">Valor:</span> {formatBRL(sale.sell_price)}</p>
                 <p>

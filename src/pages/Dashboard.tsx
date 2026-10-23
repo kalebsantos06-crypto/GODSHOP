@@ -13,10 +13,12 @@ import { parseLocalDate, getSaleNotifications, getCalculatedInstallments } from 
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
+import LoadingScreen from '../components/LoadingScreen';
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
 
+  // 1. ALL HOOKS MUST BE AT THE TOP
   const { data: tip, isLoading: loadingTip, refetch: refetchTip } = useQuery({
     queryKey: ['dailyTip'],
     queryFn: async () => {
@@ -32,7 +34,7 @@ export default function Dashboard() {
         return 'A inovação é o segredo do sucesso. Esteja sempre atento às novidades do mundo mobile e games!';
       }
     },
-    staleTime: 1000 * 60 * 10, // 10 minutes
+    staleTime: 1000 * 60 * 10,
   });
 
   const { data: iphones = [], isLoading: isLoadingIphones, refetch: refetchIphones } = useQuery({
@@ -51,7 +53,6 @@ export default function Dashboard() {
     queryKey: ['sales'],
     queryFn: () => db.sales.list(),
     staleTime: 1000 * 60 * 3,
-    // Polling: Refetch every 30 seconds if there are pending signatures
     refetchInterval: (query) => {
       const salesData = query.state.data as any[];
       if (salesData && salesData.some(s => !s.signature_data && !s.signed_at)) {
@@ -79,46 +80,44 @@ export default function Dashboard() {
     staleTime: 1000 * 60 * 5,
   });
 
-  const handleRefreshAll = () => {
-    refetchIphones();
-    refetchConsoles();
-    refetchSales();
-    refetchClients();
-    refetchGiftPurchases();
-    refetchAccessorySales();
-    refetchTip();
-    toast.success('Dados atualizados!');
-  };
+  const [isSendingAutomation, setIsSendingAutomation] = useState(false);
+  const [lastSync, setLastSync] = useState<string>(() => localStorage.getItem('last_cloud_sync_ts') || '');
 
+  useEffect(() => {
+    const handleSync = (e: any) => {
+      if (e?.detail?.timestamp) {
+        setLastSync(String(e.detail.timestamp));
+      }
+    };
+    window.addEventListener('cloud_sync_completed', handleSync);
+    return () => window.removeEventListener('cloud_sync_completed', handleSync);
+  }, []);
+
+  // 2. Logic and Memoized values
   const availableIphones = useMemo(() => iphones.filter(p => p.status === 'disponivel'), [iphones]);
   const availableConsoles = useMemo(() => consoles.filter(p => p.status === 'disponivel'), [consoles]);
   const availableCount = availableIphones.length + availableConsoles.length;
-  
   const soldCount = sales.length;
   
-  // Calculate profit with memoization
   const totalProfit = useMemo(() => {
     return sales.reduce((sum, sale) => {
       return sum + db.getProfit(sale, iphones, consoles);
     }, 0);
   }, [sales, iphones, consoles]);
 
-  // Calculate revenue (Faturamento)
-  const totalRevenue = useMemo(() => sales.reduce((sum, sale) => sum + sale.sell_price, 0), [sales]);
+  const totalRevenue = useMemo(() => sales.reduce((sum, sale) => sum + (Number(sale.sell_price) || 0), 0), [sales]);
 
-  // Calculate stock cost (Investimento)
   const totalStockCost = useMemo(() => {
-    return availableIphones.reduce((sum, i) => sum + i.buy_price, 0) +
-           availableConsoles.reduce((sum, c) => sum + c.buy_price, 0);
+    return availableIphones.reduce((sum, i) => sum + (Number(i.buy_price) || 0), 0) +
+           availableConsoles.reduce((sum, c) => sum + (Number(c.buy_price) || 0), 0);
   }, [availableIphones, availableConsoles]);
 
-  // Detailed Financial Calculations
   const totalReceived = useMemo(() => {
     return sales.reduce((sum, sale) => {
-      const downPayment = sale.down_payment || 0;
-      const totalAmount = sale.sell_price - downPayment;
+      const downPayment = Number(sale.down_payment) || 0;
+      const totalAmount = (Number(sale.sell_price) || 0) - downPayment;
       
-      if (sale.installments && sale.installments > 1) {
+      if (sale.installments && Number(sale.installments) > 1) {
         let customPayments: Record<number, number> | null = null;
         if (sale.custom_payments) {
           try {
@@ -140,37 +139,21 @@ export default function Dashboard() {
           return sum + downPayment + totalPaidFromCustom;
         }
         
-        const totalInstallments = sale.installments || 1;
-        const installmentsPaid = sale.installments_paid || 0;
+        const totalInstallments = Number(sale.installments) || 1;
+        const installmentsPaid = Number(sale.installments_paid) || 0;
         const installmentValue = totalAmount / totalInstallments;
         return sum + downPayment + (installmentsPaid * installmentValue);
       }
       
-      return sum + sale.sell_price;
+      return sum + (Number(sale.sell_price) || 0);
     }, 0);
   }, [sales]);
 
   const totalRemainingBalance = totalRevenue - totalReceived;
-  
   const signedSales = useMemo(() => sales.filter(s => s.signature_data || s.signed_at).length, [sales]);
   const pendingSales = sales.length - signedSales;
   const signatureRate = sales.length ? (signedSales / sales.length) * 100 : 0;
 
-  const totalBuyPriceOfSoldItems = useMemo(() => {
-    return sales.reduce((sum, sale) => {
-      let buyPrice = 0;
-      if (sale.iphone_id) {
-        const iphone = iphones.find(i => i.id === sale.iphone_id);
-        if (iphone) buyPrice = iphone.buy_price;
-      } else if (sale.console_id) {
-        const consoleItem = consoles.find(c => c.id === sale.console_id);
-        if (consoleItem) buyPrice = consoleItem.buy_price;
-      }
-      return sum + buyPrice;
-    }, 0);
-  }, [sales, iphones, consoles]);
-
-  // Previews with memoization
   const profitPreview = useMemo(() => {
     return sales.slice(0, 3).map(sale => {
       let label = 'Venda';
@@ -205,7 +188,7 @@ export default function Dashboard() {
       const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
       return {
         label: clientDisplay,
-        value: formatBRL(sale.sell_price),
+        value: formatBRL(Number(sale.sell_price) || 0),
         sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
       };
     });
@@ -213,11 +196,11 @@ export default function Dashboard() {
 
   const stockCostPreview = useMemo(() => {
     return [...availableIphones, ...availableConsoles]
-      .sort((a, b) => b.buy_price - a.buy_price)
+      .sort((a, b) => (Number(b.buy_price) || 0) - (Number(a.buy_price) || 0))
       .slice(0, 3)
       .map(item => ({
         label: item.model,
-        value: formatBRL(item.buy_price),
+        value: formatBRL(Number(item.buy_price) || 0),
         sublabel: 'storage' in item ? item.storage : item.version
       }));
   }, [availableIphones, availableConsoles]);
@@ -236,7 +219,7 @@ export default function Dashboard() {
       const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
       return {
         label: clientDisplay,
-        value: formatBRL(sale.sell_price),
+        value: formatBRL(Number(sale.sell_price) || 0),
         sublabel: sale.payment_method
       };
     });
@@ -254,29 +237,27 @@ export default function Dashboard() {
   }, [availableIphones, availableConsoles]);
 
   const avgProfitPreview = useMemo(() => {
-    return Array.from(new Set([...iphones, ...consoles].map(i => i.model)))
+    const models = Array.from(new Set([...iphones, ...consoles].map(i => i.model)));
+    return models
       .map(model => {
         const modelSales = sales.filter(s => {
           const item = s.iphone_id ? iphones.find(i => i.id === s.iphone_id) : consoles.find(c => c.id === s.console_id);
           return item?.model === model;
         });
         if (modelSales.length === 0) return null;
-        const profit = modelSales.reduce((sum, s) => {
-          return sum + db.getProfit(s, iphones, consoles);
-        }, 0);
+        const profit = modelSales.reduce((sum, s) => sum + db.getProfit(s, iphones, consoles), 0);
         return { model, avg: profit / modelSales.length };
       })
-      .filter(Boolean)
-      .sort((a, b) => (b?.avg || 0) - (a?.avg || 0))
+      .filter((item): item is { model: string; avg: number } => item !== null)
+      .sort((a, b) => b.avg - a.avg)
       .slice(0, 3)
       .map(item => ({
-        label: item!.model,
-        value: formatBRL(item!.avg),
+        label: item.model,
+        value: formatBRL(item.avg),
         sublabel: 'Média por modelo'
       }));
   }, [iphones, consoles, sales]);
 
-  // Monthly profit data for last 6 months (memoized)
   const monthlyData = useMemo(() => {
     const now = new Date();
     const months = eachMonthOfInterval({
@@ -291,9 +272,7 @@ export default function Dashboard() {
         const d = new Date(s.sale_date);
         return d >= monthStart && d <= monthEnd;
       });
-      const profit = monthSales.reduce((sum, sale) => {
-        return sum + db.getProfit(sale, iphones, consoles);
-      }, 0);
+      const profit = monthSales.reduce((sum, sale) => sum + db.getProfit(sale, iphones, consoles), 0);
       return {
         name: format(month, 'MMM', { locale: ptBR }),
         lucro: profit,
@@ -301,23 +280,27 @@ export default function Dashboard() {
     });
   }, [sales, iphones, consoles]);
 
-  // Real-time calculated notifications across all sales
   const allNotificationsList = useMemo(() => {
     return getSaleNotifications(sales || [], clients || [], iphones || [], consoles || []);
   }, [sales, clients, iphones, consoles]);
 
   const pendingNotifCount = allNotificationsList.filter(n => n.daysDiff <= 3).length;
-
   const upcomingInstallments = allNotificationsList.slice(0, 3);
 
-  const [isSendingAutomation, setIsSendingAutomation] = useState(false);
-
-  const getAllPendingNotifications = () => {
-    return allNotificationsList.filter(n => n.daysDiff <= 3);
+  // 3. EVENT HANDLERS
+  const handleRefreshAll = () => {
+    refetchIphones();
+    refetchConsoles();
+    refetchSales();
+    refetchClients();
+    refetchGiftPurchases();
+    refetchAccessorySales();
+    refetchTip();
+    toast.success('Dados atualizados!');
   };
 
   const handleTriggerAutomations = async () => {
-    const items = getAllPendingNotifications();
+    const items = allNotificationsList.filter(n => n.daysDiff <= 3);
     if (items.length === 0) {
       toast.info('Não há automações pendentes para disparar no momento! 🎉');
       return;
@@ -411,12 +394,9 @@ export default function Dashboard() {
     }
   };
 
+  // 4. CONDITIONAL RENDER (AFTER ALL HOOKS)
   if (isLoadingIphones || isLoadingSales || isLoadingConsoles || isLoadingClients) {
-    return (
-      <div className="flex h-[50vh] items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
+    return <LoadingScreen message="Carregando Dashboard..." />;
   }
 
   return (
@@ -424,19 +404,27 @@ export default function Dashboard() {
 
       {/* Banner de Dica Premium */}
       <div className="relative group overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-4 sm:p-6 shadow-2xl transition-all duration-500 hover:bg-white/10">
-        {/* Efeito de brilho de fundo */}
         <div className="absolute -right-10 -top-10 h-32 w-32 bg-primary/20 blur-[60px] transition-all duration-700 group-hover:bg-primary/30"></div>
         <div className="absolute -left-10 -bottom-10 h-32 w-32 bg-primary/10 blur-[60px] transition-all duration-700 group-hover:bg-primary/20"></div>
         
         <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4">
           <div className="flex-1 min-w-0 space-y-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="h-[1px] w-4 bg-primary/50"></span>
-                <span className="text-[10px] font-black tracking-[0.2em] text-primary uppercase opacity-80">Insight Empreendedor</span>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="h-[1px] w-4 bg-primary/50"></span>
+                  <span className="text-[10px] font-black tracking-[0.2em] text-primary uppercase opacity-80">Insight Empreendedor</span>
+                </div>
+                {lastSync && (
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                    <Database className="h-3 w-3 text-emerald-500" />
+                    <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider">
+                      Sincronizado: {format(new Date(Number(lastSync)), 'HH:mm:ss')}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-1.5">
-                {/* Botão de Disparar Automação Apenas Ícone */}
                 <button
                   onClick={handleTriggerAutomations}
                   disabled={isSendingAutomation}

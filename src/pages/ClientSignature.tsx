@@ -10,6 +10,7 @@ interface PublicSaleData {
   sale: any;
   client: any;
   product: any;
+  products?: any[];
   warrantyMonths: number;
   warrantyStartDate: string;
   warrantyEndDate: string;
@@ -673,13 +674,36 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
               <Smartphone className="h-4 w-4 text-slate-400" />
               Detalhes do Aparelho / Equipamento
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-700">
-              <p><span className="font-semibold text-slate-900">Modelo:</span> {product?.model}</p>
-              {product?.imei && <p><span className="font-semibold text-slate-900">IMEI / Serial:</span> <span className="font-mono">{product.imei}</span></p>}
-              {product?.storage && <p><span className="font-semibold text-slate-900">Armazenamento:</span> {product.storage}</p>}
-              {product?.color && <p><span className="font-semibold text-slate-900">Cor:</span> {product.color}</p>}
-              {product?.version && <p><span className="font-semibold text-slate-900">Versão:</span> {product.version}</p>}
-              <p><span className="font-semibold text-slate-900">Condição física:</span> <span className="capitalize">{product?.condition || 'Seminovo'}</span></p>
+            <div className="space-y-3">
+              {data.products && data.products.length > 0 ? (
+                data.products.map((it: any, idx: number) => (
+                  <div key={idx} className="p-3 border rounded-xl bg-slate-50/50">
+                    <p className="font-bold text-slate-900">{it.model || it.name}</p>
+                    <div className="grid grid-cols-2 gap-2 mt-1 text-xs text-slate-500">
+                      {it.storage && <p><span>Armazenamento:</span> {it.storage}</p>}
+                      {it.color && <p><span>Cor:</span> {it.color}</p>}
+                      {it.imei && <p className="col-span-2"><span>IMEI/Serial:</span> {it.imei}</p>}
+                      {it.condition && <p className="capitalize"><span>Condição:</span> {it.condition}</p>}
+                    </div>
+                  </div>
+                ))
+              ) : (sale?.items && sale.items.length > 0) ? (
+                sale.items.map((it: any, idx: number) => (
+                  <div key={idx} className="p-3 border rounded-xl bg-slate-50/50">
+                    <p className="font-bold text-slate-900">{it.name || it.model}</p>
+                    <p className="text-xs text-slate-500 uppercase font-medium">{it.type}</p>
+                  </div>
+                ))
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-700">
+                  <p><span className="font-semibold text-slate-900">Modelo:</span> {product?.model}</p>
+                  {product?.imei && <p><span className="font-semibold text-slate-900">IMEI / Serial:</span> <span className="font-mono">{product.imei}</span></p>}
+                  {product?.storage && <p><span className="font-semibold text-slate-900">Armazenamento:</span> {product.storage}</p>}
+                  {product?.color && <p><span className="font-semibold text-slate-900">Cor:</span> {product.color}</p>}
+                  {product?.version && <p><span className="font-semibold text-slate-900">Versão:</span> {product.version}</p>}
+                  <p><span className="font-semibold text-slate-900">Condição física:</span> <span className="capitalize">{product?.condition || 'Seminovo'}</span></p>
+                </div>
+              )}
             </div>
           </section>
 

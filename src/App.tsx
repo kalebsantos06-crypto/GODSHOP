@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -14,61 +14,27 @@ import { AuthProvider } from './types/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { initRealtimeSync } from './services/realtime';
 import { backgroundService } from './services/backgroundService';
+import LoadingScreen from './components/LoadingScreen';
 
-// Resilient dynamic page loader: auto-retries on network drop or dev server refresh
-function lazyWithRetry<T extends React.ComponentType<any>>(
-  factory: () => Promise<{ default: T }>
-) {
-  return lazy(async () => {
-    try {
-      return await factory();
-    } catch (error: any) {
-      const errorMsg = String(error?.message || error || '').toLowerCase();
-      if (
-        errorMsg.includes('failed to fetch') ||
-        errorMsg.includes('dynamically imported module') ||
-        error?.name === 'TypeError'
-      ) {
-        console.warn('[lazyWithRetry] Module import failed, retrying...', error);
-        await new Promise((resolve) => setTimeout(resolve, 350));
-        try {
-          return await factory();
-        } catch (retryErr) {
-          console.error('[lazyWithRetry] Second attempt failed, refreshing page for fresh chunks...', retryErr);
-          const lastReload = sessionStorage.getItem('last_dyn_import_reload');
-          const now = Date.now();
-          if (!lastReload || now - Number(lastReload) > 10000) {
-            sessionStorage.setItem('last_dyn_import_reload', String(now));
-            window.location.reload();
-            return new Promise(() => {});
-          }
-          throw retryErr;
-        }
-      }
-      throw error;
-    }
-  });
-}
-
-// Lazy load route pages with retry protection
-const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
-const Inventory = lazyWithRetry(() => import('./pages/Inventory'));
-const Sales = lazyWithRetry(() => import('./pages/Sales'));
-const ConsolesStock = lazyWithRetry(() => import('./pages/ConsolesStock'));
-const GiftsAndAccessories = lazyWithRetry(() => import('./pages/GiftsAndAccessories'));
-const Invoices = lazyWithRetry(() => import('./pages/Invoices'));
-const Clients = lazyWithRetry(() => import('./pages/Clients'));
-const Suppliers = lazyWithRetry(() => import('./pages/Suppliers'));
-const GuaranteeNote = lazyWithRetry(() => import('./pages/GuaranteeNote'));
-const PriceTable = lazyWithRetry(() => import('./pages/PriceTable'));
-const Settings = lazyWithRetry(() => import('./pages/Settings'));
-const UsersPage = lazyWithRetry(() => import('./pages/Users'));
-const OfferTagGenerator = lazyWithRetry(() => import('./pages/OfferTagGenerator'));
-const Notes = lazyWithRetry(() => import('./pages/Notes'));
-const Login = lazyWithRetry(() => import('./pages/Login'));
-const FiscalHub = lazyWithRetry(() => import('./pages/fiscal/FiscalHub'));
-const ClientSignature = lazyWithRetry(() => import('./pages/ClientSignature'));
-const ClientRemoteRegister = lazyWithRetry(() => import('./pages/ClientRemoteRegister'));
+// Import all application route pages directly for maximum reliability and zero dynamic chunk loading failures
+import Dashboard from './pages/Dashboard';
+import Inventory from './pages/Inventory';
+import Sales from './pages/Sales';
+import ConsolesStock from './pages/ConsolesStock';
+import GiftsAndAccessories from './pages/GiftsAndAccessories';
+import Invoices from './pages/Invoices';
+import Clients from './pages/Clients';
+import Suppliers from './pages/Suppliers';
+import GuaranteeNote from './pages/GuaranteeNote';
+import PriceTable from './pages/PriceTable';
+import Settings from './pages/Settings';
+import UsersPage from './pages/Users';
+import OfferTagGenerator from './pages/OfferTagGenerator';
+import Notes from './pages/Notes';
+import Login from './pages/Login';
+import FiscalHub from './pages/fiscal/FiscalHub';
+import ClientSignature from './pages/ClientSignature';
+import ClientRemoteRegister from './pages/ClientRemoteRegister';
 
 // High performance Query Client configuration with intelligent caching
 const queryClient = new QueryClient({
@@ -86,14 +52,7 @@ const queryClient = new QueryClient({
 
 // Lightweight instant loading placeholder
 function PageLoadingFallback() {
-  return (
-    <div className="flex items-center justify-center min-h-[50vh] w-full animate-in fade-in duration-150">
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
-        <span className="text-xs font-medium text-muted-foreground tracking-wide">Carregando tela...</span>
-      </div>
-    </div>
-  );
+  return <LoadingScreen message="Carregando tela..." />;
 }
 
 function handleInitialRedirects() {
@@ -218,16 +177,16 @@ function AppContent() {
     // Register sync task to run with background keep-alive
     const unregisterBgSync = backgroundService.registerSyncTask(performSync);
 
-    // Fast polling interval: syncs every 60 seconds in foreground or background
+    // High-frequency polling interval: syncs every 10 seconds for seamless multi-device parity
     const interval = setInterval(() => {
       performSync();
-    }, 60000);
+    }, 10000);
 
-    // Sync immediately when user switches tabs, clicks window, or unlocks their phone (throttled)
+    // Sync immediately when user switches tabs, clicks window, or unlocks their phone (throttled to 2s)
     let lastFocusSync = 0;
     const handleFocusOrActivity = () => {
       const now = Date.now();
-      if (now - lastFocusSync > 30000) { // Only sync if at least 30s passed
+      if (now - lastFocusSync > 2000) {
         performSync();
         lastFocusSync = now;
       }
@@ -239,9 +198,23 @@ function AppContent() {
       }
     };
 
+    const handleDeviceMutation = () => {
+      if (isSubscribed) {
+        performSync();
+      }
+    };
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('db_fallback_') && isSubscribed) {
+        queryClient.invalidateQueries();
+      }
+    };
+
     window.addEventListener('focus', handleFocusOrActivity);
     window.addEventListener('cloud_sync_completed', handleSyncCompleted);
     window.addEventListener('visibilitychange', handleFocusOrActivity);
+    window.addEventListener('device_data_mutated', handleDeviceMutation);
+    window.addEventListener('storage', handleStorageChange);
 
     return () => {
       isSubscribed = false;
@@ -250,6 +223,8 @@ function AppContent() {
       window.removeEventListener('focus', handleFocusOrActivity);
       window.removeEventListener('cloud_sync_completed', handleSyncCompleted);
       window.removeEventListener('visibilitychange', handleFocusOrActivity);
+      window.removeEventListener('device_data_mutated', handleDeviceMutation);
+      window.removeEventListener('storage', handleStorageChange);
     };
   }, [isAuthenticated, user]);
 

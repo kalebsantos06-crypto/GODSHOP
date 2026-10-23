@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Smartphone, Monitor, QrCode, RefreshCw, CheckCircle2, Copy, Link as LinkIcon, ShieldCheck, Zap, X } from 'lucide-react';
+import { Smartphone, Monitor, QrCode, RefreshCw, CheckCircle2, Copy, Link as LinkIcon, ShieldCheck, Zap, X, AlertTriangle, Plus } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { toast } from 'sonner';
+import { supabase } from '../lib/supabase';
+import { db, getCloudApiUrl } from '../services/db';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -17,13 +19,11 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
   const [pairingCode, setPairingCode] = useState<string>('');
   const [inputCode, setInputCode] = useState<string>('');
   const [isLinking, setIsLinking] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [linkedDevices, setLinkedDevices] = useState<Array<{ id: string; name: string; type: 'apk' | 'exe'; time: string }>>([]);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
-    setPairingCode(randomCode);
-
     try {
       const stored = localStorage.getItem('godshop_linked_devices');
       if (stored) {
@@ -40,20 +40,79 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
     }
   }, []);
 
-  const handleGenerateNewCode = () => {
-    const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
-    setPairingCode(randomCode);
-    toast.success('Novo código de pareamento gerado!');
+  const handleGenerateNewCode = async () => {
+    setIsGenerating(true);
+    try {
+      const supaUrl = localStorage.getItem('custom_supabase_url') || import.meta.env.VITE_SUPABASE_URL || 'https://wkkjaakydjnfzayyedxy.supabase.co';
+      const supaKey = localStorage.getItem('custom_supabase_key') || import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indra2phYWt5ZGpuZnpheXllZHh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NDUwMTQsImV4cCI6MjA5ODIyMTAxNH0.DcTQJaLlJnejtXCHOwc_Maod9ytCGtcLri6kGnXV_mM';
+      
+      const serverUrl = typeof window !== 'undefined' && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost')
+        ? window.location.origin
+        : (localStorage.getItem('custom_cloud_server_url') || 'https://ais-dev-vaaqegsewou44zzapwefq3-387330212853.us-west2.run.app');
+
+      let code = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // 1. Try local Express API if available
+      try {
+        const res = await fetch(getCloudApiUrl('/api/pair/generate'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            supabaseUrl: supaUrl,
+            supabaseKey: supaKey,
+            serverUrl: serverUrl,
+            deviceName: navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE'
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.code) {
+            code = data.code;
+          }
+        }
+      } catch (err) {
+        console.warn('Server pair/generate warning:', err);
+      }
+
+      // 2. Also register in Supabase public_sales table directly for universal multi-device access across any network
+      try {
+        await supabase.from('public_sales').upsert({
+          id: `pair_${code}`,
+          sale_data: {
+            type: 'device_pairing',
+            code,
+            supabaseUrl: supaUrl,
+            supabaseKey: supaKey,
+            serverUrl: serverUrl,
+            deviceName: navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE',
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            createdAt: new Date().toISOString()
+          }
+        });
+      } catch (supaErr) {
+        console.warn('Supabase pair record warning:', supaErr);
+      }
+
+      setPairingCode(code);
+      toast.success('Novo código de pareamento ativo na nuvem!');
+      setActiveTab('code');
+    } catch (err: any) {
+      toast.error(err.message || 'Falha ao gerar código.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleCopyCode = () => {
+    if (!pairingCode) return;
     navigator.clipboard.writeText(pairingCode);
     setCopied(true);
     toast.success('Código copiado para a área de transferência!');
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleLinkDevice = (e: React.FormEvent) => {
+  const handleLinkDevice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputCode || inputCode.length < 6) {
       toast.error('Insira um código de 6 dígitos válido.');
@@ -61,21 +120,86 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
     }
 
     setIsLinking(true);
-    setTimeout(() => {
-      setIsLinking(false);
+    try {
+      let data: any = null;
+
+      // 1. Try server endpoint first
+      try {
+        const res = await fetch(getCloudApiUrl(`/api/pair/consume?code=${inputCode}`));
+        if (res.ok) {
+          data = await res.json();
+        }
+      } catch (err) {
+        console.warn('Server consume fetch warning:', err);
+      }
+
+      // 2. If server endpoint was not reachable (e.g. inside APK), query Supabase public_sales table directly
+      if (!data || !data.supabaseUrl) {
+        try {
+          const { data: supaRow, error } = await supabase
+            .from('public_sales')
+            .select('*')
+            .eq('id', `pair_${inputCode}`)
+            .single();
+
+          if (!error && supaRow && supaRow.sale_data && supaRow.sale_data.code === inputCode) {
+            const payload = supaRow.sale_data;
+            if (new Date(payload.expiresAt) > new Date()) {
+              data = payload;
+            } else {
+              throw new Error('Este código expirou. Gere um novo no computador.');
+            }
+          }
+        } catch (supaErr: any) {
+          if (supaErr?.message?.includes('expirou')) throw supaErr;
+          console.warn('Supabase direct consume warning:', supaErr);
+        }
+      }
+
+      if (!data || !data.supabaseUrl) {
+        throw new Error('Código de pareamento inválido ou expirado. Verifique os números digitados.');
+      }
+      
+      // APPLY CREDENTIALS & SERVER URL CONFIGURATIONS
+      localStorage.setItem('custom_supabase_url', data.supabaseUrl);
+      localStorage.setItem('custom_supabase_key', data.supabaseKey);
+      if (data.serverUrl) {
+        localStorage.setItem('custom_cloud_server_url', data.serverUrl);
+        localStorage.setItem('custom_app_domain', data.serverUrl);
+      }
+      
       const newDev = {
         id: `dev-${Date.now()}`,
-        name: `Dispositivo Vinculado (${inputCode})`,
-        type: 'apk' as const,
+        name: data.deviceName || `Dispositivo Vinculado`,
+        type: (navigator.userAgent.includes('Android') ? 'apk' : 'exe') as 'apk' | 'exe',
         time: new Date().toLocaleTimeString()
       };
-      const updated = [...linkedDevices, newDev];
+      
+      const updated = [...linkedDevices.filter(d => d.id !== newDev.id), newDev];
       setLinkedDevices(updated);
       localStorage.setItem('godshop_linked_devices', JSON.stringify(updated));
-      setInputCode('');
-      toast.success('Dispositivo vinculado com sucesso! Sincronizado.');
-      setActiveTab('pair');
-    }, 1200);
+      
+      toast.loading('Vinculado! Puxando banco de dados do computador principal...', { id: 'link_sync' });
+
+      // Pull latest database from cloud immediately so this device gets everything right now!
+      try {
+        await db.pullFromCloud();
+      } catch (pullErr) {
+        console.warn('Pre-reload pull warning:', pullErr);
+      }
+
+      toast.success('Dispositivos sincronizados com sucesso! Reiniciando...', { id: 'link_sync' });
+      
+      // Trigger reload to apply new Supabase credentials and start sync
+      setTimeout(() => {
+        window.location.reload();
+      }, 1200);
+
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao vincular dispositivo.');
+    } finally {
+      setIsLinking(false);
+    }
   };
 
   const [deviceToRemove, setDeviceToRemove] = useState<{ id: string; name: string } | null>(null);
@@ -148,33 +272,42 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
       <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 w-full max-w-full box-border">
         {activeTab === 'pair' && (
           <div className="space-y-6 w-full max-w-full box-border">
-            {/* Pairing Code Banner for Mobile & Desktop visibility */}
+            
             <div className={cn(
-              "p-4 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-4",
-              theme === 'dark' ? "bg-emerald-950/20 border-emerald-500/30" : "bg-emerald-50 border-emerald-200"
+              "p-4 rounded-xl border bg-amber-500/10 border-amber-500/30 flex items-start gap-3",
+              theme === 'light' && "bg-amber-50 border-amber-200"
             )}>
-              <div className="text-center sm:text-left">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500 block mb-1">Seu Código de Pareamento Ativo</span>
-                <div className="font-mono font-black text-2xl sm:text-3xl tracking-widest text-emerald-500">{pairingCode}</div>
-                <p className="text-[11px] opacity-70 mt-0.5">Digite este código no outro dispositivo para conectar.</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCopyCode}
-                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition cursor-pointer shadow"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  {copied ? 'Copiado!' : 'Copiar'}
-                </button>
-                <button
-                  onClick={handleGenerateNewCode}
-                  className="p-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white transition cursor-pointer"
-                  title="Gerar Novo Código"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </button>
+              <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-xs font-bold text-amber-600 uppercase">Atenção Sincronização</p>
+                <p className="text-[11px] opacity-90 leading-relaxed">
+                  Para que o APK e o EXE compartilhem os mesmos dados, eles <strong>devem estar pareados</strong>. 
+                  Ao parear, o celular passará a usar o mesmo banco de dados do computador automaticamente.
+                </p>
               </div>
             </div>
+
+            {pairingCode && (
+              <div className={cn(
+                "p-4 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-4",
+                theme === 'dark' ? "bg-emerald-950/20 border-emerald-500/30" : "bg-emerald-50 border-emerald-200"
+              )}>
+                <div className="text-center sm:text-left">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500 block mb-1">Seu Código de Pareamento Ativo</span>
+                  <div className="font-mono font-black text-2xl sm:text-3xl tracking-widest text-emerald-500">{pairingCode}</div>
+                  <p className="text-[11px] opacity-70 mt-0.5">Válido por 15 minutos.</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCopyCode}
+                    className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition cursor-pointer shadow"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    {copied ? 'Copiado!' : 'Copiar'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className={cn(
               "p-4 rounded-xl border",
@@ -182,10 +315,10 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
             )}>
               <h4 className="font-bold text-sm mb-2 flex items-center gap-2">
                 <Zap className="h-4 w-4 text-emerald-500 shrink-0" />
-                Vincular Outro Dispositivo (Digitar Código)
+                Vincular Dispositivo (Digitar Código)
               </h4>
               <p className="text-xs opacity-80 mb-4">
-                Digite o código de 6 dígitos gerado no outro dispositivo (Computador ou Celular) para parear.
+                Digite o código gerado no <strong>Dispositivo Principal</strong> (geralmente o Computador) para sincronizar.
               </p>
               <form onSubmit={handleLinkDevice} className="flex flex-col sm:flex-row gap-2">
                 <input
@@ -210,15 +343,25 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
                   )}
                 >
                   {isLinking ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                  {isLinking ? 'Vinculando...' : 'Vincular'}
+                  {isLinking ? 'Sincronizando...' : 'Vincular Agora'}
                 </button>
               </form>
             </div>
 
             <div>
-              <h4 className="font-bold text-xs uppercase opacity-70 mb-3 tracking-wider">
-                Dispositivos Ativos na Rede GodShop
-              </h4>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-bold text-xs uppercase opacity-70 tracking-wider">
+                  Dispositivos Ativos
+                </h4>
+                <button 
+                  onClick={handleGenerateNewCode}
+                  disabled={isGenerating}
+                  className="text-[10px] font-bold text-emerald-500 hover:underline uppercase flex items-center gap-1"
+                >
+                  {isGenerating ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                  Novo Código
+                </button>
+              </div>
               <div className="space-y-2">
                 {linkedDevices.map((dev) => (
                   <div 
@@ -237,7 +380,7 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
                       </div>
                       <div className="min-w-0">
                         <div className="font-bold text-xs truncate">{dev.name}</div>
-                        <div className="text-[10px] opacity-60 truncate">Conectado às {dev.time} • Sincronização Ativa</div>
+                        <div className="text-[10px] opacity-60 truncate">Sincronizado às {dev.time}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -264,9 +407,9 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
         {activeTab === 'code' && (
           <div className="text-center space-y-6 py-4 w-full max-w-full box-border">
             <div>
-              <h4 className="font-black text-lg mb-1">Código de Pareamento Temporário</h4>
+              <h4 className="font-black text-lg mb-1">Código de Pareamento</h4>
               <p className="text-xs opacity-70 max-w-md mx-auto">
-                Digite este código ou aponte a câmera no outro aplicativo para parear instantaneamente.
+                No outro dispositivo, acesse Configurações {'>'} Pareamento e digite este código.
               </p>
             </div>
 
@@ -278,14 +421,16 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
                 <QrCode className="h-28 w-28 text-slate-900" />
               </div>
               <div className="font-mono font-black text-3xl tracking-widest text-emerald-500">
-                {pairingCode}
+                {pairingCode || '------'}
               </div>
               <div className="flex gap-2 w-full">
                 <button
                   onClick={handleCopyCode}
+                  disabled={!pairingCode}
                   className={cn(
                     "flex-1 py-2 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer border",
-                    theme === 'dark' ? "bg-white/10 hover:bg-white/20 border-white/20 text-white" : "bg-black/10 hover:bg-black/20 border-black/20 text-slate-900"
+                    theme === 'dark' ? "bg-white/10 hover:bg-white/20 border-white/20 text-white" : "bg-black/10 hover:bg-black/20 border-black/20 text-slate-900",
+                    !pairingCode && "opacity-50 cursor-not-allowed"
                   )}
                 >
                   <Copy className="h-3.5 w-3.5" />
@@ -293,14 +438,15 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
                 </button>
                 <button
                   onClick={handleGenerateNewCode}
+                  disabled={isGenerating}
                   className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition cursor-pointer"
                   title="Gerar Novo Código"
                 >
-                  <RefreshCw className="h-4 w-4" />
+                  {isGenerating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 </button>
               </div>
             </div>
-            <p className="text-[11px] opacity-60">O código expira em 10 minutos por segurança.</p>
+            <p className="text-[11px] opacity-60">O código expira em 15 minutos.</p>
           </div>
         )}
 
@@ -311,13 +457,12 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
               theme === 'dark' ? "bg-white/5 border-white/10" : "bg-black/5 border-black/10"
             )}>
               <h5 className="font-bold text-emerald-500 flex items-center gap-2 text-sm">
-                <Smartphone className="h-4 w-4 shrink-0" /> Como usar no Celular (Mobile APK)
+                <ShieldCheck className="h-4 w-4 shrink-0" /> Sincronização Garantida
               </h5>
-              <ol className="list-decimal list-inside space-y-1.5 opacity-90 pl-1">
-                <li>Abra o aplicativo GodShop no celular ou acesse via navegador mobile.</li>
-                <li>Toque em <strong>Vincular Dispositivos</strong> e visualize o seu código de pareamento.</li>
-                <li>Digite o código de 6 dígitos no seu computador ou vice-versa para sincronizar em tempo real.</li>
-              </ol>
+              <p className="opacity-90 leading-relaxed">
+                Ao utilizar o código de pareamento, o segundo dispositivo recebe as mesmas chaves de acesso ao Supabase do dispositivo principal. 
+                Isso garante que <strong>ambos salvem e leiam do mesmo lugar</strong>.
+              </p>
             </div>
 
             <div className={cn(
@@ -325,11 +470,12 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
               theme === 'dark' ? "bg-white/5 border-white/10" : "bg-black/5 border-black/10"
             )}>
               <h5 className="font-bold text-blue-400 flex items-center gap-2 text-sm">
-                <Monitor className="h-4 w-4 shrink-0" /> Sincronização Automática
+                <Monitor className="h-4 w-4 shrink-0" /> Passo a Passo
               </h5>
               <ol className="list-decimal list-inside space-y-1.5 opacity-90 pl-1">
-                <li>Todos os dados salvos (Vendas, Estoque, Clientes) ficam sincronizados entre todos os dispositivos conectados.</li>
-                <li>Não há perda de dados mesmo operando offline.</li>
+                <li>No computador (EXE), clique em <strong>Gerar Código</strong>.</li>
+                <li>No celular (APK), vá em Configurações e digite esse código em <strong>Vincular Dispositivo</strong>.</li>
+                <li>O celular irá reiniciar e passar a usar o mesmo estoque e vendas do computador.</li>
               </ol>
             </div>
           </div>
