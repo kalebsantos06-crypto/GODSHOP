@@ -1,6 +1,7 @@
 import { supabase, clearStaleAuthTokens } from '../lib/supabase';
 import { iPhone, Client, Supplier, Sale, PriceTableItem, Console, ProductPhoto } from '../types';
 import { broadcastLocalChange } from './realtime';
+import { safeSetLocalStorage, safeSaveStoreSetting } from '../utils/imageStorageUtils';
 
 let authenticatedUserId: string | null = null;
 let lastKnownUserIdFromRows: string | null = null;
@@ -622,15 +623,19 @@ export const db = {
           if (cloudVal !== undefined && cloudVal !== null && cloudVal !== '') {
             const localVal = localStorage.getItem(key);
             if (!localVal || (localVal !== cloudVal && !localVal.trim())) {
-              localStorage.setItem(key, String(cloudVal));
-              hasChanged = true;
+              try {
+                await safeSaveStoreSetting(key, cloudVal);
+                hasChanged = true;
+              } catch (e) {
+                console.warn(`[Cloud Sync] Skipped setting ${key}:`, e);
+              }
             }
           }
         }
       }
 
       if (typeof window !== 'undefined') {
-        localStorage.setItem('last_cloud_sync_ts', String(Date.now()));
+        safeSetLocalStorage('last_cloud_sync_ts', String(Date.now()));
         window.dispatchEvent(new CustomEvent('cloud_sync_completed', { 
           detail: { count: totalImported, timestamp: Date.now(), hasChanged } 
         }));
@@ -686,7 +691,7 @@ export const db = {
       const result = await cloudApi.pushAll(dataToPush);
       if (result) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('last_cloud_sync_ts', String(Date.now()));
+          safeSetLocalStorage('last_cloud_sync_ts', String(Date.now()));
           window.dispatchEvent(new CustomEvent('cloud_sync_completed', { 
             detail: { timestamp: Date.now() } 
           }));
@@ -3199,14 +3204,7 @@ export const db = {
         const sDate = s.sale_date ? new Date(s.sale_date).getTime() : 0;
 
         const existingIndex = uniqueSales.findIndex(ex => {
-          if (ex.id === s.id) return true;
-          const exDate = ex.sale_date ? new Date(ex.sale_date).getTime() : 0;
-          const sameClient = ex.client_id === mappedClientId;
-          const sameIphone = mappedIphoneId && ex.iphone_id === mappedIphoneId;
-          const sameConsole = mappedConsoleId && ex.console_id === mappedConsoleId;
-          const samePrice = Math.abs(Number(ex.sell_price || 0) - Number(s.sell_price || 0)) < 0.01;
-          const sameDate = Math.abs(exDate - sDate) < 300000; // 5 mins
-          return sameClient && (sameIphone || sameConsole || samePrice) && sameDate;
+          return ex.id === s.id;
         });
 
         if (existingIndex >= 0) {

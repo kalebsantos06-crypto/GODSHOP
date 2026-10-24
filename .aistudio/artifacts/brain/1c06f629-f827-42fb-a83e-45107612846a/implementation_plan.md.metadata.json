@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for multi-product sales cart supporting adding multiple items into a single client sale transaction",
-  "updatedAt":  "2026-10-22T08:55:36.863573174Z",
+  "summary":  "Implementation plan for fixing the guarantee note (nota fiscal/garantia) rendering and download bug so the note opens fully in a modal with direct Download PDF and Print capabilities.",
+  "updatedAt":  "2026-10-23T22:39:29.263946902Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

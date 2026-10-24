@@ -19,6 +19,7 @@ import { parseLocalDate, getCalculatedInstallments, getSaleNotifications, Notifi
 import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 import { formatBRL } from '../lib/formatCurrency';
 import { checkNotificationPermission, requestNotificationPermission, openNotificationSettings, showNotification, scheduleBackgroundNotifications } from '../lib/pushNotifications';
+import { safeSaveStoreSetting } from '../utils/imageStorageUtils';
 
 
 export default function Layout() {
@@ -402,12 +403,12 @@ export default function Layout() {
           const serverSettings = await res.json();
           if (serverSettings && typeof serverSettings === 'object') {
             if (serverSettings.app_background) {
-              localStorage.setItem('app_background', serverSettings.app_background);
+              await safeSaveStoreSetting('app_background', serverSettings.app_background);
               setBgImage(serverSettings.app_background);
             }
             if (serverSettings.app_logo !== undefined) {
               if (serverSettings.app_logo) {
-                localStorage.setItem('app_logo', serverSettings.app_logo);
+                await safeSaveStoreSetting('app_logo', serverSettings.app_logo);
                 setLogoImage(serverSettings.app_logo);
               } else {
                 localStorage.removeItem('app_logo');

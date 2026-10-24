@@ -23,6 +23,7 @@ import { parseLocalDate, getSaleNotifications } from '../lib/dateUtils';
 import { DEFAULT_STATUS_TEMPLATES, dispatchWebhookMessage, WebhookProvider, testWebhookConnection } from '../lib/whatsappUtils';
 import { formatBRL } from '../lib/formatCurrency';
 import { useSearchParams } from 'react-router-dom';
+import { compressBase64Image, safeSaveStoreSetting, safeSetLocalStorage } from '../utils/imageStorageUtils';
 
 import { db } from '../services/db';
 import StorageExplorer from '../components/StorageExplorer';
@@ -963,12 +964,12 @@ export default function Settings() {
           const s = await res.json();
           if (s.app_background) {
             setBgPreview(s.app_background);
-            localStorage.setItem('app_background', s.app_background);
+            await safeSaveStoreSetting('app_background', s.app_background);
           }
           if (s.app_logo !== undefined) {
             if (s.app_logo) {
               setLogoPreview(s.app_logo);
-              localStorage.setItem('app_logo', s.app_logo);
+              await safeSaveStoreSetting('app_logo', s.app_logo);
             } else {
               setLogoPreview('/logo.png');
               localStorage.removeItem('app_logo');
@@ -1126,6 +1127,13 @@ export default function Settings() {
         const result = await backupService.importData(validation.normalizedData);
         if (result.success) {
           toast.success(result.message);
+          const warnings = result.details?.filter(d => d.includes('⚠️')) || [];
+          if (warnings.length > 0) {
+            toast.warning('Aviso de armazenamento:', {
+              description: warnings[0],
+              duration: 7000
+            });
+          }
           queryClient.invalidateQueries();
           await db.sales.list().catch(() => {});
           await db.clients.list().catch(() => {});
@@ -1179,6 +1187,13 @@ export default function Settings() {
       const result = await backupService.importData(validation.normalizedData);
       if (result.success) {
         toast.success(result.message);
+        const warnings = result.details?.filter(d => d.includes('⚠️')) || [];
+        if (warnings.length > 0) {
+          toast.warning('Aviso de armazenamento:', {
+            description: warnings[0],
+            duration: 7000
+          });
+        }
         queryClient.invalidateQueries();
         setShowPasteModal(false);
         setPasteJsonText('');
@@ -1203,17 +1218,26 @@ export default function Settings() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, key: string, setPreview: React.Dispatch<React.SetStateAction<string | null>>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        toast.error('A imagem deve ter no máximo 2MB.');
+      if (file.size > 8 * 1024 * 1024) {
+        toast.error('A imagem deve ter no máximo 8MB.');
         return;
       }
       
       const reader = new FileReader();
       reader.onloadend = async () => {
-        const base64String = reader.result as string;
+        const rawBase64 = reader.result as string;
         try {
-          localStorage.setItem(key, base64String);
-          setPreview(base64String);
+          // Auto-compress to prevent localStorage quota exhaustion
+          const maxDim = key === 'app_logo' ? 320 : 960;
+          const compressed = await compressBase64Image(rawBase64, maxDim, 0.75);
+          
+          const saved = await safeSaveStoreSetting(key, compressed);
+          if (!saved) {
+            toast.error('Não foi possível salvar a imagem devido ao limite de espaço local. Tente uma imagem mais leve.');
+            return;
+          }
+          
+          setPreview(compressed);
           window.dispatchEvent(new Event('settings_updated'));
           
           if (user?.id) {
@@ -1223,15 +1247,16 @@ export default function Settings() {
               body: JSON.stringify({
                 userId: user.id,
                 settings: {
-                  [key]: base64String
+                  [key]: compressed
                 }
               })
-            });
+            }).catch(() => {});
           }
           
-          toast.success('Imagem atualizada com sucesso!');
-        } catch (err) {
-          toast.error('Erro ao salvar imagem. O arquivo pode ser muito grande.');
+          toast.success('Imagem atualizada e otimizada com sucesso!');
+        } catch (err: any) {
+          console.warn('Error uploading image:', err);
+          toast.error('Erro ao processar imagem: ' + (err?.message || 'Arquivo incompatível'));
         }
       };
       reader.readAsDataURL(file);

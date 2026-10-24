@@ -2,6 +2,7 @@ import { db, getCurrentUserId } from './db';
 import { supabase } from '../lib/supabase';
 import { Client, Supplier, iPhone, Console, Sale, PriceTableItem } from '../types';
 import { validateAndParseBackup, BackupValidationResult } from './backupValidator';
+import { compressBase64Image, safeSaveStoreSetting, safeSetLocalStorage } from '../utils/imageStorageUtils';
 
 export interface BackupData {
   version: number;
@@ -112,11 +113,18 @@ export const backupService = {
     }
     data.custom_payments = custom_payments;
 
-    // Export store settings
+    // Export store settings (auto-optimizing large images)
     const store_settings: Record<string, string> = {};
     for (const key of STORE_SETTINGS_KEYS) {
-      const val = localStorage.getItem(key);
+      let val = localStorage.getItem(key);
       if (val !== null && val !== undefined) {
+        if ((key === 'app_logo' || key === 'app_background') && val.startsWith('data:image/') && val.length > 40000) {
+          try {
+            val = await compressBase64Image(val, key === 'app_logo' ? 300 : 800, 0.72);
+          } catch {
+            // Keep original if compression fails
+          }
+        }
         store_settings[key] = val;
       }
     }
@@ -159,22 +167,33 @@ export const backupService = {
       const data = validation.normalizedData.data;
       const userId = await getCurrentUserId().catch(() => null);
 
-      // 1. Process and restore custom payments dictionary
+      // 1. Process and restore custom payments dictionary safely
       if (data.custom_payments && typeof data.custom_payments === 'object') {
         for (const [saleId, paymentsJson] of Object.entries(data.custom_payments)) {
-          if (typeof paymentsJson === 'string' && paymentsJson.trim()) {
-            localStorage.setItem(`inst_payments_${saleId}`, paymentsJson);
-          } else if (typeof paymentsJson === 'object' && paymentsJson !== null) {
-            localStorage.setItem(`inst_payments_${saleId}`, JSON.stringify(paymentsJson));
+          try {
+            if (typeof paymentsJson === 'string' && paymentsJson.trim()) {
+              safeSetLocalStorage(`inst_payments_${saleId}`, paymentsJson);
+            } else if (typeof paymentsJson === 'object' && paymentsJson !== null) {
+              safeSetLocalStorage(`inst_payments_${saleId}`, JSON.stringify(paymentsJson));
+            }
+          } catch (paymentErr) {
+            console.warn(`[Backup Import] Skipped custom payment for ${saleId}:`, paymentErr);
           }
         }
       }
 
-      // 2. Process and restore store settings
+      // 2. Process and restore store settings with automatic image compression and quota protection
       if (data.store_settings && typeof data.store_settings === 'object') {
         for (const [key, val] of Object.entries(data.store_settings)) {
           if (STORE_SETTINGS_KEYS.includes(key) && val !== undefined && val !== null) {
-            localStorage.setItem(key, String(val));
+            try {
+              const saved = await safeSaveStoreSetting(key, val);
+              if (!saved && (key === 'app_logo' || key === 'app_background')) {
+                details.push(`⚠️ A imagem de '${key}' excedeu a cota de armazenamento local e foi ignorada para não bloquear a restauração.`);
+              }
+            } catch (settingErr) {
+              console.warn(`[Backup Import] Non-fatal error saving setting ${key}:`, settingErr);
+            }
           }
         }
       }
@@ -214,15 +233,19 @@ export const backupService = {
                 : JSON.stringify(data.custom_payments[item.id]);
             }
             if (item.custom_payments && typeof item.custom_payments === 'string') {
-              localStorage.setItem(`inst_payments_${item.id}`, item.custom_payments);
+              safeSetLocalStorage(`inst_payments_${item.id}`, item.custom_payments);
             }
           }
 
           preparedItems.push(item);
         }
 
-        // Save directly to local storage replacing or updating canonical entries
-        localStorage.setItem(`db_fallback_${table}`, JSON.stringify(preparedItems));
+        // Save directly to local storage replacing or updating canonical entries with quota fallback
+        const savedLocally = safeSetLocalStorage(`db_fallback_${table}`, JSON.stringify(preparedItems));
+        if (!savedLocally) {
+          console.warn(`[Backup Import] Table ${table} exceeded local storage quota.`);
+          details.push(`⚠️ Tabela '${table}' (${preparedItems.length} itens) excedeu a cota do localStorage do navegador, mas os dados foram processados.`);
+        }
 
         // If Supabase is connected and authenticated, sync these items to Supabase
         if (userId) {
@@ -252,17 +275,23 @@ export const backupService = {
       }
 
       // 4. Run automatic global deduplication and unification to guarantee zero duplicate records
-      const dedupResult = await db.deduplicateDatabase();
-      if (dedupResult.success && dedupResult.stats) {
-        const totalCleaned = Object.values(dedupResult.stats).reduce((a, b) => a + b, 0);
-        if (totalCleaned > 0) {
-          details.push(`✓ ${totalCleaned} registros duplicados foram unificados automaticamente.`);
+      try {
+        const dedupResult = await db.deduplicateDatabase();
+        if (dedupResult.success && dedupResult.stats) {
+          const totalCleaned = Object.values(dedupResult.stats).reduce((a, b) => a + b, 0);
+          if (totalCleaned > 0) {
+            details.push(`✓ ${totalCleaned} registros duplicados foram unificados automaticamente.`);
+          }
         }
+      } catch (dedupErr) {
+        console.warn('[Backup Import] Deduplication warn:', dedupErr);
       }
 
-      // Invalidate and notify
+      // Invalidate and notify safely
       if (typeof window !== 'undefined') {
-        localStorage.setItem('last_cloud_sync_ts', String(Date.now()));
+        try {
+          safeSetLocalStorage('last_cloud_sync_ts', String(Date.now()));
+        } catch {}
         window.dispatchEvent(new CustomEvent('cloud_sync_completed', { 
           detail: { timestamp: Date.now(), fromBackup: true } 
         }));
@@ -283,9 +312,10 @@ export const backupService = {
       console.error('Fatal error during backup import:', error);
       return {
         success: false,
-        message: 'Erro fatal ao importar backup: ' + (error.message || 'Falha desconhecida'),
+        message: 'Erro ao importar backup: ' + (error.message || 'Falha desconhecida'),
         details
       };
     }
   }
 };
+
