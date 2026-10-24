@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { copyToClipboard } from '../utils/url';
+import { supabase } from '../lib/supabase';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
@@ -931,14 +932,42 @@ export default function Sales() {
                               onClick={async () => {
                                 const toastId = toast.loading(`Buscando assinatura de ${client?.name || 'Cliente'}...`);
                                 try {
-                                  // This will trigger the list() query which includes the signature sync logic
+                                  // Direct Supabase lookup for this sale ID
+                                  const { data: supaData } = await supabase
+                                    .from('public_sales')
+                                    .select('*')
+                                    .eq('id', sale.id)
+                                    .maybeSingle();
+
+                                  const sigData = supaData?.signature_data || supaData?.sale_data?.signatureInfo?.signature_data;
+                                  const sigAt = supaData?.signed_at || supaData?.sale_data?.signatureInfo?.signed_at;
+                                  const sigIp = supaData?.signed_ip || supaData?.sale_data?.signatureInfo?.signed_ip;
+
+                                  if (sigData || sigAt) {
+                                    try {
+                                      await supabase.from('sales').update({
+                                        signature_data: sigData,
+                                        signed_at: sigAt,
+                                        signed_ip: sigIp
+                                      }).eq('id', sale.id);
+                                    } catch (e) {}
+
+                                    // Update local cache
+                                    const localSales = JSON.parse(localStorage.getItem('db_fallback_sales') || '[]');
+                                    const updated = localSales.map((s: any) => s.id === sale.id ? { ...s, signature_data: sigData, signed_at: sigAt, signed_ip: sigIp } : s);
+                                    localStorage.setItem('db_fallback_sales', JSON.stringify(updated));
+                                    
+                                    toast.success('Assinatura localizada e vinculada!', { id: toastId });
+                                  } else {
+                                    toast.info('Assinatura ainda não realizada pelo cliente.', { id: toastId });
+                                  }
+
                                   await queryClient.invalidateQueries({ queryKey: ['sales'] });
-                                  toast.success('Busca concluída!', { id: toastId });
                                 } catch (e) {
-                                  toast.error('Erro na busca.', { id: toastId });
+                                  toast.error('Erro na busca de assinatura.', { id: toastId });
                                 }
                               }}
-                              className="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-primary transition-colors"
+                              className="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-primary transition-colors cursor-pointer"
                               title="Verificar se o cliente já assinou"
                             >
                               <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />

@@ -484,6 +484,24 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
         }
 
         if (!dbErr) {
+          // Update main sales table in Supabase directly so all apps/APKs fetching 'sales' table immediately see signature
+          try {
+            await supabase.from('sales').update({
+              signature_data,
+              signed_at: signedAt,
+              signed_ip: clientIp,
+              client_name: fullName,
+              witness1_name: witness1Name || null,
+              witness1_cpf: witness1Cpf || null,
+              witness1_signature: witness1_signature || null,
+              witness2_name: witness2Name || null,
+              witness2_cpf: witness2Cpf || null,
+              witness2_signature: witness2_signature || null
+            }).eq('id', id);
+          } catch (salesUpdateErr) {
+            console.warn('Could not update sales table in Supabase directly:', salesUpdateErr);
+          }
+
           // Fetch updated record from Supabase to update state
           const { data: dbData } = await supabase
             .from('public_sales')

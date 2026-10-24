@@ -1813,10 +1813,54 @@ export const db = {
           }
         }
 
-        const unsignedSaleIds = (data || []).filter(s => !s.signature_data || s.signature_data.length < 5000 || !s.signed_at).map(s => s.id);
+        const unsignedSaleIds = (data || []).filter(s => !s.signature_data || s.signature_data.length < 50 || !s.signed_at).map(s => s.id);
         if (unsignedSaleIds.length > 0) {
           try {
             const chunkSize = 50;
+            // 1. First, check Supabase public_sales directly (100% reliable for APKs and native apps)
+            for (let i = 0; i < unsignedSaleIds.length; i += chunkSize) {
+              const chunk = unsignedSaleIds.slice(i, i + chunkSize);
+              const { data: publicSigs } = await supabase
+                .from('public_sales')
+                .select('*')
+                .in('id', chunk);
+
+              if (publicSigs && publicSigs.length > 0) {
+                const localSales = getLocalData('sales');
+                let updatedLocal = [...localSales];
+
+                for (const sig of publicSigs) {
+                  const targetSaleId = sig.id || sig.sale_id;
+                  if (!targetSaleId) continue;
+
+                  const sigData = sig.signature_data || sig.sale_data?.signatureInfo?.signature_data || sig.sale_data?.signature_data;
+                  const sigAt = sig.signed_at || sig.sale_data?.signatureInfo?.signed_at || sig.sale_data?.signed_at;
+                  const sigIp = sig.signed_ip || sig.sale_data?.signatureInfo?.signed_ip || sig.sale_data?.signed_ip;
+
+                  if (sigData || sigAt) {
+                    const rowToUpdate = (data || []).find(s => s.id === targetSaleId);
+                    if (rowToUpdate) {
+                      rowToUpdate.signature_data = sigData;
+                      rowToUpdate.signed_at = sigAt;
+                      rowToUpdate.signed_ip = sigIp;
+                    }
+
+                    updatedLocal = updatedLocal.map(s => s.id === targetSaleId ? { ...s, signature_data: sigData, signed_at: sigAt, signed_ip: sigIp } : s);
+
+                    try {
+                      await supabase.from('sales').update({
+                        signature_data: sigData,
+                        signed_at: sigAt,
+                        signed_ip: sigIp
+                      }).eq('id', targetSaleId);
+                    } catch (e) {}
+                  }
+                }
+                setLocalData('sales', updatedLocal);
+              }
+            }
+
+            // 2. Also attempt Express API sync as secondary fallback when Node server is present
             await Promise.all(unsignedSaleIds.map(async (saleId) => {
               try {
                 const res = await fetch(`/api/public-sales/${saleId}?t=${Date.now()}`, { cache: 'no-store' });
@@ -1833,6 +1877,9 @@ export const db = {
                       rowToUpdate.signed_at = sigAt;
                       rowToUpdate.signed_ip = sigIp;
                     }
+                    const localSales = getLocalData('sales');
+                    setLocalData('sales', localSales.map(s => s.id === saleId ? { ...s, signature_data: sigData, signed_at: sigAt, signed_ip: sigIp } : s));
+                    
                     await supabase.from('sales').update({
                       signature_data: sigData,
                       signed_at: sigAt,
@@ -1842,40 +1889,6 @@ export const db = {
                 }
               } catch (err) {}
             }));
-
-            for (let i = 0; i < unsignedSaleIds.length; i += chunkSize) {
-              const chunk = unsignedSaleIds.slice(i, i + chunkSize);
-              const [res1, res2] = await Promise.all([
-                supabase.from('public_sales').select('*').in('sale_id', chunk),
-                supabase.from('public_sales').select('*').in('id', chunk)
-              ]);
-              
-              const publicSignatures = [...(res1.data || []), ...(res2.data || [])];
-              if (publicSignatures.length > 0) {
-                for (const sig of publicSignatures) {
-                  const targetSaleId = chunk.find(id => id === sig.sale_id || id === sig.id);
-                  if (!targetSaleId) continue;
-
-                  const sigData = sig.signature_data || sig.sale_data?.signatureInfo?.signature_data;
-                  const sigAt = sig.signed_at || sig.sale_data?.signatureInfo?.signed_at;
-                  const sigIp = sig.signed_ip || sig.sale_data?.signatureInfo?.signed_ip;
-                  
-                  if (sigData || sigAt) {
-                    const rowToUpdate = (data || []).find(s => s.id === targetSaleId);
-                    if (rowToUpdate) {
-                      rowToUpdate.signature_data = sigData;
-                      rowToUpdate.signed_at = sigAt;
-                      rowToUpdate.signed_ip = sigIp;
-                    }
-                    await supabase.from('sales').update({
-                      signature_data: sigData,
-                      signed_at: sigAt,
-                      signed_ip: sigIp
-                    }).eq('id', targetSaleId);
-                  }
-                }
-              }
-            }
           } catch (e) {
             console.error("Signature sync error:", e);
           }
