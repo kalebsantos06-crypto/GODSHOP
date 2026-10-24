@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { getBaseUrl, copyToClipboard } from '../utils/url';
+import { getBaseUrl, copyToClipboard, shareContent } from '../utils/url';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { db } from '../services/db';
@@ -260,6 +260,23 @@ export default function GuaranteeNote() {
 
   const checkSignature = async () => {
     if (!id) return;
+
+    // Check sale prop immediately first
+    if (sale && (sale.signature_data || sale.signed_at)) {
+      setSignatureInfo({
+        signature_data: sale.signature_data,
+        signed_at: sale.signed_at,
+        signed_ip: sale.signed_ip,
+        client_name: sale.client_name || client?.name,
+        witness1_name: sale.witness1_name,
+        witness1_cpf: sale.witness1_cpf,
+        witness1_signature: sale.witness1_signature,
+        witness2_name: sale.witness2_name,
+        witness2_cpf: sale.witness2_cpf,
+        witness2_signature: sale.witness2_signature
+      });
+    }
+
     try {
       const res = await fetch(`/api/public-sales/${id}?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
@@ -290,26 +307,10 @@ export default function GuaranteeNote() {
               witness2_cpf: json.witness2_cpf || json.signatureInfo?.witness2_cpf,
               witness2_signature: json.witness2_signature || json.signatureInfo?.witness2_signature
             });
-            return;
           }
         }
       }
     } catch (e) {}
-
-    if (sale && sale.signature_data) {
-      setSignatureInfo({
-        signature_data: sale.signature_data,
-        signed_at: sale.signed_at,
-        signed_ip: sale.signed_ip,
-        client_name: sale.client_name || client?.name,
-        witness1_name: sale.witness1_name,
-        witness1_cpf: sale.witness1_cpf,
-        witness1_signature: sale.witness1_signature,
-        witness2_name: sale.witness2_name,
-        witness2_cpf: sale.witness2_cpf,
-        witness2_signature: sale.witness2_signature
-      });
-    }
   };
 
   useEffect(() => {
@@ -619,18 +620,50 @@ export default function GuaranteeNote() {
       </div>
 
       <div className="bg-white border rounded-xl p-5 shadow-sm space-y-4 print:hidden">
-        <h3 className="font-bold text-sm flex items-center gap-2"><PenTool className="h-4 w-4 text-blue-600" /> Assinatura do Cliente</h3>
+        <div className="flex justify-between items-center">
+          <h3 className="font-bold text-sm flex items-center gap-2"><PenTool className="h-4 w-4 text-blue-600" /> Status da Assinatura do Cliente</h3>
+          {currentSignatureData ? (
+            <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
+              <Check className="h-3.5 w-3.5" /> Assinado
+            </span>
+          ) : (
+            <span className="bg-amber-100 text-amber-800 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 animate-pulse">
+              Pendente
+            </span>
+          )}
+        </div>
         <div className="flex flex-wrap gap-3">
-          <button onClick={() => { copyToClipboard(signatureLink); toast.success('Link copiado!'); }} className="bg-blue-600 text-white text-xs font-bold px-5 py-2.5 rounded-lg shadow-md">Copiar Link</button>
-          <button onClick={async () => { await checkSignature(); toast.success('Status atualizado!'); }} className="bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5" /> Atualizar</button>
+          <button onClick={() => { copyToClipboard(signatureLink); toast.success('Link copiado!'); }} className="bg-blue-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-md cursor-pointer flex items-center gap-1.5"><Copy className="h-4 w-4" /> Copiar Link</button>
+          <button 
+            onClick={async () => {
+              const shared = await shareContent({
+                title: 'Assinar Termo de Garantia GODSHOP',
+                text: `Olá ${client?.name || 'Cliente'}, por favor assine o seu Termo de Garantia e Contrato GODSHOP aqui:`,
+                url: signatureLink,
+                dialogTitle: 'Compartilhar Link de Assinatura'
+              });
+              if (!shared) {
+                copyToClipboard(signatureLink);
+                toast.success('Link copiado para a área de transferência!');
+              }
+            }} 
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-md flex items-center gap-1.5 cursor-pointer"
+          >
+            <Share2 className="h-4 w-4" /> Compartilhar Link
+          </button>
+          <button onClick={async () => { await checkSignature(); toast.success('Status atualizado!'); }} className="bg-slate-100 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"><RefreshCw className="h-3.5 w-3.5" /> Atualizar Status</button>
         </div>
         {currentSignatureData ? (
-          <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg text-xs">
-            <p><strong>Assinado por:</strong> {signatureInfo?.client_name || client?.name}</p>
-            <p><strong>Data:</strong> {signatureInfo?.signed_at ? new Date(signatureInfo.signed_at).toLocaleString() : 'N/A'}</p>
+          <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg text-xs space-y-1">
+            <p className="font-semibold text-emerald-900">✓ Contrato assinado com sucesso</p>
+            <p><strong>Assinado por:</strong> {signatureInfo?.client_name || sale?.client_name || client?.name}</p>
+            <p><strong>Data/Hora:</strong> {signatureInfo?.signed_at ? new Date(signatureInfo.signed_at).toLocaleString() : (sale?.signed_at ? new Date(sale.signed_at).toLocaleString() : 'N/A')}</p>
           </div>
         ) : (
-          <div className="p-4 bg-amber-50 border border-amber-100 rounded-lg text-xs animate-pulse">Pendente de assinatura do cliente.</div>
+          <div className="p-4 bg-amber-50 border border-amber-100 rounded-lg text-xs space-y-1">
+            <p className="font-semibold text-amber-900">⚠️ Aguardando assinatura do cliente</p>
+            <p className="text-amber-700">Envie o link de assinatura acima para o cliente assinar digitalmente pelo celular ou computador.</p>
+          </div>
         )}
       </div>
 
