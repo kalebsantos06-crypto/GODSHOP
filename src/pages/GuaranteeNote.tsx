@@ -261,7 +261,47 @@ export default function GuaranteeNote() {
   const checkSignature = async () => {
     if (!id) return;
 
-    // Check sale prop immediately first
+    // 1. Check Supabase 'public_sales' table first (Crucial for Capacitor APK/EXE where local Express /api is not present)
+    try {
+      const { data: supaData, error: supaErr } = await supabase
+        .from('public_sales')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (!supaErr && supaData) {
+        const sigInfo = supaData.sale_data?.signatureInfo || {};
+        const sigData = supaData.signature_data || sigInfo.signature_data || supaData.sale_data?.signature_data;
+        const signedAt = supaData.signed_at || sigInfo.signed_at || supaData.sale_data?.signed_at;
+        const clientName = supaData.client_name || sigInfo.client_name || supaData.sale_data?.client_name || client?.name;
+
+        if (supaData.checklist) setChecklist(supaData.checklist);
+        if (supaData.delivery_observations) setDeliveryObservations(supaData.delivery_observations);
+        if (supaData.photos) setPhotos(supaData.photos);
+        if (supaData.checklist_verified_at) setChecklistVerifiedAt(supaData.checklist_verified_at);
+        if (supaData.checklist_verified_by) setChecklistVerifiedBy(supaData.checklist_verified_by);
+
+        if (sigData) {
+          setSignatureInfo({
+            signature_data: sigData,
+            signed_at: signedAt,
+            signed_ip: supaData.signed_ip || sigInfo.signed_ip,
+            client_name: clientName,
+            witness1_name: supaData.witness1_name || sigInfo.witness1_name,
+            witness1_cpf: supaData.witness1_cpf || sigInfo.witness1_cpf,
+            witness1_signature: supaData.witness1_signature || sigInfo.witness1_signature,
+            witness2_name: supaData.witness2_name || sigInfo.witness2_name,
+            witness2_cpf: supaData.witness2_cpf || sigInfo.witness2_cpf,
+            witness2_signature: supaData.witness2_signature || sigInfo.witness2_signature
+          });
+          return;
+        }
+      }
+    } catch (supaFetchErr) {
+      console.warn('Supabase checkSignature error:', supaFetchErr);
+    }
+
+    // 2. Check local sale object prop
     if (sale && (sale.signature_data || sale.signed_at)) {
       setSignatureInfo({
         signature_data: sale.signature_data,
@@ -275,8 +315,10 @@ export default function GuaranteeNote() {
         witness2_cpf: sale.witness2_cpf,
         witness2_signature: sale.witness2_signature
       });
+      return;
     }
 
+    // 3. Try Express server API as fallback (for web dev environment)
     try {
       const res = await fetch(`/api/public-sales/${id}?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
