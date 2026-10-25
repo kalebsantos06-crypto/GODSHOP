@@ -4,7 +4,7 @@ import { db } from '../services/db';
 import { formatBRL } from '../lib/formatCurrency';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, getSaleClient } from '../lib/dateUtils';
 import { Link } from 'react-router-dom';
 import { Receipt, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -67,7 +67,7 @@ export default function Invoices() {
           console.log('DEBUG Invoices sale:', sale);
           const iphone = iphones.find(i => i.id === sale.iphone_id);
           const consoleItem = consoles.find(c => c.id === sale.console_id);
-          const client = clients.find(c => c.id === sale.client_id);
+          const client = getSaleClient(sale, clients);
           const isSigned = !!sale.signature_data || !!sale.signed_at;
 
           return (

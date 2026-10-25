@@ -2322,6 +2322,50 @@ export const db = {
         const localSales = getLocalData('sales');
         setLocalData('sales', localSales.map(item => item.id === id ? { ...item, ...data, updated_at: nowIso } : item));
 
+        if (data.items && Array.isArray(data.items)) {
+          const localIphones = getLocalData('iphones');
+          const localConsoles = getLocalData('consoles');
+          const localGifts = getLocalData('gifts');
+          let updatedIphones = [...localIphones];
+          let updatedConsoles = [...localConsoles];
+          let updatedGifts = [...localGifts];
+
+          const oldItems = oldSale?.items && Array.isArray(oldSale.items) ? oldSale.items : [];
+          const newItems = data.items;
+
+          for (const oldItem of oldItems) {
+            if (!newItems.some((ni: any) => ni.id === oldItem.id)) {
+              if (oldItem.type === 'iphone' && oldItem.id) {
+                try { supabase.from('iphones').update({ status: 'disponivel', updated_at: nowIso }).eq('id', oldItem.id); } catch(e){}
+                updatedIphones = updatedIphones.map(i => i.id === oldItem.id ? { ...i, status: 'disponivel', updated_at: nowIso } : i);
+              } else if (oldItem.type === 'console' && oldItem.id) {
+                try { supabase.from('consoles').update({ status: 'disponivel', updated_at: nowIso }).eq('id', oldItem.id); } catch(e){}
+                updatedConsoles = updatedConsoles.map(c => c.id === oldItem.id ? { ...c, status: 'disponivel', updated_at: nowIso } : c);
+              } else if (oldItem.type === 'accessory' && oldItem.id) {
+                try { supabase.from('gifts').update({ status: 'disponivel', updated_at: nowIso }).eq('id', oldItem.id); } catch(e){}
+                updatedGifts = updatedGifts.map(g => g.id === oldItem.id ? { ...g, status: 'disponivel', updated_at: nowIso } : g);
+              }
+            }
+          }
+
+          for (const newItem of newItems) {
+            if (newItem.type === 'iphone' && newItem.id) {
+              try { supabase.from('iphones').update({ status: 'vendido', updated_at: nowIso }).eq('id', newItem.id); } catch(e){}
+              updatedIphones = updatedIphones.map(i => i.id === newItem.id ? { ...i, status: 'vendido', updated_at: nowIso } : i);
+            } else if (newItem.type === 'console' && newItem.id) {
+              try { supabase.from('consoles').update({ status: 'vendido', updated_at: nowIso }).eq('id', newItem.id); } catch(e){}
+              updatedConsoles = updatedConsoles.map(c => c.id === newItem.id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
+            } else if (newItem.type === 'accessory' && newItem.id) {
+              try { supabase.from('gifts').update({ status: 'vendido', updated_at: nowIso }).eq('id', newItem.id); } catch(e){}
+              updatedGifts = updatedGifts.map(g => g.id === newItem.id ? { ...g, status: 'vendido', updated_at: nowIso } : g);
+            }
+          }
+
+          setLocalData('iphones', updatedIphones);
+          setLocalData('consoles', updatedConsoles);
+          setLocalData('gifts', updatedGifts);
+        }
+
         if (data.iphone_id && oldSale.iphone_id !== data.iphone_id) {
           const localIphones = getLocalData('iphones');
           let updatedIphones = [...localIphones];
@@ -2350,6 +2394,29 @@ export const db = {
         const localSales = getLocalData('sales');
         const oldSale = localSales.find(s => s.id === id) || { iphone_id: null, console_id: null };
         
+        if (data.items && Array.isArray(data.items)) {
+          const localIphones = getLocalData('iphones');
+          const localConsoles = getLocalData('consoles');
+          const localGifts = getLocalData('gifts');
+          let updatedIphones = [...localIphones];
+          let updatedConsoles = [...localConsoles];
+          let updatedGifts = [...localGifts];
+
+          for (const newItem of data.items) {
+            if (newItem.type === 'iphone' && newItem.id) {
+              updatedIphones = updatedIphones.map(i => i.id === newItem.id ? { ...i, status: 'vendido', updated_at: nowIso } : i);
+            } else if (newItem.type === 'console' && newItem.id) {
+              updatedConsoles = updatedConsoles.map(c => c.id === newItem.id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
+            } else if (newItem.type === 'accessory' && newItem.id) {
+              updatedGifts = updatedGifts.map(g => g.id === newItem.id ? { ...g, status: 'vendido', updated_at: nowIso } : g);
+            }
+          }
+
+          setLocalData('iphones', updatedIphones);
+          setLocalData('consoles', updatedConsoles);
+          setLocalData('gifts', updatedGifts);
+        }
+
         if (data.iphone_id && oldSale.iphone_id !== data.iphone_id) {
           const localIphones = getLocalData('iphones');
           let updatedIphones = [...localIphones];

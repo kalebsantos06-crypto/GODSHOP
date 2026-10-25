@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { formatBRL } from '../lib/formatCurrency';
 import { format, addMonths, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { parseLocalDate } from '../lib/dateUtils';
+import { parseLocalDate, getSaleClient } from '../lib/dateUtils';
 import { getConditionLabel, getWarrantyMonths } from '../lib/utils';
 import { Printer, ArrowLeft, Download, MessageCircle, FileDown, Smartphone, Share2, Copy, Check, ExternalLink, ShieldCheck, PenTool, Camera, Trash2, Plus, Image as ImageIcon, Lock, AlertTriangle, Eye, RefreshCw, Sparkles, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
@@ -233,7 +233,7 @@ export default function GuaranteeNote() {
 
   // Derive data only after hooks
   const sale = useMemo(() => sales.find(s => s.id === id), [sales, id]);
-  const client = useMemo(() => sale ? clients.find(c => c.id === sale.client_id) : null, [sale, clients]);
+  const client = useMemo(() => sale ? getSaleClient(sale, clients) : null, [sale, clients]);
   const saleItems = sale?.items || [];
   
   const iphone = useMemo(() => {

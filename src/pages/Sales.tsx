@@ -12,7 +12,7 @@ import {
 import { toast } from 'sonner';
 import { format, isWithinInterval, startOfDay, endOfDay, addDays, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { parseLocalDate, getInstallmentDate, getCalculatedInstallments, CalculatedInstallment } from '../lib/dateUtils';
+import { parseLocalDate, getInstallmentDate, getCalculatedInstallments, getSaleClient, CalculatedInstallment } from '../lib/dateUtils';
 import { broadcastLocalChange } from '../services/realtime';
 import { Link } from 'react-router-dom';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
@@ -185,9 +185,17 @@ export default function Sales() {
     mutationFn: (newSale: any) => db.sales.create(newSale),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
       queryClient.invalidateQueries({ queryKey: ['iphones'] });
       queryClient.invalidateQueries({ queryKey: ['consoles'] });
+      broadcastLocalChange('sales');
+      broadcastLocalChange('clients');
       setIsAdding(false);
+      setSelectedClientId('');
+      setIsCreatingNewClient(false);
+      setNewClientName('');
+      setNewClientPhone('');
+      setNewClientCpf('');
       toast.success('Venda registrada com sucesso!');
     },
     onError: (error: any) => {
@@ -200,10 +208,18 @@ export default function Sales() {
     mutationFn: ({ id, data }: { id: string, data: any }) => db.sales.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
       queryClient.invalidateQueries({ queryKey: ['iphones'] });
       queryClient.invalidateQueries({ queryKey: ['consoles'] });
+      broadcastLocalChange('sales');
+      broadcastLocalChange('clients');
       setEditingSale(null);
-      toast.success('Venda atualizada com sucesso!');
+      setSelectedClientId('');
+      setIsCreatingNewClient(false);
+      setNewClientName('');
+      setNewClientPhone('');
+      setNewClientCpf('');
+      toast.success('Venda e cliente atualizados com sucesso!');
     },
     onError: (error: any) => {
       console.error('Erro ao atualizar venda:', error);
@@ -352,7 +368,13 @@ export default function Sales() {
     }
   };
 
-  const handleAdd = (e: React.FormEvent<HTMLFormElement>) => {
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [isCreatingNewClient, setIsCreatingNewClient] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientPhone, setNewClientPhone] = useState('');
+  const [newClientCpf, setNewClientCpf] = useState('');
+
+  const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (cartItems.length === 0) {
       toast.error('Adicione pelo menos um produto ao carrinho.');
@@ -363,11 +385,41 @@ export default function Sales() {
     const firstConsole = cartItems.find(i => i.type === 'console')?.id;
     const firstInstallmentDate = formData.get('first_installment_date');
 
+    let clientId = selectedClientId || (formData.get('client_id') as string) || '';
+    let clientObj = clients.find(c => c && String(c.id) === String(clientId)) || null;
+
+    if (isCreatingNewClient) {
+      if (!newClientName.trim()) {
+        toast.error('Por favor, informe o nome do novo cliente.');
+        return;
+      }
+      try {
+        const created = await db.clients.create({
+          name: newClientName.trim(),
+          phone: newClientPhone.trim(),
+          cpf: newClientCpf.trim(),
+        });
+        clientId = String(created.id);
+        clientObj = created;
+        setSelectedClientId(String(created.id));
+        queryClient.invalidateQueries({ queryKey: ['clients'] });
+        toast.success(`Cliente "${created.name}" cadastrado e vinculado com sucesso!`);
+      } catch (err: any) {
+        toast.error('Erro ao cadastrar novo cliente: ' + (err.message || 'Erro desconhecido'));
+        return;
+      }
+    }
+
     addMutation.mutate({
       iphone_id: firstIphone || null,
       console_id: firstConsole || null,
       items: cartItems,
-      client_id: formData.get('client_id'),
+      client_id: clientId,
+      client_name: clientObj?.name || newClientName.trim() || '',
+      client_phone: clientObj?.phone || newClientPhone.trim() || '',
+      client_cpf: clientObj?.cpf || newClientCpf.trim() || '',
+      client_address: clientObj?.address || '',
+      client: clientObj || null,
       sell_price: tempPrice > 0 ? tempPrice : Number(formData.get('sell_price')),
       down_payment: Number(formData.get('down_payment')) || 0,
       payment_method: formData.get('payment_method'),
@@ -378,7 +430,7 @@ export default function Sales() {
     });
   };
 
-  const handleUpdate = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!editingSale) return;
     const formData = new FormData(e.currentTarget);
@@ -387,13 +439,64 @@ export default function Sales() {
     const firstInstallmentDate = formData.get('first_installment_date');
     const cleanFirstDate = firstInstallmentDate && typeof firstInstallmentDate === 'string' && firstInstallmentDate.trim() !== '' ? firstInstallmentDate.toString().trim() : null;
 
+    const formClientId = (formData.get('client_id') as string)?.trim() || selectedClientId || '';
+    const existingClient = getSaleClient(editingSale, clients);
+
+    let targetClientId = formClientId;
+    let targetClientObj = clients.find(c => c && String(c.id) === String(targetClientId)) || null;
+
+    if (isCreatingNewClient) {
+      if (!newClientName.trim()) {
+        toast.error('Por favor, informe o nome do novo cliente.');
+        return;
+      }
+      try {
+        const created = await db.clients.create({
+          name: newClientName.trim(),
+          phone: newClientPhone.trim(),
+          cpf: newClientCpf.trim(),
+        });
+        targetClientId = String(created.id);
+        targetClientObj = created;
+        setSelectedClientId(String(created.id));
+        queryClient.invalidateQueries({ queryKey: ['clients'] });
+        toast.success(`Cliente "${created.name}" cadastrado e vinculado com sucesso!`);
+      } catch (err: any) {
+        toast.error('Erro ao cadastrar novo cliente: ' + (err.message || 'Erro desconhecido'));
+        return;
+      }
+    }
+
+    if (!targetClientId && !isCreatingNewClient && existingClient) {
+      targetClientId = String(existingClient.id || '');
+      targetClientObj = existingClient;
+    }
+
+    const finalClientName = targetClientObj?.name || (isCreatingNewClient ? newClientName.trim() : '') || existingClient?.name || editingSale.client_name || editingSale.client?.name || '';
+    const finalClientPhone = targetClientObj?.phone || (isCreatingNewClient ? newClientPhone.trim() : '') || existingClient?.phone || editingSale.client_phone || editingSale.client?.phone || '';
+    const finalClientCpf = targetClientObj?.cpf || (isCreatingNewClient ? newClientCpf.trim() : '') || existingClient?.cpf || editingSale.client_cpf || editingSale.client?.cpf || '';
+    const finalClientAddress = targetClientObj?.address || existingClient?.address || editingSale.client_address || editingSale.client?.address || '';
+
+    const finalClientObj = targetClientObj || existingClient || (finalClientName ? {
+      id: targetClientId || 'client-obj',
+      name: finalClientName,
+      phone: finalClientPhone,
+      cpf: finalClientCpf,
+      address: finalClientAddress
+    } : null);
+
     updateMutation.mutate({
       id: editingSale.id,
       data: {
         iphone_id: firstIphone || null,
         console_id: firstConsole || null,
         items: cartItems,
-        client_id: formData.get('client_id'),
+        client_id: targetClientId || editingSale.client_id || '',
+        client_name: finalClientName,
+        client_phone: finalClientPhone,
+        client_cpf: finalClientCpf,
+        client_address: finalClientAddress,
+        client: finalClientObj,
         sell_price: tempPrice > 0 ? tempPrice : Number(formData.get('sell_price')),
         down_payment: Number(formData.get('down_payment')) || 0,
         payment_method: formData.get('payment_method'),
@@ -405,8 +508,9 @@ export default function Sales() {
     });
   };
 
-  const availableIphones = iphones.filter(i => (i.status === 'disponivel' || editingSale?.iphone_id === i.id) && !cartItems.some(ci => ci.id === i.id));
-  const availableConsoles = consoles.filter(c => (c.status === 'disponivel' || editingSale?.console_id === c.id) && !cartItems.some(ci => ci.id === c.id));
+  const availableIphones = iphones.filter(i => (!cartItems.some(ci => ci.id === i.id)) && (i.status === 'disponivel' || !!editingSale || i.id === editingSale?.iphone_id));
+  const availableConsoles = consoles.filter(c => (!cartItems.some(ci => ci.id === c.id)) && (c.status === 'disponivel' || !!editingSale || c.id === editingSale?.console_id));
+  const availableGifts = gifts.filter(g => (!cartItems.some(ci => ci.id === g.id)) && (g.status === 'disponivel' || !!editingSale));
 
   const filteredSales = sales.filter(sale => {
     if (!startDate || !endDate) return true;
@@ -455,6 +559,11 @@ export default function Sales() {
             onClick={() => {
               setIsAdding(!isAdding);
               setEditingSale(null);
+              setSelectedClientId('');
+              setIsCreatingNewClient(false);
+              setNewClientName('');
+              setNewClientPhone('');
+              setNewClientCpf('');
               setTempPrice(0);
               setTempDownPayment(0);
               setTempInstallments(1);
@@ -566,20 +675,20 @@ export default function Sales() {
                     <option value="">Selecione um produto do estoque...</option>
                     {selectedProductType === 'iphone' && availableIphones.map(i => (
                       <option key={i.id} value={i.id}>
-                        {i.model} - {i.storage} ({i.color}) — {formatBRL(Number(i.sell_price || 0))}
+                        {i.model} - {i.storage} ({i.color}) — {formatBRL(Number(i.sell_price || 0))} {i.status === 'vendido' ? '(Vendido)' : ''}
                       </option>
                     ))}
                     {selectedProductType === 'console' && availableConsoles.map(c => {
                       const cat = c.category === 'tv' ? 'TV' : (c.category === 'rice_cooker' ? 'Panela' : (c.category === 'outro' ? 'Eletro' : 'Console'));
                       return (
                         <option key={c.id} value={c.id}>
-                          [{cat}] {c.model} - {c.version} — {formatBRL(Number(c.sell_price || 0))}
+                          [{cat}] {c.model} - {c.version} — {formatBRL(Number(c.sell_price || 0))} {c.status === 'vendido' ? '(Vendido)' : ''}
                         </option>
                       );
                     })}
-                    {selectedProductType === 'gift' && gifts.map(g => (
+                    {selectedProductType === 'gift' && availableGifts.map(g => (
                       <option key={g.id} value={g.id}>
-                        {g.name} — {formatBRL(Number(g.sell_price || 0))}
+                        {g.name} — {formatBRL(Number(g.sell_price || 0))} {g.status === 'vendido' ? '(Vendido)' : ''}
                       </option>
                     ))}
                   </select>
@@ -631,17 +740,30 @@ export default function Sales() {
                         key={`${item.id}-${idx}`}
                         className="flex items-center justify-between p-3 rounded-xl border bg-background text-xs shadow-xs hover:border-primary/50 transition"
                       >
-                        <div className="flex items-center gap-2.5 overflow-hidden">
+                        <div className="flex items-center gap-2.5 overflow-hidden flex-1 min-w-0 mr-2">
                           <span className={cn(
                             "p-2 rounded-lg shrink-0",
                             item.type === 'iphone' ? "bg-blue-500/10 text-blue-500" : (item.type === 'console' ? "bg-purple-500/10 text-purple-500" : "bg-amber-500/10 text-amber-500")
                           )}>
                             {item.type === 'iphone' ? <Smartphone className="h-4 w-4" /> : (item.type === 'console' ? <Gamepad2 className="h-4 w-4" /> : <Gift className="h-4 w-4" />)}
                           </span>
-                          <div className="truncate">
+                          <div className="truncate flex-1 min-w-0">
                             <div className="font-bold text-foreground truncate">{item.name}</div>
-                            <div className="text-[11px] font-mono text-emerald-500 font-bold">
-                              {formatBRL(item.price)}
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-[10px] text-muted-foreground font-semibold shrink-0">Preço R$:</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={item.price}
+                                onChange={(e) => {
+                                  const newPrice = Number(e.target.value);
+                                  const updated = cartItems.map((ci, iIdx) => iIdx === idx ? { ...ci, price: newPrice } : ci);
+                                  setCartItems(updated);
+                                  const newTotal = updated.reduce((sum, ci) => sum + (ci.price * (ci.quantity || 1)), 0);
+                                  setTempPrice(newTotal);
+                                }}
+                                className="w-24 p-0.5 px-1.5 text-xs border rounded font-mono font-bold text-emerald-600 bg-background focus:ring-1 focus:ring-primary focus:outline-none"
+                              />
                             </div>
                           </div>
                         </div>
@@ -649,7 +771,7 @@ export default function Sales() {
                         <button
                           type="button"
                           onClick={() => handleRemoveFromCart(idx)}
-                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition cursor-pointer shrink-0 ml-2"
+                          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition cursor-pointer shrink-0 ml-1"
                           title="Remover produto da venda"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -663,14 +785,90 @@ export default function Sales() {
 
             {/* Sale Financial and Payment Details */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Cliente</label>
-                <select name="client_id" defaultValue={editingSale?.client_id} required className="w-full p-2 border rounded-md bg-background">
-                  <option value="">Selecione...</option>
-                  {clients.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+              <div className="space-y-2 md:col-span-2 bg-muted/20 border border-border/60 p-3 rounded-xl">
+                <div className="flex justify-between items-center">
+                  <label className="text-sm font-bold flex items-center gap-1.5">
+                    Cliente {editingSale && getSaleClient(editingSale, clients)?.name && (
+                      <span className="text-xs text-primary font-medium">
+                        ({getSaleClient(editingSale, clients)?.name})
+                      </span>
+                    )}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCreatingNewClient(!isCreatingNewClient);
+                      setNewClientName('');
+                      setNewClientPhone('');
+                      setNewClientCpf('');
+                    }}
+                    className="text-xs text-primary hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    {isCreatingNewClient ? '← Selecionar da Lista' : '+ Novo Cliente Rápido'}
+                  </button>
+                </div>
+
+                {isCreatingNewClient ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground block mb-0.5">Nome do Cliente *</label>
+                      <input
+                        type="text"
+                        placeholder="Nome completo..."
+                        value={newClientName}
+                        onChange={(e) => setNewClientName(e.target.value)}
+                        required={isCreatingNewClient}
+                        className="w-full p-2 border rounded-md text-xs bg-background font-medium focus:ring-2 focus:ring-primary focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground block mb-0.5">Telefone / WhatsApp</label>
+                      <input
+                        type="text"
+                        placeholder="(00) 00000-0000"
+                        value={newClientPhone}
+                        onChange={(e) => setNewClientPhone(e.target.value)}
+                        className="w-full p-2 border rounded-md text-xs bg-background font-medium focus:ring-2 focus:ring-primary focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground block mb-0.5">CPF</label>
+                      <input
+                        type="text"
+                        placeholder="000.000.000-00"
+                        value={newClientCpf}
+                        onChange={(e) => setNewClientCpf(e.target.value)}
+                        className="w-full p-2 border rounded-md text-xs bg-background font-medium focus:ring-2 focus:ring-primary focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <select 
+                    name="client_id" 
+                    value={selectedClientId} 
+                    onChange={(e) => setSelectedClientId(e.target.value)}
+                    required={!isCreatingNewClient}
+                    className="w-full p-2 border rounded-md bg-background text-sm font-medium"
+                  >
+                    <option value="">Selecione um cliente cadastrado...</option>
+                    {(() => {
+                      const activeClient = editingSale ? getSaleClient(editingSale, clients) : null;
+                      if (activeClient && activeClient.id && !clients.some(c => String(c.id) === String(activeClient.id))) {
+                        return (
+                          <option value={String(activeClient.id)}>
+                            {activeClient.name} {activeClient.phone ? `(${activeClient.phone})` : ''}
+                          </option>
+                        );
+                      }
+                      return null;
+                    })()}
+                    {clients.map(c => (
+                      <option key={c.id} value={String(c.id)}>
+                        {c.name} {c.phone ? `(${c.phone})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -768,7 +966,16 @@ export default function Sales() {
             <div className="flex justify-end gap-2 pt-2 border-t border-border/50">
               <button 
                 type="button" 
-                onClick={() => { setIsAdding(false); setEditingSale(null); setCartItems([]); }} 
+                onClick={() => {
+                  setIsAdding(false);
+                  setEditingSale(null);
+                  setSelectedClientId('');
+                  setIsCreatingNewClient(false);
+                  setNewClientName('');
+                  setNewClientPhone('');
+                  setNewClientCpf('');
+                  setCartItems([]);
+                }} 
                 className="bg-muted hover:bg-muted/80 text-muted-foreground px-4 py-2 rounded-md font-medium transition cursor-pointer"
               >
                 Cancelar
@@ -828,7 +1035,7 @@ export default function Sales() {
             </thead>
             <tbody className="divide-y">
               {filteredSales.map((sale) => {
-                const client = clients.find(c => c.id === sale.client_id);
+                const client = getSaleClient(sale, clients);
                 const iphone = iphones.find(i => i.id === sale.iphone_id) || (
                   (sale.id === '7ab8846f-1d26-4591-908c-b8fa6742edfb' || (client?.name || sale.client_name || '').toLowerCase().includes('paula'))
                     ? iphones.find(i => i.id === '089025de-e939-432c-8204-29f95ed02821' || i.model?.toLowerCase().includes('poco x6'))
@@ -918,7 +1125,68 @@ export default function Sales() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <span>{client?.name || 'N/A'}</span>
+                        <span className="font-semibold text-foreground">
+                          {client?.name ? (
+                            client.name
+                          ) : (
+                            <span className="text-amber-600 font-bold flex items-center gap-1">
+                              N/A (Sem Cliente)
+                            </span>
+                          )}
+                        </span>
+                        {!client?.name && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingSale(sale);
+                              setIsAdding(false);
+                              const sc = getSaleClient(sale, clients);
+                              setSelectedClientId(sc?.id ? String(sc.id) : (sale.client_id ? String(sale.client_id) : ''));
+                              setIsCreatingNewClient(false);
+                              setNewClientName('');
+                              setNewClientPhone('');
+                              setNewClientCpf('');
+                              setTempPrice(sale.sell_price);
+                              setTempDownPayment(sale.down_payment || 0);
+                              setTempInstallments(sale.installments || 1);
+                              if (sale.items && Array.isArray(sale.items) && sale.items.length > 0) {
+                                setCartItems(sale.items);
+                              } else {
+                                const existingItems = [];
+                                if (sale.iphone_id) {
+                                  const found = iphones.find(i => i.id === sale.iphone_id);
+                                  if (found) {
+                                    existingItems.push({
+                                      type: 'iphone' as const,
+                                      id: found.id,
+                                      name: `iPhone ${found.model} - ${found.storage} (${found.color})`,
+                                      price: Number(sale.sell_price),
+                                      quantity: 1,
+                                      cost_price: Number(found.buy_price || 0)
+                                    });
+                                  }
+                                } else if (sale.console_id) {
+                                  const found = consoles.find(c => c.id === sale.console_id);
+                                  if (found) {
+                                    existingItems.push({
+                                      type: 'console' as const,
+                                      id: found.id,
+                                      name: `[Console] ${found.model} - ${found.version}`,
+                                      price: Number(sale.sell_price),
+                                      quantity: 1,
+                                      cost_price: Number(found.buy_price || 0)
+                                    });
+                                  }
+                                }
+                                setCartItems(existingItems);
+                              }
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="text-[11px] bg-primary/10 hover:bg-primary text-primary hover:text-primary-foreground font-bold px-2 py-0.5 rounded-md transition-colors w-fit my-1 flex items-center gap-1 cursor-pointer"
+                          >
+                            <Plus className="h-3 w-3" /> + Add Cliente
+                          </button>
+                        )}
                         {(sale.signature_data || sale.signed_at) ? (
                           <span className="text-[10px] font-medium text-emerald-600 flex items-center gap-1 mt-1 bg-emerald-50 w-fit px-1.5 py-0.5 rounded">
                             <CheckCircle2 className="h-3 w-3" /> Assinado
@@ -1081,6 +1349,12 @@ export default function Sales() {
                           onClick={() => {
                             setEditingSale(sale);
                             setIsAdding(false);
+                            const sc = getSaleClient(sale, clients);
+                            setSelectedClientId(sc?.id ? String(sc.id) : (sale.client_id ? String(sale.client_id) : ''));
+                            setIsCreatingNewClient(false);
+                            setNewClientName('');
+                            setNewClientPhone('');
+                            setNewClientCpf('');
                             setTempPrice(sale.sell_price);
                             setTempDownPayment(sale.down_payment || 0);
                             setTempInstallments(sale.installments || 1);
@@ -1090,28 +1364,28 @@ export default function Sales() {
                               const existingItems = [];
                               if (sale.iphone_id) {
                                 const found = iphones.find(i => i.id === sale.iphone_id);
-                                if (found) {
-                                  existingItems.push({
-                                    type: 'iphone' as const,
-                                    id: found.id,
-                                    name: `iPhone ${found.model} - ${found.storage} (${found.color})`,
-                                    price: Number(sale.sell_price),
-                                    quantity: 1,
-                                    cost_price: Number(found.buy_price || 0)
-                                  });
-                                }
+                                existingItems.push({
+                                  type: 'iphone' as const,
+                                  id: sale.iphone_id,
+                                  name: found 
+                                    ? `iPhone ${found.model} - ${found.storage} (${found.color})` 
+                                    : (sale.iphone?.model ? `iPhone ${sale.iphone.model} - ${sale.iphone.storage || ''}` : (sale.item_name || 'iPhone (Venda Finalizada)')),
+                                  price: Number(sale.sell_price),
+                                  quantity: 1,
+                                  cost_price: Number(found?.buy_price || sale.buy_price || 0)
+                                });
                               } else if (sale.console_id) {
                                 const found = consoles.find(c => c.id === sale.console_id);
-                                if (found) {
-                                  existingItems.push({
-                                    type: 'console' as const,
-                                    id: found.id,
-                                    name: `[Console] ${found.model} - ${found.version}`,
-                                    price: Number(sale.sell_price),
-                                    quantity: 1,
-                                    cost_price: Number(found.buy_price || 0)
-                                  });
-                                }
+                                existingItems.push({
+                                  type: 'console' as const,
+                                  id: sale.console_id,
+                                  name: found 
+                                    ? `[Console] ${found.model} - ${found.version}` 
+                                    : (sale.console?.model ? `[Console] ${sale.console.model} - ${sale.console.version || ''}` : (sale.item_name || 'Console (Venda Finalizada)')),
+                                  price: Number(sale.sell_price),
+                                  quantity: 1,
+                                  cost_price: Number(found?.buy_price || sale.buy_price || 0)
+                                });
                               }
                               setCartItems(existingItems);
                             }

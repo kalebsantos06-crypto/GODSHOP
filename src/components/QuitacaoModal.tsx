@@ -29,9 +29,9 @@ export default function QuitacaoModal({
 
   if (!isOpen || !sale) return null;
 
-  const clientName = client?.name || 'Cliente';
-  const clientCpf = client?.cpf || 'Não informado';
-  const clientPhone = client?.phone || '';
+  const clientName = client?.name || sale?.client_name || sale?.client?.name || 'Cliente';
+  const clientCpf = client?.cpf || sale?.client_cpf || sale?.client?.cpf || 'Não informado';
+  const clientPhone = client?.phone || sale?.client_phone || sale?.client?.phone || sale?.phone || '';
 
   const itemName = iphone
     ? `${iphone.model} ${iphone.storage || ''} (${iphone.color || ''})`

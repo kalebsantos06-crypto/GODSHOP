@@ -205,6 +205,70 @@ export function getCalculatedInstallments(
 }
 
 /**
+ * Robustly resolves client information for a sale across ID, embedded objects, name, or flat fields.
+ */
+export function getSaleClient(sale: any, clientsList: any[] = []) {
+  if (!sale) return null;
+
+  // 1. Match by client_id in clients list
+  if (sale.client_id && clientsList && clientsList.length > 0) {
+    const foundById = clientsList.find((c: any) => c && c.id === sale.client_id);
+    if (foundById) return foundById;
+  }
+
+  // 2. Embedded client object on sale
+  if (sale.client && typeof sale.client === 'object' && (sale.client.name || sale.client.phone)) {
+    return {
+      id: sale.client_id || sale.client.id || 'embedded',
+      name: sale.client.name || sale.client_name || 'Cliente',
+      phone: sale.client.phone || sale.client_phone || sale.phone || '',
+      cpf: sale.client.cpf || sale.client_cpf || sale.cpf || '',
+      email: sale.client.email || sale.client_email || '',
+      address: sale.client.address || sale.client_address || '',
+      city: sale.client.city || sale.client_city || '',
+      state: sale.client.state || sale.client_state || ''
+    };
+  }
+
+  // 3. Match by name in clients list
+  const saleName = sale.client_name || sale.client?.name;
+  if (saleName && clientsList && clientsList.length > 0) {
+    const foundByName = clientsList.find((c: any) => c && c.name?.trim().toLowerCase() === saleName.trim().toLowerCase());
+    if (foundByName) return foundByName;
+  }
+
+  // 4. Match by CPF or Phone in clients list
+  const saleCpf = sale.client_cpf || sale.client?.cpf;
+  const salePhone = sale.client_phone || sale.client?.phone || sale.phone;
+  if (clientsList && clientsList.length > 0) {
+    if (saleCpf) {
+      const foundByCpf = clientsList.find((c: any) => c && c.cpf && c.cpf.replace(/\D/g, '') === saleCpf.replace(/\D/g, ''));
+      if (foundByCpf) return foundByCpf;
+    }
+    if (salePhone) {
+      const foundByPhone = clientsList.find((c: any) => c && c.phone && c.phone.replace(/\D/g, '') === salePhone.replace(/\D/g, ''));
+      if (foundByPhone) return foundByPhone;
+    }
+  }
+
+  // 5. Flat fields on sale record
+  if (sale.client_name || sale.client_phone || sale.client_cpf) {
+    return {
+      id: sale.client_id || 'flat',
+      name: sale.client_name || 'Cliente Sem Nome',
+      phone: sale.client_phone || sale.phone || '',
+      cpf: sale.client_cpf || sale.cpf || '',
+      email: sale.client_email || sale.email || '',
+      address: sale.client_address || sale.address || '',
+      city: sale.client_city || sale.city || '',
+      state: sale.client_state || sale.state || ''
+    };
+  }
+
+  return null;
+}
+
+/**
  * Compiles real-time installment notifications across all sales.
  */
 export function getSaleNotifications(
@@ -222,7 +286,7 @@ export function getSaleNotifications(
     if (!sale.installments || Number(sale.installments) <= 1) continue;
 
     const calculatedList = getCalculatedInstallments(sale);
-    const client = clientsList.find((c: any) => c.id === sale.client_id);
+    const client = getSaleClient(sale, clientsList);
     const iphone = iphonesList.find((p: any) => p.id === sale.iphone_id);
     const consoleObj = consolesList.find((p: any) => p.id === sale.console_id);
 
