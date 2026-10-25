@@ -111,8 +111,54 @@ export async function compressBase64Image(
 }
 
 /**
+ * Emergency pruning function to free up localStorage when quota is reached
+ */
+export function pruneLocalStorageQuota() {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      // Remove heavy non-essential keys
+      if (k.startsWith('db_fallback_product_photos') || k.startsWith('auto_sent_logs') || k.startsWith('godshop_auto_backup')) {
+        keysToRemove.push(k);
+      }
+    }
+    for (const k of keysToRemove) {
+      try { localStorage.removeItem(k); } catch (e) {}
+    }
+
+    // Sanitize any array fallback items in localStorage
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('db_fallback_')) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw && raw.length > 30000) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const sliced = parsed.slice(-20).map(item => {
+                if (!item || typeof item !== 'object') return item;
+                const copy = { ...item };
+                delete copy.signature_data;
+                delete copy.witness1_signature;
+                delete copy.witness2_signature;
+                delete copy.photo_base64;
+                return copy;
+              });
+              localStorage.setItem(k, JSON.stringify(sliced));
+            }
+          }
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+}
+
+/**
  * Safely sets an item in localStorage, catching QuotaExceededError.
- * Returns true if saved, false if failed due to storage limits.
+ * Auto-prunes and sanitizes heavy cache entries on quota exhaustion.
  */
 export function safeSetLocalStorage(key: string, value: string): boolean {
   if (typeof window === 'undefined' || !window.localStorage) {
@@ -129,7 +175,66 @@ export function safeSetLocalStorage(key: string, value: string): boolean {
       err?.code === 22 || 
       err?.code === 1014;
 
-    console.warn(`[StorageQuota] Failed to set '${key}' (quota exceeded: ${isQuotaError}):`, err?.message || err);
+    if (isQuotaError) {
+      // 1. Emergency quota pruning
+      pruneLocalStorageQuota();
+
+      // 2. Sanitize value if it's JSON containing heavy base64 strings or large array
+      let cleanValue = value;
+      try {
+        if (value.startsWith('[') && (value.includes('data:image/') || value.length > 20000)) {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) {
+            const sanitizedArr = parsed.slice(-20).map(item => {
+              if (!item || typeof item !== 'object') return item;
+              const copy = { ...item };
+              if (typeof copy.signature_data === 'string' && copy.signature_data.length > 100) {
+                copy.signature_data = '[truncated]';
+              }
+              if (typeof copy.witness1_signature === 'string' && copy.witness1_signature.length > 100) {
+                copy.witness1_signature = '[truncated]';
+              }
+              if (typeof copy.witness2_signature === 'string' && copy.witness2_signature.length > 100) {
+                copy.witness2_signature = '[truncated]';
+              }
+              if (typeof copy.photo_base64 === 'string' && copy.photo_base64.length > 100) {
+                copy.photo_base64 = '[truncated]';
+              }
+              return copy;
+            });
+            cleanValue = JSON.stringify(sanitizedArr);
+          }
+        }
+      } catch (e) {}
+
+      // 3. Retry setting item
+      try {
+        localStorage.setItem(key, cleanValue);
+        return true;
+      } catch (retryErr) {
+        // 4. Final attempt: slice array to latest 10 items without heavy fields
+        try {
+          if (cleanValue.startsWith('[')) {
+            const parsed = JSON.parse(cleanValue);
+            if (Array.isArray(parsed)) {
+              const miniArr = parsed.slice(-10).map(item => {
+                if (!item || typeof item !== 'object') return item;
+                const copy = { ...item };
+                delete copy.signature_data;
+                delete copy.witness1_signature;
+                delete copy.witness2_signature;
+                delete copy.photo_base64;
+                return copy;
+              });
+              localStorage.setItem(key, JSON.stringify(miniArr));
+              return true;
+            }
+          }
+        } catch (finalErr) {}
+      }
+    }
+
+    // Gracefully report cloud database fallback mode without throwing/warning repeatedly
     return false;
   }
 }

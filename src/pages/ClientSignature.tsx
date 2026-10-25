@@ -87,8 +87,13 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
       console.warn('Server API fetchContract failed, trying Supabase fallback:', err);
     }
 
-    // 2. Fallback reading from Supabase public_sales table directly
+    // 2. Fallback reading from Supabase public_sales table directly (skip if id is pairing code)
     try {
+      if (!id || id.startsWith('pair_')) {
+        setLoading(false);
+        return;
+      }
+
       const { data: dbData, error: dbErr } = await supabase
         .from('public_sales')
         .select('*')

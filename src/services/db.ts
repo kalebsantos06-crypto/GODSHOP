@@ -135,9 +135,39 @@ const scheduleCloudPush = () => {
   }, 200);
 };
 
+const sanitizeForLocalStorage = (table: string, data: any[]): any[] => {
+  if (!Array.isArray(data)) return [];
+  const sliced = data.slice(-40);
+  return sliced.map(item => {
+    if (!item) return item;
+    const copy = { ...item };
+    if (table === 'sales') {
+      // Do NOT truncate signature_data anymore, as it's needed for PDFs and offline visibility
+    }
+    if (table === 'product_photos') {
+      if (copy.photo_base64 && typeof copy.photo_base64 === 'string' && copy.photo_base64.length > 1000) {
+        copy.photo_base64 = '[truncated]';
+      }
+    }
+    return copy;
+  });
+};
+
 const setLocalData = (table: string, data: any[]) => {
   try {
-    localStorage.setItem(`db_fallback_${table}`, JSON.stringify(data));
+    const sanitized = sanitizeForLocalStorage(table, data);
+    let jsonStr = JSON.stringify(sanitized);
+    let saved = safeSetLocalStorage(`db_fallback_${table}`, jsonStr);
+    if (!saved && sanitized.length > 15) {
+      const trimmed = sanitized.slice(-15);
+      jsonStr = JSON.stringify(trimmed);
+      saved = safeSetLocalStorage(`db_fallback_${table}`, jsonStr);
+    }
+    if (!saved) {
+      try {
+        localStorage.removeItem(`db_fallback_${table}`);
+      } catch (err) {}
+    }
     broadcastLocalChange(table);
     // Automatically replicate change to Cloud Server in the background
     scheduleCloudPush();
@@ -196,9 +226,20 @@ export const getCloudApiUrl = (endpoint: string): string => {
     }
   }
   if (!baseUrl) {
+    // Default fallback to the latest known production URL for this project
     baseUrl = 'https://ais-dev-vaaqegsewou44zzapwefq3-387330212853.us-west2.run.app';
+    
+    // If we're on a browser, try current origin as a last resort
+    if (typeof window !== 'undefined' && window.location.origin.startsWith('http')) {
+      const currentOrigin = window.location.origin;
+      if (!currentOrigin.includes('localhost') && !currentOrigin.includes('127.0.0.1')) {
+         baseUrl = currentOrigin;
+      }
+    }
   }
-  return `${baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+  const cleanBase = baseUrl.replace(/\/$/, '');
+  const cleanEnd = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  return `${cleanBase}${cleanEnd}`;
 };
 
 export const notifyDataMutation = (table: string, action: 'create' | 'update' | 'delete', item?: any) => {
@@ -437,9 +478,9 @@ export const db = {
   // Pull all tables and settings from server cloud database to local storage (for new devices or refresh)
   pullFromCloud: async (): Promise<{ success: boolean; message: string; count?: number; hasChanged?: boolean }> => {
     try {
-      const cloudData = await cloudApi.pullAll();
-      if (!cloudData) {
-        // When server endpoint is unavailable, continue safely in resilient local mode
+      let cloudData = await cloudApi.pullAll() || {};
+
+      if (!cloudData || Object.keys(cloudData).length === 0) {
         return { success: true, message: 'Operando em modo local resiliente.', count: 0, hasChanged: false };
       }
 
@@ -480,6 +521,11 @@ export const db = {
               let merged = cloudTime >= localTime
                 ? { ...existing, ...item }
                 : { ...item, ...existing };
+                
+              // If incoming from cloud is missing fields that local has, protect them if local is newer
+              if (localTime > cloudTime) {
+                merged = { ...item, ...existing };
+              }
 
               // Special handling for sales: protect installments paid and installment payment schedule
               if (table === 'sales') {
@@ -514,7 +560,7 @@ export const db = {
                   if (Object.keys(mergedCust).length > 0) {
                     merged.custom_payments = JSON.stringify(mergedCust);
                     if (typeof window !== 'undefined') {
-                      localStorage.setItem(`inst_payments_${item.id}`, JSON.stringify(mergedCust));
+                      safeSetLocalStorage(`inst_payments_${item.id}`, JSON.stringify(mergedCust));
                     }
                   }
                 } catch (e) {}
@@ -573,8 +619,7 @@ export const db = {
         const mergedJson = JSON.stringify(merged);
 
         if (localJson !== mergedJson) {
-          localStorage.setItem(`db_fallback_${table}`, mergedJson);
-          broadcastLocalChange(table);
+          setLocalData(table, merged);
           hasChanged = true;
         }
         totalImported += merged.length;
@@ -608,7 +653,7 @@ export const db = {
                 } catch (e) {}
               }
               if (current !== mergedJson) {
-                localStorage.setItem(`inst_payments_${saleId}`, mergedJson);
+                safeSetLocalStorage(`inst_payments_${saleId}`, mergedJson);
                 hasChanged = true;
               }
             }
@@ -976,10 +1021,11 @@ export const db = {
           console.warn('Could not update price in Supabase, continuing with local update:', dbErr);
         }
 
+        const now = new Date().toISOString();
         const local = getLocalData('prices');
-        setLocalData('prices', local.map(item => item.id === id ? { ...item, ...data } : item));
-        cloudApi.updateItem('prices', id, updateData).catch(err => console.warn('[Cloud Update Price] Warn:', err));
-        notifyDataMutation('prices', 'update', { id, ...data });
+        setLocalData('prices', local.map(item => item.id === id ? { ...item, ...data, updated_at: now } : item));
+        cloudApi.updateItem('prices', id, { ...updateData, updated_at: now }).catch(err => console.warn('[Cloud Update Price] Warn:', err));
+        notifyDataMutation('prices', 'update', { id, ...data, updated_at: now });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1176,10 +1222,11 @@ export const db = {
           console.warn('Could not update iphone in Supabase, continuing with local update:', dbErr);
         }
 
+        const now = new Date().toISOString();
         const local = getLocalData('iphones');
-        setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data } : item));
-        cloudApi.updateItem('iphones', id, updateData).catch(err => console.warn('[Cloud Update iPhone] Warn:', err));
-        notifyDataMutation('iphones', 'update', { id, ...data });
+        setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data, updated_at: now } : item));
+        cloudApi.updateItem('iphones', id, { ...updateData, updated_at: now }).catch(err => console.warn('[Cloud Update iPhone] Warn:', err));
+        notifyDataMutation('iphones', 'update', { id, ...data, updated_at: now });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1229,12 +1276,18 @@ export const db = {
         }
         for (const item of local) {
           if (item && item.id && !deletedIds.includes(item.id)) {
-            if (!map.has(item.id)) {
+            const existing = map.get(item.id);
+            if (!existing) {
               map.set(item.id, item);
             } else {
-              // Merge details
-              const existing = map.get(item.id)!;
-              map.set(item.id, { ...item, ...existing });
+              const localTime = new Date(item.updated_at || item.created_at || 0).getTime();
+              const dbTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
+              
+              if (localTime > dbTime) {
+                map.set(item.id, { ...existing, ...item });
+              } else {
+                map.set(item.id, { ...item, ...existing });
+              }
             }
           }
         }
@@ -1364,18 +1417,19 @@ export const db = {
           (cleanEmail && l.email && l.email.trim().toLowerCase() === cleanEmail)
         );
 
+        const now = new Date().toISOString();
         if (localExisting) {
           console.log(`Local existing client found. Updating...`);
           const updatedLocalList = local.map(item => 
-            item.id === localExisting.id ? { ...item, ...data } : item
+            item.id === localExisting.id ? { ...item, ...data, updated_at: now } : item
           );
           setLocalData('clients', updatedLocalList);
-          const updated = { ...localExisting, ...data } as Client;
+          const updated = { ...localExisting, ...data, updated_at: now } as Client;
           cloudApi.upsertItem('clients', updated).catch(err => console.warn('[Cloud Upsert Client] Warn:', err));
           notifyDataMutation('clients', 'update', updated);
           return updated;
         } else {
-          const newItem = { ...data, id } as Client;
+          const newItem = { ...data, id, updated_at: now, created_at: now } as Client;
           setLocalData('clients', [...local, newItem]);
           cloudApi.upsertItem('clients', newItem).catch(err => console.warn('[Cloud Upsert Client] Warn:', err));
           notifyDataMutation('clients', 'create', newItem);
@@ -1394,28 +1448,32 @@ export const db = {
         }
 
         try {
-          const { error } = await supabase.from('clients').update(updateData).eq('id', id);
+          const now = new Date().toISOString();
+          const cleanDataForDb = { ...updateData, updated_at: now };
+          
+          const { error } = await supabase.from('clients').update(cleanDataForDb).eq('id', id);
           if (error) {
-            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna');
+            const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('updated_at');
             if (isColumnError) {
               const match = error.message?.match(/"([^"]+)"/);
               if (match && match[1]) {
                 if (!missingColumnsByTable['clients']) missingColumnsByTable['clients'] = new Set();
                 missingColumnsByTable['clients'].add(match[1]);
-                delete updateData[match[1]];
+                delete cleanDataForDb[match[1]];
               }
-              const { user_id, ...cleanData } = updateData;
-              await supabase.from('clients').update(cleanData).eq('id', id);
+              const { user_id, ...finalCleanData } = cleanDataForDb;
+              await supabase.from('clients').update(finalCleanData).eq('id', id);
             }
           }
         } catch (dbErr) {
           console.warn('Could not update client in Supabase, continuing with local update:', dbErr);
         }
 
+        const now = new Date().toISOString();
         const local = getLocalData('clients');
-        setLocalData('clients', local.map(item => item.id === id ? { ...item, ...data } : item));
-        cloudApi.updateItem('clients', id, updateData).catch(err => console.warn('[Cloud Update Client] Warn:', err));
-        notifyDataMutation('clients', 'update', { id, ...data });
+        setLocalData('clients', local.map(item => item.id === id ? { ...item, ...data, updated_at: now } : item));
+        cloudApi.updateItem('clients', id, { ...updateData, updated_at: now }).catch(err => console.warn('[Cloud Update Client] Warn:', err));
+        notifyDataMutation('clients', 'update', { id, ...data, updated_at: now });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1509,7 +1567,8 @@ export const db = {
         return newItem as Supplier;
       } catch (err: any) {
         notifyOffline(err);
-        const newItem = { ...data, id } as Supplier;
+        const now = new Date().toISOString();
+        const newItem = { ...data, id, updated_at: now, created_at: now } as Supplier;
         const local = getLocalData('suppliers');
         setLocalData('suppliers', [...local, newItem]);
         cloudApi.upsertItem('suppliers', newItem).catch(err => console.warn('[Cloud Upsert Supplier] Warn:', err));
@@ -1546,10 +1605,11 @@ export const db = {
           console.warn('Could not update supplier in Supabase, continuing with local update:', dbErr);
         }
 
+        const now = new Date().toISOString();
         const local = getLocalData('suppliers');
-        setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data } : item));
-        cloudApi.updateItem('suppliers', id, updateData).catch(err => console.warn('[Cloud Update Supplier] Warn:', err));
-        notifyDataMutation('suppliers', 'update', { id, ...data });
+        setLocalData('suppliers', local.map(item => item.id === id ? { ...item, ...data, updated_at: now } : item));
+        cloudApi.updateItem('suppliers', id, { ...updateData, updated_at: now }).catch(err => console.warn('[Cloud Update Supplier] Warn:', err));
+        notifyDataMutation('suppliers', 'update', { id, ...data, updated_at: now });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1693,7 +1753,8 @@ export const db = {
         if (isConnectionError(err)) {
           notifyOffline(err);
         }
-        const newItem = { ...data, id } as Console;
+        const now = new Date().toISOString();
+        const newItem = { ...data, id, updated_at: now, created_at: now } as Console;
         const local = getLocalData('consoles');
         setLocalData('consoles', [...local, newItem]);
         cloudApi.upsertItem('consoles', newItem).catch(err => console.warn('[Cloud Upsert Console] Warn:', err));
@@ -1743,11 +1804,12 @@ export const db = {
           console.warn('Could not update console in Supabase, continuing with local update:', dbErr);
         }
 
+        const now = new Date().toISOString();
         const local = getLocalData('consoles');
-        const updatedLocal = local.map(item => item.id === id ? { ...item, ...data } : item);
+        const updatedLocal = local.map(item => item.id === id ? { ...item, ...data, updated_at: now } : item);
         setLocalData('consoles', updatedLocal);
-        cloudApi.updateItem('consoles', id, updateData).catch(err => console.warn('[Cloud Update Console] Warn:', err));
-        notifyDataMutation('consoles', 'update', { id, ...data });
+        cloudApi.updateItem('consoles', id, { ...updateData, updated_at: now }).catch(err => console.warn('[Cloud Update Console] Warn:', err));
+        notifyDataMutation('consoles', 'update', { id, ...data, updated_at: now });
       } catch (err: any) {
         if (isConnectionError(err)) {
           notifyOffline(err);
@@ -1813,7 +1875,7 @@ export const db = {
           }
         }
 
-        const unsignedSaleIds = (data || []).filter(s => !s.signature_data || s.signature_data.length < 50 || !s.signed_at).map(s => s.id);
+        const unsignedSaleIds = (data || []).filter(s => s && s.id && !String(s.id).startsWith('pair_') && (!s.signature_data || s.signature_data.length < 50 || !s.signed_at)).map(s => s.id);
         if (unsignedSaleIds.length > 0) {
           try {
             const chunkSize = 50;

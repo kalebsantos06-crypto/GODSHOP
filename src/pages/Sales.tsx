@@ -21,6 +21,7 @@ import QuitacaoModal from '../components/QuitacaoModal';
 import { WhatsAppStatusType } from '../lib/whatsappUtils';
 import { Console } from '../types';
 import { cn } from '../lib/utils';
+import { safeSetLocalStorage } from '../utils/imageStorageUtils';
 
 export default function Sales() {
   const queryClient = useQueryClient();
@@ -439,11 +440,11 @@ export default function Sales() {
     const firstInstallmentDate = formData.get('first_installment_date');
     const cleanFirstDate = firstInstallmentDate && typeof firstInstallmentDate === 'string' && firstInstallmentDate.trim() !== '' ? firstInstallmentDate.toString().trim() : null;
 
-    const formClientId = (formData.get('client_id') as string)?.trim() || selectedClientId || '';
+    const formClientId = (formData.get('client_id') as string)?.trim() || selectedClientId || editingSale.client_id || '';
     const existingClient = getSaleClient(editingSale, clients);
 
-    let targetClientId = formClientId;
-    let targetClientObj = clients.find(c => c && String(c.id) === String(targetClientId)) || null;
+    let targetClientId = formClientId || existingClient?.id || '';
+    let targetClientObj = clients.find(c => c && String(c.id) === String(targetClientId)) || existingClient || null;
 
     if (isCreatingNewClient) {
       if (!newClientName.trim()) {
@@ -508,9 +509,9 @@ export default function Sales() {
     });
   };
 
-  const availableIphones = iphones.filter(i => (!cartItems.some(ci => ci.id === i.id)) && (i.status === 'disponivel' || !!editingSale || i.id === editingSale?.iphone_id));
-  const availableConsoles = consoles.filter(c => (!cartItems.some(ci => ci.id === c.id)) && (c.status === 'disponivel' || !!editingSale || c.id === editingSale?.console_id));
-  const availableGifts = gifts.filter(g => (!cartItems.some(ci => ci.id === g.id)) && (g.status === 'disponivel' || !!editingSale));
+  const availableIphones = iphones.filter(i => (!cartItems.some(ci => ci.id === i.id)));
+  const availableConsoles = consoles.filter(c => (!cartItems.some(ci => ci.id === c.id)));
+  const availableGifts = gifts.filter(g => (!cartItems.some(ci => ci.id === g.id)));
 
   const filteredSales = sales.filter(sale => {
     if (!startDate || !endDate) return true;
@@ -1126,11 +1127,11 @@ export default function Sales() {
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
                         <span className="font-semibold text-foreground">
-                          {client?.name ? (
-                            client.name
+                          {client?.name || sale.client_name || sale.client?.name ? (
+                            client?.name || sale.client_name || sale.client?.name
                           ) : (
-                            <span className="text-amber-600 font-bold flex items-center gap-1">
-                              N/A (Sem Cliente)
+                            <span className="text-muted-foreground font-medium">
+                              Cliente Geral
                             </span>
                           )}
                         </span>

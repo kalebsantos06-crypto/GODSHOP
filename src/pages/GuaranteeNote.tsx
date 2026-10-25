@@ -16,6 +16,7 @@ import LoadingScreen from '../components/LoadingScreen';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { checkAndRequestStoragePermission } from '../utils/permissionUtils';
+import { safeSetLocalStorage } from '../utils/imageStorageUtils';
 
 // Helper local storage accessors for robust sales fallback syncing
 const getLocalSales = () => {
@@ -29,7 +30,16 @@ const getLocalSales = () => {
 
 const setLocalSales = (sales: any[]) => {
   try {
-    localStorage.setItem('db_fallback_sales', JSON.stringify(sales));
+    const sliced = Array.isArray(sales) ? sales.slice(-40) : [];
+    const sanitized = sliced.map(s => {
+      if (!s) return s;
+      const copy = { ...s };
+      if (copy.signature_data && typeof copy.signature_data === 'string' && copy.signature_data.length > 500) {
+        copy.signature_data = copy.signature_data.substring(0, 100) + '...[truncated]';
+      }
+      return copy;
+    });
+    safeSetLocalStorage('db_fallback_sales', JSON.stringify(sanitized));
   } catch (e) {}
 };
 
@@ -259,7 +269,7 @@ export default function GuaranteeNote() {
   }, []);
 
   const checkSignature = async () => {
-    if (!id) return;
+    if (!id || id.startsWith('pair_')) return;
 
     // 1. Check Supabase 'public_sales' table first (Crucial for Capacitor APK/EXE where local Express /api is not present)
     try {
@@ -523,18 +533,95 @@ export default function GuaranteeNote() {
       const html2canvas = (await import('html2canvas-pro')).default;
       const { jsPDF } = await import('jspdf');
 
+      // Wait for all signature elements to be fully loaded
+      const waitForSignatures = async () => {
+        const signatureElements = Array.from(printContent.querySelectorAll('[data-signature-loaded]'));
+        let attempts = 0;
+        while (attempts < 25) {
+          const allLoaded = signatureElements.every(el => el.getAttribute('data-signature-loaded') === 'true');
+          if (allLoaded && signatureElements.length > 0) break;
+          // If no elements found yet but we expect them, wait a bit
+          if (signatureElements.length === 0 && attempts < 5) {
+             // Re-query in case they are mounting
+             const retryElements = Array.from(printContent.querySelectorAll('[data-signature-loaded]'));
+             if (retryElements.length > 0) {
+               attempts = 0; // reset
+               continue;
+             }
+          }
+          await new Promise(resolve => setTimeout(resolve, 200));
+          attempts++;
+        }
+      };
+      await waitForSignatures();
+
+      // Ensure we are at the top for better capture consistency
+      const originalScrollY = window.scrollY;
+      window.scrollTo(0, 0);
+
+      // Wait a bit for layout to settle
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       const canvas = await html2canvas(printContent, {
         scale: 2,
         useCORS: true,
         allowTaint: true,
-        logging: false,
+        logging: true, // Enable logging to debug capture issues
         backgroundColor: '#ffffff',
-        windowWidth: printContent.scrollWidth,
-        windowHeight: printContent.scrollHeight,
+        width: printContent.offsetWidth,
         height: printContent.scrollHeight,
+        windowWidth: 1200,
+        windowHeight: printContent.scrollHeight + 500,
+        y: 0,
+        x: 0,
+        scrollX: 0,
         scrollY: 0,
-        scrollX: 0
+        onclone: (clonedDoc, element) => {
+          // Force all images to be visible and ensure they are loaded in the clone
+          const images = Array.from(clonedDoc.getElementsByTagName('img'));
+          for (const img of images) {
+            img.style.visibility = 'visible';
+            img.style.display = 'block';
+            img.style.opacity = '1';
+            
+            // Ensure data URIs are not mangled
+            if (img.src.startsWith('data:')) {
+               // Nothing to do, they are already local
+            }
+          }
+          
+          // Ensure the signature wrappers are visible
+          const wrappers = clonedDoc.querySelectorAll('.signature-wrapper');
+          wrappers.forEach(w => {
+            const el = w as HTMLElement;
+            el.style.visibility = 'visible';
+            el.style.display = 'inline-block';
+            el.style.opacity = '1';
+          });
+
+          // Ensure the print container itself is fully visible and not clipped
+          if (element) {
+            element.style.height = 'auto';
+            element.style.maxHeight = 'none';
+            element.style.overflow = 'visible';
+            element.style.padding = '40px';
+            element.style.backgroundColor = '#ffffff';
+          }
+
+          // Force parent containers to not clip
+          let parent = element?.parentElement;
+          while (parent) {
+            parent.style.maxHeight = 'none';
+            parent.style.overflow = 'visible';
+            parent.style.height = 'auto';
+            parent = parent.parentElement;
+          }
+        }
       });
+
+      // Restore scroll position
+      window.scrollTo(0, originalScrollY);
+
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
@@ -638,7 +725,7 @@ export default function GuaranteeNote() {
 
   const signatureOrigin = getBaseUrl().replace('ais-dev-', 'ais-pre-');
   const signatureLink = `${signatureOrigin}/#/assinar/${id}`;
-  const currentSignatureData = signatureInfo?.signature_data || sale?.signature_data;
+  const currentSignatureData = signatureInfo?.signature_data || sale?.signature_data || client?.assinatura_base64;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -840,24 +927,28 @@ export default function GuaranteeNote() {
           </section>
 
           {/* Signatures */}
-          <div className="pt-12 grid grid-cols-2 gap-10 text-center border-t border-dashed">
-            <div className="pt-3 flex flex-col items-center">
-              <div className="h-16 flex items-center justify-center mb-1 w-full">
+          <div className="pt-12 grid grid-cols-2 gap-10 text-center border-t border-dashed opacity-100 visible" style={{ minHeight: '180px' }}>
+            <div className="pt-3 flex flex-col items-center justify-end">
+              <div className="min-h-[80px] flex items-center justify-center mb-2 w-full overflow-visible">
                 {currentSignatureData ? (
-                  <SignatureDisplay signatureData={currentSignatureData} signerName={signatureInfo?.client_name || client?.name} className="max-h-14 object-contain" />
+                  <SignatureDisplay signatureData={currentSignatureData} signerName={signatureInfo?.client_name || client?.name} className="w-full max-w-[280px] h-auto object-contain" />
                 ) : (
                   <span className="text-[11px] text-muted-foreground italic">(Pendente de Assinatura Digital)</span>
                 )}
               </div>
-              <p className="font-bold text-xs text-slate-900 uppercase">Comprador</p>
-              <p className="text-[10px] text-slate-600">{client?.name}</p>
-            </div>
-            <div className="pt-3 flex flex-col items-center">
-              <div className="h-16 flex items-center justify-center mb-1 w-full">
-                <span className="text-xl italic font-serif text-blue-900">Kaleb Santos</span>
+              <div className="border-t border-slate-300 w-4/5 mx-auto pt-1">
+                <p className="font-bold text-xs text-slate-900 uppercase">Comprador</p>
+                <p className="text-[10px] text-slate-600">{client?.name}</p>
               </div>
-              <p className="font-bold text-xs text-slate-900 uppercase">Vendedor</p>
-              <p className="text-[10px] text-slate-600">Kaleb Santos (GODSHOP)</p>
+            </div>
+            <div className="pt-3 flex flex-col items-center justify-end">
+              <div className="min-h-[80px] flex items-center justify-center mb-2 w-full">
+                <span className="text-2xl italic font-serif text-blue-900 font-bold">Kaleb Santos</span>
+              </div>
+              <div className="border-t border-slate-300 w-4/5 mx-auto pt-1">
+                <p className="font-bold text-xs text-slate-900 uppercase">Vendedor</p>
+                <p className="text-[10px] text-slate-600">Kaleb Santos (GODSHOP)</p>
+              </div>
             </div>
           </div>
         </div>

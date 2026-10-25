@@ -3,6 +3,10 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
+import { pruneLocalStorageQuota } from './utils/imageStorageUtils';
+
+// Auto-purge any stale legacy 5MB quota bloat from localStorage on app startup
+pruneLocalStorageQuota();
 
 // 1. Monkeypatch Node/Element prototypes to permanently eliminate React NotFoundError
 const protos = [

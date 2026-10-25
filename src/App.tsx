@@ -15,6 +15,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { initRealtimeSync } from './services/realtime';
 import { backgroundService } from './services/backgroundService';
 import LoadingScreen from './components/LoadingScreen';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Import all application route pages directly for maximum reliability and zero dynamic chunk loading failures
 import Dashboard from './pages/Dashboard';
@@ -177,10 +178,10 @@ function AppContent() {
     // Register sync task to run with background keep-alive
     const unregisterBgSync = backgroundService.registerSyncTask(performSync);
 
-    // High-frequency polling interval: syncs every 10 seconds for seamless multi-device parity
+    // High-frequency polling interval: syncs every 60 seconds for stability
     const interval = setInterval(() => {
       performSync();
-    }, 10000);
+    }, 60000);
 
     // Sync immediately when user switches tabs, clicks window, or unlocks their phone (throttled to 2s)
     let lastFocusSync = 0;
@@ -226,40 +227,42 @@ function AppContent() {
       window.removeEventListener('device_data_mutated', handleDeviceMutation);
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user?.id]); // Use user.id to avoid unnecessary re-triggers
 
   return (
     <>
       <Toaster position="top-right" richColors />
       <Suspense fallback={<PageLoadingFallback />}>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/assinar/:id" element={<ClientSignature />} />
-          <Route path="/cadastro-cliente" element={<ClientRemoteRegister />} />
-          <Route element={<ProtectedRoute />}>
-            <Route path="/" element={<Layout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="inventory" element={<Inventory />} />
-              <Route path="consoles" element={<ConsolesStock />} />
-              <Route path="gifts" element={<GiftsAndAccessories />} />
-              <Route path="sales" element={<Sales />} />
-              <Route path="invoices" element={<Invoices />} />
-              <Route path="prices" element={<PriceTable />} />
-              <Route path="notes" element={<Notes />} />
-              <Route path="offer-tags" element={<OfferTagGenerator />} />
-              <Route path="clients" element={<Clients />} />
-              <Route path="suppliers" element={<Suppliers />} />
-              <Route path="users" element={<UsersPage />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="guarantee/:id" element={<GuaranteeNote />} />
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/assinar/:id" element={<ClientSignature />} />
+            <Route path="/cadastro-cliente" element={<ClientRemoteRegister />} />
+            <Route element={<ProtectedRoute />}>
+              <Route path="/" element={<Layout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="inventory" element={<Inventory />} />
+                <Route path="consoles" element={<ConsolesStock />} />
+                <Route path="gifts" element={<GiftsAndAccessories />} />
+                <Route path="sales" element={<Sales />} />
+                <Route path="invoices" element={<Invoices />} />
+                <Route path="prices" element={<PriceTable />} />
+                <Route path="notes" element={<Notes />} />
+                <Route path="offer-tags" element={<OfferTagGenerator />} />
+                <Route path="clients" element={<Clients />} />
+                <Route path="suppliers" element={<Suppliers />} />
+                <Route path="users" element={<UsersPage />} />
+                <Route path="settings" element={<Settings />} />
+                <Route path="guarantee/:id" element={<GuaranteeNote />} />
 
-              {/* Fiscal Module Route */}
-              <Route path="fiscal" element={<FiscalHub />} />
-              <Route path="fiscal/*" element={<FiscalHub />} />
+                {/* Fiscal Module Route */}
+                <Route path="fiscal" element={<FiscalHub />} />
+                <Route path="fiscal/*" element={<FiscalHub />} />
+              </Route>
             </Route>
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </ErrorBoundary>
       </Suspense>
     </>
   );

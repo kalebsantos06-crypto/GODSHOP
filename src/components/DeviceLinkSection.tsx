@@ -23,6 +23,31 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
   const [linkedDevices, setLinkedDevices] = useState<Array<{ id: string; name: string; type: 'apk' | 'exe'; time: string }>>([]);
   const [copied, setCopied] = useState(false);
 
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
+
+  const handleClearAllPairings = async () => {
+    try {
+      // 1. Clear locally
+      localStorage.removeItem('godshop_linked_devices');
+      setLinkedDevices([]);
+      
+      // 2. Clear server-side
+      const url = getCloudApiUrl('/api/pair/clear');
+      console.log('[Pairing] Unpairing all, target URL:', url);
+      const res = await fetch(url, { method: 'POST' });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Falha ao desvincular no servidor.');
+      }
+      
+      toast.success('Todos os dispositivos foram desvinculados.');
+      setShowClearAllConfirm(false);
+    } catch (e: any) {
+      console.error('[Pairing] Clear all error:', e);
+      toast.error('Erro ao desvincular: ' + (e.message || 'Falha desconhecida'));
+    }
+  };
+
   useEffect(() => {
     try {
       const stored = localStorage.getItem('godshop_linked_devices');
@@ -52,7 +77,22 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
 
       let code = Math.floor(100000 + Math.random() * 900000).toString();
 
-      // 1. Try local Express API if available
+      const pairingPayload = {
+        code,
+        supabaseUrl: supaUrl,
+        supabaseKey: supaKey,
+        serverUrl: serverUrl,
+        deviceName: navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE',
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        createdAt: new Date().toISOString()
+      };
+
+      // 1. Save to local storage for local fallback
+      try {
+        localStorage.setItem(`godshop_pairing_${code}`, JSON.stringify(pairingPayload));
+      } catch (e) {}
+
+      // 2. Try local Express API if available
       try {
         const res = await fetch(getCloudApiUrl('/api/pair/generate'), {
           method: 'POST',
@@ -61,7 +101,7 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
             supabaseUrl: supaUrl,
             supabaseKey: supaKey,
             serverUrl: serverUrl,
-            deviceName: navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE'
+            deviceName: pairingPayload.deviceName
           })
         });
 
@@ -69,29 +109,24 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
           const data = await res.json();
           if (data && data.code) {
             code = data.code;
+            pairingPayload.code = code;
           }
         }
       } catch (err) {
         console.warn('Server pair/generate warning:', err);
       }
 
-      // 2. Also register in Supabase public_sales table directly for universal multi-device access across any network
+      // 3. Register in Supabase public_tokens table
       try {
-        await supabase.from('public_sales').upsert({
-          id: `pair_${code}`,
-          sale_data: {
-            type: 'device_pairing',
-            code,
-            supabaseUrl: supaUrl,
-            supabaseKey: supaKey,
-            serverUrl: serverUrl,
-            deviceName: navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE',
-            expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-            createdAt: new Date().toISOString()
-          }
+        await supabase.from('public_tokens').upsert({
+          token: `pair_${code}`,
+          user_id: 'df9c4051-e407-4fe4-8978-a6b9e6140ed9',
+          used: false,
+          client_data: pairingPayload,
+          expires_at: pairingPayload.expiresAt
         });
-      } catch (supaErr) {
-        console.warn('Supabase pair record warning:', supaErr);
+      } catch (supaTokenErr) {
+        console.warn('Supabase public_tokens pair warning:', supaTokenErr);
       }
 
       setPairingCode(code);
@@ -133,26 +168,43 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
         console.warn('Server consume fetch warning:', err);
       }
 
-      // 2. If server endpoint was not reachable (e.g. inside APK), query Supabase public_sales table directly
+      // 2. Try Supabase public_tokens table
       if (!data || !data.supabaseUrl) {
         try {
-          const { data: supaRow, error } = await supabase
-            .from('public_sales')
+          const { data: tokenRow, error: tokenErr } = await supabase
+            .from('public_tokens')
             .select('*')
-            .eq('id', `pair_${inputCode}`)
-            .single();
+            .eq('token', `pair_${inputCode}`)
+            .maybeSingle();
 
-          if (!error && supaRow && supaRow.sale_data && supaRow.sale_data.code === inputCode) {
-            const payload = supaRow.sale_data;
-            if (new Date(payload.expiresAt) > new Date()) {
+          if (!tokenErr && tokenRow && tokenRow.client_data) {
+            const payload = typeof tokenRow.client_data === 'string' ? JSON.parse(tokenRow.client_data) : tokenRow.client_data;
+            if (payload && new Date(payload.expiresAt) > new Date()) {
+              data = payload;
+            } else if (payload) {
+              throw new Error('Este código expirou. Gere um novo no computador.');
+            }
+          }
+        } catch (tokErr: any) {
+          if (tokErr?.message?.includes('expirou')) throw tokErr;
+          console.warn('Supabase public_tokens consume warning:', tokErr);
+        }
+      }
+
+      // 4. Try localStorage fallback
+      if (!data || !data.supabaseUrl) {
+        try {
+          const storedLocal = localStorage.getItem(`godshop_pairing_${inputCode}`);
+          if (storedLocal) {
+            const payload = JSON.parse(storedLocal);
+            if (payload && new Date(payload.expiresAt) > new Date()) {
               data = payload;
             } else {
               throw new Error('Este código expirou. Gere um novo no computador.');
             }
           }
-        } catch (supaErr: any) {
-          if (supaErr?.message?.includes('expirou')) throw supaErr;
-          console.warn('Supabase direct consume warning:', supaErr);
+        } catch (localErr: any) {
+          if (localErr?.message?.includes('expirou')) throw localErr;
         }
       }
 
@@ -353,14 +405,22 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
                 <h4 className="font-bold text-xs uppercase opacity-70 tracking-wider">
                   Dispositivos Ativos
                 </h4>
-                <button 
-                  onClick={handleGenerateNewCode}
-                  disabled={isGenerating}
-                  className="text-[10px] font-bold text-emerald-500 hover:underline uppercase flex items-center gap-1"
-                >
-                  {isGenerating ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-                  Novo Código
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setShowClearAllConfirm(true)}
+                    className="text-[10px] font-bold text-red-500 hover:underline uppercase flex items-center gap-1 cursor-pointer"
+                  >
+                    <X className="h-3 w-3" /> Desvincular Todos
+                  </button>
+                  <button 
+                    onClick={handleGenerateNewCode}
+                    disabled={isGenerating}
+                    className="text-[10px] font-bold text-emerald-500 hover:underline uppercase flex items-center gap-1"
+                  >
+                    {isGenerating ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+                    Novo Código
+                  </button>
+                </div>
               </div>
               <div className="space-y-2">
                 {linkedDevices.map((dev) => (
@@ -482,7 +542,47 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
         )}
       </div>
 
-      {/* Confirmation Modal for Device Removal */}
+      {/* Confirmation Modal for All Devices Removal */}
+      {showClearAllConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+          <div className={cn(
+            "w-full max-w-md rounded-2xl border p-6 shadow-2xl space-y-4",
+            theme === 'dark' ? "bg-slate-900 border-white/10 text-white" : "bg-white border-black/10 text-slate-900"
+          )}>
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-red-500/10 text-red-500 border border-red-500/20">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="font-black text-base">Desvincular TODOS</h3>
+                <p className="text-xs opacity-70">Tem certeza? Isso removerá a conexão de todos os dispositivos simultaneamente.</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearAllConfirm(false)}
+                className={cn(
+                  "flex-1 py-2.5 rounded-xl font-bold text-xs transition border cursor-pointer",
+                  theme === 'dark' ? "bg-white/5 hover:bg-white/10 border-white/10 text-white" : "bg-black/5 hover:bg-black/10 border-black/10 text-slate-900"
+                )}
+              >
+                Manter Conexões
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAllPairings}
+                className="flex-1 py-2.5 rounded-xl font-bold text-xs bg-red-600 hover:bg-red-500 text-white transition shadow-lg cursor-pointer"
+              >
+                Sim, Desvincular Tudo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Single Device Removal */}
       {deviceToRemove && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
           <div className={cn(

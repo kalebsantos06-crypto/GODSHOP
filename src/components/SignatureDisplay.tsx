@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { cn } from '../lib/utils';
 
 export function formatSignatureData(data: string | undefined | null): string | null {
   if (!data || typeof data !== 'string') return null;
@@ -29,24 +30,21 @@ export function formatSignatureData(data: string | undefined | null): string | n
 
   // If data URI
   if (s.startsWith('data:image/')) {
-    const commaIndex = s.indexOf(',');
-    if (commaIndex !== -1) {
-      const header = s.substring(0, commaIndex);
-      const payload = s.substring(commaIndex + 1).replace(/\s+/g, '');
-      return `${header},${payload}`;
-    }
-    return s;
+    // Only clean if it looks like it has been double-encoded or has surrounding quotes
+    return s.replace(/["']/g, '').replace(/\s/g, '+').replace('data:image/png;base64,+', 'data:image/png;base64,');
   }
 
   // If raw base64 PNG/JPEG/SVG without prefix
-  if (s.startsWith('iVBORw0KGgo')) {
-    return `data:image/png;base64,${s.replace(/\s+/g, '')}`;
-  }
-  if (s.startsWith('/9j/')) {
-    return `data:image/jpeg;base64,${s.replace(/\s+/g, '')}`;
-  }
-  if (s.startsWith('PHN2Zy')) {
-    return `data:image/svg+xml;base64,${s.replace(/\s+/g, '')}`;
+  if (s.length > 30) {
+    if (s.startsWith('iVBORw0KGgo')) {
+      return `data:image/png;base64,${s.replace(/\s+/g, '')}`;
+    }
+    if (s.startsWith('/9j/')) {
+      return `data:image/jpeg;base64,${s.replace(/\s+/g, '')}`;
+    }
+    if (s.startsWith('PHN2Zy')) {
+      return `data:image/svg+xml;base64,${s.replace(/\s+/g, '')}`;
+    }
   }
 
   // Standard web URL
@@ -73,31 +71,103 @@ export default function SignatureDisplay({
   fallbackClassName = 'text-2xl text-blue-900 -rotate-2 font-bold select-none tracking-wide'
 }: SignatureDisplayProps) {
   const [hasError, setHasError] = useState(false);
+  const [rasterizedUrl, setRasterizedUrl] = useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const cleanData = useMemo(() => {
     return formatSignatureData(signatureData);
   }, [signatureData]);
 
-  if (!cleanData || hasError) {
-    if (signerName) {
-      return (
-        <span style={{ fontFamily: "'Dancing Script', cursive" }} className={fallbackClassName}>
-          {signerName}
-        </span>
-      );
-    }
-    return null;
-  }
+  useEffect(() => {
+    let isMounted = true;
+    
+    const rasterize = async () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 400;
+        canvas.height = 100;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+
+        if (cleanData && !hasError) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          
+          // Add cache buster to bypass potential stale CORS headers
+          const separator = cleanData.includes('?') ? '&' : '?';
+          img.src = cleanData.startsWith('data:') ? cleanData : `${cleanData}${separator}t=${Date.now()}`;
+          
+          img.onload = () => {
+            if (!isMounted) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw a slight background or just the image
+            const ratio = img.width / img.height;
+            let drawWidth = canvas.width;
+            let drawHeight = canvas.width / ratio;
+            
+            if (drawHeight > canvas.height) {
+              drawHeight = canvas.height;
+              drawWidth = canvas.height * ratio;
+            }
+            
+            const x = (canvas.width - drawWidth) / 2;
+            const y = (canvas.height - drawHeight) / 2;
+            
+            ctx.drawImage(img, x, y, drawWidth, drawHeight);
+            const dataUrl = canvas.toDataURL('image/png');
+            setRasterizedUrl(dataUrl);
+            setIsLoaded(true);
+          };
+          
+          img.onerror = () => {
+            if (!isMounted) return;
+            setHasError(true);
+          };
+        } else if (signerName) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.font = 'italic bold 28px serif';
+          ctx.fillStyle = '#1e3a8a';
+          ctx.textBaseline = 'middle';
+          ctx.textAlign = 'center';
+          ctx.fillText(signerName, canvas.width / 2, canvas.height / 2);
+          
+          const dataUrl = canvas.toDataURL('image/png');
+          setRasterizedUrl(dataUrl);
+          setIsLoaded(true);
+        }
+      } catch (err) {
+        console.warn('Rasterization error:', err);
+        if (isMounted) setHasError(true);
+      }
+    };
+
+    rasterize();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [cleanData, hasError, signerName]);
 
   return (
-    <img
-      src={cleanData}
-      alt={alt}
-      className={className}
-      onError={() => {
-        console.warn('SignatureDisplay: imagem da assinatura não pôde ser renderizada, usando assinatura cursiva eletrônica para', signerName);
-        setHasError(true);
-      }}
-    />
+    <div className={cn("signature-wrapper relative inline-block overflow-visible", className)} style={{ minWidth: '120px', minHeight: '40px' }}>
+      {rasterizedUrl ? (
+        <img 
+          src={rasterizedUrl} 
+          alt={alt} 
+          className="signature-img block w-full h-full object-contain"
+          data-signature-loaded={isLoaded}
+          style={{ 
+            visibility: 'visible', 
+            opacity: 1,
+            minHeight: '40px'
+          }}
+        />
+      ) : (
+        <div className="flex items-center justify-center bg-white/50 w-full h-full min-h-[40px] border border-dashed border-slate-200 rounded">
+          <span className="text-[8px] text-slate-400">Processando...</span>
+        </div>
+      )}
+    </div>
   );
 }

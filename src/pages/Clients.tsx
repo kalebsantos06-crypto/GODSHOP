@@ -57,9 +57,19 @@ export default function Clients() {
   const [state, setState] = useState('');
   const [loadingAddress, setLoadingAddress] = useState(false);
 
+  // Controlled states for basic info to fix "reverting to old value" issues
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [clientCpf, setClientCpf] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
+
   // Synchronize state when adding/editing
   React.useEffect(() => {
     if (editingClient) {
+      setClientName(editingClient.name || '');
+      setClientPhone(editingClient.phone || '');
+      setClientCpf(editingClient.cpf || '');
+      setClientEmail(editingClient.email || '');
       setBirthDate(editingClient.birth_date || '');
       setDocumentUrl(editingClient.documento_url || '');
       setSignatureData(editingClient.assinatura_base64 || '');
@@ -73,6 +83,10 @@ export default function Clients() {
       setCity(editingClient.city || '');
       setState(editingClient.state || '');
     } else {
+      setClientName('');
+      setClientPhone('');
+      setClientCpf('');
+      setClientEmail('');
       setBirthDate('');
       setDocumentUrl('');
       setSignatureData('');
@@ -492,7 +506,6 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
 
   const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
     
     const addressParts = [];
     if (street) addressParts.push(street);
@@ -501,10 +514,10 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     if (complement) addressParts.push(complement);
     
     const data = {
-      name: formData.get('name') as string,
-      phone: formData.get('phone') as string,
-      cpf: formData.get('cpf') as string || undefined,
-      email: formData.get('email') as string || undefined,
+      name: clientName,
+      phone: clientPhone,
+      cpf: clientCpf || undefined,
+      email: clientEmail || undefined,
       birth_date: birthDate || undefined,
       cep: cep || undefined,
       street: street || undefined,
@@ -523,7 +536,6 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
   const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!editingClient) return;
-    const formData = new FormData(e.currentTarget);
     
     const addressParts = [];
     if (street) addressParts.push(street);
@@ -532,10 +544,10 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     if (complement) addressParts.push(complement);
     
     const data = {
-      name: formData.get('name') as string,
-      phone: formData.get('phone') as string,
-      cpf: formData.get('cpf') as string || undefined,
-      email: formData.get('email') as string || undefined,
+      name: clientName,
+      phone: clientPhone,
+      cpf: clientCpf || undefined,
+      email: clientEmail || undefined,
       birth_date: birthDate || undefined,
       cep: cep || undefined,
       street: street || undefined,
@@ -852,8 +864,8 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                 <div className="space-y-1.5 md:col-span-2">
                   <label className="text-xs font-semibold text-muted-foreground uppercase">Nome Completo</label>
                   <input 
-                    name="name" 
-                    defaultValue={editingClient?.name} 
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
                     required 
                     className="w-full p-2.5 bg-background border border-white/10 rounded-xl focus:ring-2 focus:ring-[#D4AF37]/30 focus:border-[#D4AF37] outline-none text-sm transition" 
                     placeholder="Ex: João da Silva" 
@@ -863,8 +875,8 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-muted-foreground uppercase">WhatsApp / Celular</label>
                   <input 
-                    name="phone" 
-                    defaultValue={editingClient?.phone} 
+                    value={clientPhone}
+                    onChange={(e) => setClientPhone(e.target.value)}
                     required 
                     className="w-full p-2.5 bg-background border border-white/10 rounded-xl focus:ring-2 focus:ring-[#D4AF37]/30 focus:border-[#D4AF37] outline-none text-sm transition" 
                     placeholder="Ex: (11) 99999-9999" 
@@ -874,8 +886,8 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-muted-foreground uppercase">CPF</label>
                   <input 
-                    name="cpf" 
-                    defaultValue={editingClient?.cpf} 
+                    value={clientCpf}
+                    onChange={(e) => setClientCpf(e.target.value)}
                     className="w-full p-2.5 bg-background border border-white/10 rounded-xl focus:ring-2 focus:ring-[#D4AF37]/30 focus:border-[#D4AF37] outline-none text-sm transition" 
                     placeholder="Ex: 000.000.000-00" 
                   />
@@ -894,9 +906,9 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-muted-foreground uppercase">E-mail</label>
                   <input 
-                    name="email" 
+                    value={clientEmail}
+                    onChange={(e) => setClientEmail(e.target.value)}
                     type="email" 
-                    defaultValue={editingClient?.email} 
                     className="w-full p-2.5 bg-background border border-white/10 rounded-xl focus:ring-2 focus:ring-[#D4AF37]/30 focus:border-[#D4AF37] outline-none text-sm transition" 
                     placeholder="Ex: joao@email.com" 
                   />
