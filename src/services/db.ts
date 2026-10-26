@@ -58,6 +58,12 @@ export const getCurrentUserId = async () => {
         return cachedUser.id;
       }
     }
+    
+    const lastKnownId = localStorage.getItem('last_known_user_id');
+    if (lastKnownId) {
+      authenticatedUserId = lastKnownId;
+      return lastKnownId;
+    }
   } catch (e) {
     // Local fallback
   }
@@ -137,15 +143,20 @@ const scheduleCloudPush = () => {
 
 const sanitizeForLocalStorage = (table: string, data: any[]): any[] => {
   if (!Array.isArray(data)) return [];
-  const sliced = data.slice(-40);
+  
+  // Increase limit for important tables
+  const limit = (table === 'sales' || table === 'clients' || table === 'iphones') ? 200 : 100;
+  const sliced = data.slice(-limit);
+  
   return sliced.map(item => {
     if (!item) return item;
     const copy = { ...item };
-    if (table === 'sales') {
-      // Do NOT truncate signature_data anymore, as it's needed for PDFs and offline visibility
-    }
+    
+    // We NO LONGER truncate signature_data because it's needed for offline visibility and PDF generation.
+    // However, if storage is full, the safeSetLocalStorage logic will handle it by trying smaller sets.
+    
     if (table === 'product_photos') {
-      if (copy.photo_base64 && typeof copy.photo_base64 === 'string' && copy.photo_base64.length > 1000) {
+      if (copy.photo_base64 && typeof copy.photo_base64 === 'string' && copy.photo_base64.length > 500) {
         copy.photo_base64 = '[truncated]';
       }
     }
@@ -158,16 +169,23 @@ const setLocalData = (table: string, data: any[]) => {
     const sanitized = sanitizeForLocalStorage(table, data);
     let jsonStr = JSON.stringify(sanitized);
     let saved = safeSetLocalStorage(`db_fallback_${table}`, jsonStr);
-    if (!saved && sanitized.length > 15) {
-      const trimmed = sanitized.slice(-15);
-      jsonStr = JSON.stringify(trimmed);
-      saved = safeSetLocalStorage(`db_fallback_${table}`, jsonStr);
+    
+    // If saving failed due to storage limits, try to reduce the amount of data progressively
+    if (!saved && sanitized.length > 20) {
+      let currentData = [...sanitized];
+      while (!saved && currentData.length > 10) {
+        // Remove 20% oldest items and try again
+        const toRemove = Math.max(5, Math.floor(currentData.length * 0.2));
+        currentData = currentData.slice(toRemove);
+        jsonStr = JSON.stringify(currentData);
+        saved = safeSetLocalStorage(`db_fallback_${table}`, jsonStr);
+      }
     }
+    
     if (!saved) {
-      try {
-        localStorage.removeItem(`db_fallback_${table}`);
-      } catch (err) {}
+      console.warn(`[Storage] Failed to save local data for ${table} even after trimming.`);
     }
+    
     broadcastLocalChange(table);
     // Automatically replicate change to Cloud Server in the background
     scheduleCloudPush();
@@ -387,7 +405,7 @@ const ALL_APP_TABLES = [
   'suppliers', 'clients', 'iphones', 'consoles', 'prices', 'sales',
   'purchases', 'products', 'product_units', 'fiscal_documents', 'fiscal_configs',
   'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'users',
-  'notes', 'note_checklist_items', 'note_audio'
+  'notes', 'note_checklist_items', 'note_audio', 'warranty_history'
 ];
 
 const STORE_SETTINGS_KEYS = [
@@ -565,15 +583,31 @@ export const db = {
                   }
                 } catch (e) {}
 
-                // Signature preservation
-                if (item.signature_data && !existing.signature_data) {
-                  merged.signature_data = item.signature_data;
+                // Signature preservation: keep the most complete and recent signature information
+                const cloudSig = item.signature_data;
+                const localSig = existing.signature_data;
+                const cloudSigDate = item.signed_at ? new Date(item.signed_at).getTime() : 0;
+                const localSigDate = existing.signed_at ? new Date(existing.signed_at).getTime() : 0;
+
+                if (cloudSig && !localSig) {
+                  merged.signature_data = cloudSig;
                   merged.signed_at = item.signed_at;
                   merged.signed_ip = item.signed_ip;
-                } else if (existing.signature_data) {
-                  merged.signature_data = existing.signature_data;
+                } else if (localSig && !cloudSig) {
+                  merged.signature_data = localSig;
                   merged.signed_at = existing.signed_at;
                   merged.signed_ip = existing.signed_ip;
+                } else if (cloudSig && localSig) {
+                  // Both have signatures, take the most recent one
+                  if (cloudSigDate >= localSigDate) {
+                    merged.signature_data = cloudSig;
+                    merged.signed_at = item.signed_at;
+                    merged.signed_ip = item.signed_ip;
+                  } else {
+                    merged.signature_data = localSig;
+                    merged.signed_at = existing.signed_at;
+                    merged.signed_ip = existing.signed_ip;
+                  }
                 }
               }
 
@@ -764,15 +798,14 @@ export const db = {
     await db.pullFromCloud().catch(e => console.warn('Cloud DB pull warning:', e));
 
     const userId = await getCurrentUserId();
+    
+    // We proceed even if userId is null, but we log it. 
+    // This allows syncing with custom Supabase instances where RLS might be disabled or using public access.
     if (!userId) {
-      return {
-        success: true,
-        message: 'Dados salvos e sincronizados na nuvem do servidor com sucesso.',
-        stats: { synced: 1, failed: 0 }
-      };
+      console.warn('[Sync] No userId found, proceeding with public/anon sync if possible.');
     }
 
-    const tables = ['clients', 'suppliers', 'iphones', 'consoles', 'sales', 'prices', 'purchases', 'products', 'product_units', 'fiscal_documents', 'fiscal_configs', 'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'notes', 'note_checklist_items', 'note_audio'];
+    const tables = ['clients', 'suppliers', 'iphones', 'consoles', 'sales', 'prices', 'purchases', 'products', 'product_units', 'fiscal_documents', 'fiscal_configs', 'gifts', 'gift_purchases', 'gift_dispatches', 'accessory_sales', 'product_photos', 'notes', 'note_checklist_items', 'note_audio', 'warranty_history'];
     const results = { synced: 0, failed: 0 };
 
     for (const table of tables) {
@@ -1283,7 +1316,7 @@ export const db = {
               const localTime = new Date(item.updated_at || item.created_at || 0).getTime();
               const dbTime = new Date(existing.updated_at || existing.created_at || 0).getTime();
               
-              if (localTime > dbTime) {
+              if (localTime >= dbTime) {
                 map.set(item.id, { ...existing, ...item });
               } else {
                 map.set(item.id, { ...item, ...existing });
@@ -1925,7 +1958,8 @@ export const db = {
             // 2. Also attempt Express API sync as secondary fallback when Node server is present
             await Promise.all(unsignedSaleIds.map(async (saleId) => {
               try {
-                const res = await fetch(`/api/public-sales/${saleId}?t=${Date.now()}`, { cache: 'no-store' });
+                const url = getCloudApiUrl(`/api/public-sales/${saleId}?t=${Date.now()}`);
+                const res = await fetch(url, { cache: 'no-store' });
                 if (res.ok) {
                   const json = await res.json();
                   const sigData = json?.signature_data || json?.sale_data?.signatureInfo?.signature_data;
@@ -2548,6 +2582,73 @@ export const db = {
         const localSales = getLocalData('sales');
         setLocalData('sales', localSales.filter(item => item.id !== id));
       }
+    }
+  },
+  warranty_history: {
+    list: async () => {
+      try {
+        let query = supabase.from('warranty_history').select('*');
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (error) throw error;
+        tryCacheUserIdFromRows(data);
+        
+        const deletedIds = getLocalDeletedIds('warranty_history');
+        const local = getLocalData('warranty_history');
+        const merged = [...(data || []), ...local.filter((l: any) => !data?.some((d: any) => d.id === l.id))].filter((i: any) => !deletedIds.includes(i.id));
+        setLocalData('warranty_history', merged);
+        return merged;
+      } catch (err: any) {
+        notifyOffline(err);
+        return getLocalData('warranty_history');
+      }
+    },
+    create: async (data: any) => {
+      const id = generateId();
+      const insertData = { ...data, id, created_at: new Date().toISOString() };
+      try {
+        const userId = await getCurrentUserId();
+        if (userId) insertData.user_id = userId;
+        const { data: newItem, error } = await supabase.from('warranty_history').insert(insertData).select().single();
+        if (error) throw error;
+        const local = getLocalData('warranty_history');
+        setLocalData('warranty_history', [...local, newItem]);
+        cloudApi.upsertItem('warranty_history', newItem);
+        notifyDataMutation('warranty_history', 'create', newItem);
+        return newItem;
+      } catch (err: any) {
+        notifyOffline(err);
+        const local = getLocalData('warranty_history');
+        setLocalData('warranty_history', [...local, insertData]);
+        cloudApi.upsertItem('warranty_history', insertData);
+        notifyDataMutation('warranty_history', 'create', insertData);
+        return insertData;
+      }
+    },
+    update: async (id: string, data: any) => {
+      try {
+        const updateData = { ...data, updated_at: new Date().toISOString() };
+        await supabase.from('warranty_history').update(updateData).eq('id', id);
+        const local = getLocalData('warranty_history');
+        setLocalData('warranty_history', local.map((item: any) => item.id === id ? { ...item, ...updateData } : item));
+        cloudApi.updateItem('warranty_history', id, updateData);
+        notifyDataMutation('warranty_history', 'update', { id, ...updateData });
+      } catch (err: any) {
+        notifyOffline(err);
+        const local = getLocalData('warranty_history');
+        setLocalData('warranty_history', local.map((item: any) => item.id === id ? { ...item, ...data } : item));
+        cloudApi.updateItem('warranty_history', id, data);
+        notifyDataMutation('warranty_history', 'update', { id, ...data });
+      }
+    },
+    delete: async (id: string) => {
+      recordLocalDelete('warranty_history', id);
+      const local = getLocalData('warranty_history');
+      setLocalData('warranty_history', local.filter((item: any) => item.id !== id));
+      cloudApi.deleteItem('warranty_history', id);
+      notifyDataMutation('warranty_history', 'delete', { id });
+      try {
+        await supabase.from('warranty_history').delete().eq('id', id);
+      } catch (e) {}
     }
   },
   purchases: {
@@ -3696,7 +3797,7 @@ export const db = {
 
   processWarrantyText: async (text: string) => {
     try {
-      const response = await fetch('/api/process-warranty', {
+      const response = await fetch(getCloudApiUrl('/api/process-warranty'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ textData: text })
@@ -3727,7 +3828,7 @@ export const db = {
         reader.readAsDataURL(file);
       });
 
-      const response = await fetch('/api/process-warranty', {
+      const response = await fetch(getCloudApiUrl('/api/process-warranty'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -95,7 +95,9 @@ Atenciosamente,
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Comprovante_Quitacao_${clientName.replace(/\s+/g, '_')}.pdf`);
+      const cleanClientName = clientName.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 20);
+      const fileName = `GODSHOP_Quitacao_${cleanClientName}_${format(new Date(), 'dd_MM_yyyy')}.pdf`;
+      pdf.save(fileName);
       toast.success('PDF baixado com sucesso!', { id: toastId });
     } catch (err) {
       console.error('Erro ao gerar PDF:', err);

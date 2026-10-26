@@ -7,7 +7,7 @@ import { formatBRL } from '../lib/formatCurrency';
 import { 
   Plus, FileText, Filter, Edit2, Trash2, CheckCircle2, Clock, CreditCard, 
   Calendar, DollarSign, MessageSquare, Copy, Check, ExternalLink, RefreshCw, 
-  FileCheck, ShoppingCart, Smartphone, Gamepad2, Gift, Tag
+  FileCheck, ShoppingCart, Smartphone, Gamepad2, Gift, Tag, History, CheckSquare, Wrench
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, isWithinInterval, startOfDay, endOfDay, addDays, addMonths } from 'date-fns';
@@ -50,6 +50,11 @@ export default function Sales() {
   const [customInstallmentPayments, setCustomInstallmentPayments] = useState<{ [key: number]: number }>({});
   const [quickPaymentVal, setQuickPaymentVal] = useState<string>('');
   
+  // Warranty History States
+  const [selectedSaleForHistory, setSelectedSaleForHistory] = useState<any>(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [isAddingHistoryEntry, setIsAddingHistoryOpen] = useState(false);
+  
   const { data: sales = [], isLoading, refetch: refetchSales } = useQuery({
     queryKey: ['sales'],
     queryFn: () => db.sales.list(),
@@ -64,12 +69,15 @@ export default function Sales() {
   });
 
   const handleSyncSignatures = async () => {
-    const toastId = toast.loading('Sincronizando assinaturas do servidor...');
+    const toastId = toast.loading('Sincronizando com a nuvem...');
     try {
+      // Pull from Cloud Server first (essential for paired devices)
+      await db.pullFromCloud();
+      // Then refetch from Supabase/Local
       await refetchSales();
       toast.success('Sincronização concluída!', { id: toastId });
     } catch (e) {
-      toast.error('Erro ao sincronizar assinaturas.');
+      toast.error('Erro ao sincronizar.');
     }
   };
 
@@ -182,6 +190,26 @@ export default function Sales() {
     }
   };
 
+  const [deliveryChecklist, setDeliveryChecklist] = useState({
+    condition: 'seminovo',
+    marks_of_use: '',
+    accessories: {
+      box: false,
+      charger: false,
+      cable: false,
+      manual: false,
+      others: '',
+      controls: 0,
+      hdmi_cable: false,
+      power_cable: false,
+    },
+    observations: ''
+  });
+
+  const generateWarrantyTermId = () => {
+    return `GS-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+  };
+
   const addMutation = useMutation({
     mutationFn: (newSale: any) => db.sales.create(newSale),
     onSuccess: () => {
@@ -237,6 +265,31 @@ export default function Sales() {
       toast.success('Venda excluída com sucesso!');
     },
     onError: () => toast.error('Erro ao excluir venda.')
+  });
+
+  const { data: warrantyHistory = [], refetch: refetchHistory } = useQuery({
+    queryKey: ['warranty_history'],
+    queryFn: () => db.warranty_history.list(),
+  });
+
+  const addHistoryMutation = useMutation({
+    mutationFn: (data: any) => db.warranty_history.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['warranty_history'] });
+      refetchHistory();
+      toast.success('Atendimento registrado!');
+      setIsAddingHistoryOpen(false);
+    },
+    onError: () => toast.error('Erro ao registrar atendimento.')
+  });
+
+  const deleteHistoryMutation = useMutation({
+    mutationFn: (id: string) => db.warranty_history.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['warranty_history'] });
+      refetchHistory();
+      toast.success('Registro removido.');
+    }
   });
 
   const updateInstallmentsMutation = useMutation({
@@ -412,6 +465,7 @@ export default function Sales() {
     }
 
     addMutation.mutate({
+      warranty_term_id: generateWarrantyTermId(),
       iphone_id: firstIphone || null,
       console_id: firstConsole || null,
       items: cartItems,
@@ -428,6 +482,8 @@ export default function Sales() {
       installment_frequency: (formData.get('installment_frequency') as 'Semanal' | 'Quinzenal' | 'Mensal') || 'Mensal',
       sale_date: formData.get('sale_date') ? (formData.get('sale_date') as string) : format(new Date(), 'yyyy-MM-dd'),
       first_installment_date: firstInstallmentDate ? (firstInstallmentDate as string) : undefined,
+      warranty_months: Number(formData.get('warranty_months')) || undefined,
+      delivery_checklist: deliveryChecklist,
     });
   };
 
@@ -486,6 +542,16 @@ export default function Sales() {
       address: finalClientAddress
     } : null);
 
+    // Update client data in background if changed
+    if (targetClientId && !isCreatingNewClient) {
+      db.clients.update(targetClientId, {
+        name: finalClientName,
+        phone: finalClientPhone,
+        cpf: finalClientCpf,
+        address: finalClientAddress
+      }).catch(e => console.warn('Could not auto-update client info:', e));
+    }
+
     updateMutation.mutate({
       id: editingSale.id,
       data: {
@@ -505,6 +571,8 @@ export default function Sales() {
         installment_frequency: (formData.get('installment_frequency') as 'Semanal' | 'Quinzenal' | 'Mensal') || 'Mensal',
         sale_date: formData.get('sale_date') ? (formData.get('sale_date') as string) : editingSale.sale_date,
         first_installment_date: cleanFirstDate,
+        warranty_months: Number(formData.get('warranty_months')) || undefined,
+        delivery_checklist: deliveryChecklist,
       }
     });
   };
@@ -950,6 +1018,18 @@ export default function Sales() {
                   />
               </div>
 
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Garantia (Meses)</label>
+                <input 
+                  name="warranty_months" 
+                  defaultValue={editingSale?.warranty_months || 3} 
+                  type="number" 
+                  className="w-full p-2 border rounded-md" 
+                  placeholder="Ex: 3 ou 12"
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">Garantia total (Legal + Comercial).</p>
+              </div>
+
               {tempInstallments > 1 && (
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Data da 1ª Parcela</label>
@@ -964,6 +1044,129 @@ export default function Sales() {
               )}
             </div>
 
+            {/* Delivery Checklist Section */}
+            <div className="bg-slate-50 border border-border/80 rounded-xl p-4 sm:p-5 space-y-4">
+              <div className="flex items-center gap-2 border-b border-border/50 pb-3">
+                <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                  <CheckSquare className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 className="font-bold text-sm text-foreground">Checklist de Entrega do Produto</h3>
+                  <p className="text-xs text-muted-foreground">Registre o estado do aparelho e os acessórios inclusos.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-foreground block">Estado de Conservação</label>
+                    <select
+                      value={deliveryChecklist.condition}
+                      onChange={(e) => setDeliveryChecklist({...deliveryChecklist, condition: e.target.value})}
+                      className="w-full p-2 rounded-lg border bg-background text-sm font-medium focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    >
+                      <option value="lacrado">Novo / Lacrado</option>
+                      <option value="seminovo">Seminovo / Usado</option>
+                      <option value="recondicionado">Recondicionado</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-foreground block">Riscos ou Marcas de Uso</label>
+                    <textarea
+                      value={deliveryChecklist.marks_of_use}
+                      onChange={(e) => setDeliveryChecklist({...deliveryChecklist, marks_of_use: e.target.value})}
+                      placeholder="Descreva riscos, marcas na tela, carcaça, etc..."
+                      className="w-full p-2 rounded-lg border bg-background text-sm h-20 resize-none focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-foreground block mb-1">Acessórios Entregues</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 p-2 rounded border bg-background cursor-pointer hover:bg-muted/50 transition">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                        checked={deliveryChecklist.accessories.box} 
+                        onChange={(e) => setDeliveryChecklist({...deliveryChecklist, accessories: {...deliveryChecklist.accessories, box: e.target.checked}})} 
+                      />
+                      <span className="text-xs font-medium">Caixa</span>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded border bg-background cursor-pointer hover:bg-muted/50 transition">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                        checked={deliveryChecklist.accessories.charger} 
+                        onChange={(e) => setDeliveryChecklist({...deliveryChecklist, accessories: {...deliveryChecklist.accessories, charger: e.target.checked}})} 
+                      />
+                      <span className="text-xs font-medium">Carregador</span>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded border bg-background cursor-pointer hover:bg-muted/50 transition">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                        checked={deliveryChecklist.accessories.cable} 
+                        onChange={(e) => setDeliveryChecklist({...deliveryChecklist, accessories: {...deliveryChecklist.accessories, cable: e.target.checked}})} 
+                      />
+                      <span className="text-xs font-medium">Cabo USB</span>
+                    </label>
+                    <label className="flex items-center gap-2 p-2 rounded border bg-background cursor-pointer hover:bg-muted/50 transition">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                        checked={deliveryChecklist.accessories.manual} 
+                        onChange={(e) => setDeliveryChecklist({...deliveryChecklist, accessories: {...deliveryChecklist.accessories, manual: e.target.checked}})} 
+                      />
+                      <span className="text-xs font-medium">Manual</span>
+                    </label>
+                    
+                    {cartItems.some(i => i.type === 'console') && (
+                      <>
+                        <label className="flex items-center gap-2 p-2 rounded border bg-background cursor-pointer hover:bg-muted/50 transition">
+                          <input 
+                            type="checkbox" 
+                            className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                            checked={deliveryChecklist.accessories.hdmi_cable} 
+                            onChange={(e) => setDeliveryChecklist({...deliveryChecklist, accessories: {...deliveryChecklist.accessories, hdmi_cable: e.target.checked}})} 
+                          />
+                          <span className="text-xs font-medium">Cabo HDMI</span>
+                        </label>
+                        <label className="flex items-center gap-2 p-2 rounded border bg-background cursor-pointer hover:bg-muted/50 transition">
+                          <input 
+                            type="checkbox" 
+                            className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                            checked={deliveryChecklist.accessories.power_cable} 
+                            onChange={(e) => setDeliveryChecklist({...deliveryChecklist, accessories: {...deliveryChecklist.accessories, power_cable: e.target.checked}})} 
+                          />
+                          <span className="text-xs font-medium">Cabo Força</span>
+                        </label>
+                        <div className="col-span-2 flex items-center gap-3 p-2 rounded border bg-background">
+                          <span className="text-xs font-medium">Controles:</span>
+                          <input 
+                            type="number" 
+                            min="0"
+                            max="4"
+                            value={deliveryChecklist.accessories.controls} 
+                            onChange={(e) => setDeliveryChecklist({...deliveryChecklist, accessories: {...deliveryChecklist.accessories, controls: Number(e.target.value)}})} 
+                            className="w-12 p-1 border rounded text-xs text-center focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Outros acessórios..."
+                    value={deliveryChecklist.accessories.others}
+                    onChange={(e) => setDeliveryChecklist({...deliveryChecklist, accessories: {...deliveryChecklist.accessories, others: e.target.value}})}
+                    className="w-full p-2 rounded-lg border bg-background text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex justify-end gap-2 pt-2 border-t border-border/50">
               <button 
                 type="button" 
@@ -976,6 +1179,21 @@ export default function Sales() {
                   setNewClientPhone('');
                   setNewClientCpf('');
                   setCartItems([]);
+                  setDeliveryChecklist({
+                    condition: 'seminovo',
+                    marks_of_use: '',
+                    accessories: {
+                      box: false,
+                      charger: false,
+                      cable: false,
+                      manual: false,
+                      others: '',
+                      controls: 0,
+                      hdmi_cable: false,
+                      power_cable: false,
+                    },
+                    observations: ''
+                  });
                 }} 
                 className="bg-muted hover:bg-muted/80 text-muted-foreground px-4 py-2 rounded-md font-medium transition cursor-pointer"
               >
@@ -1126,15 +1344,25 @@ export default function Sales() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <span className="font-semibold text-foreground">
-                          {client?.name || sale.client_name || sale.client?.name ? (
-                            client?.name || sale.client_name || sale.client?.name
-                          ) : (
-                            <span className="text-muted-foreground font-medium">
-                              Cliente Geral
+                        <span className="font-bold text-white text-sm">
+                          {client?.name || sale.client_name || sale.client?.name || 'Cliente Geral'}
+                        </span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {sale.warranty_term_id && (
+                            <span className="text-[9px] font-black text-slate-300 font-mono bg-slate-800 px-1 rounded border border-slate-700" title="Número do Termo de Garantia">
+                              {sale.warranty_term_id}
                             </span>
                           )}
-                        </span>
+                          {sale.delivery_checklist ? (
+                            <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-0.5" title="Checklist preenchido">
+                              <CheckSquare className="h-2.5 w-2.5" /> OK
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-bold text-slate-500 flex items-center gap-0.5" title="Sem checklist">
+                              <CheckSquare className="h-2.5 w-2.5" /> -
+                            </span>
+                          )}
+                        </div>
                         {!client?.name && (
                           <button
                             type="button"
@@ -1396,6 +1624,16 @@ export default function Sales() {
                           title="Editar Venda"
                         >
                           <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setSelectedSaleForHistory(sale);
+                            setIsHistoryModalOpen(true);
+                          }}
+                          className="text-blue-500 hover:bg-blue-50 transition-colors p-1 rounded-md"
+                          title="Histórico de Assistência"
+                        >
+                          <History className="h-4 w-4" />
                         </button>
                         <button 
                           onClick={() => setDeleteId(sale.id)}
@@ -1867,6 +2105,151 @@ export default function Sales() {
         iphone={quitacaoData?.iphone}
         consoleObj={quitacaoData?.consoleObj}
       />
+
+      {/* MODAL DE HISTÓRICO DE GARANTIA */}
+      {isHistoryModalOpen && selectedSaleForHistory && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-card border rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+            <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <History className="h-5 w-5 text-amber-500" />
+                  Histórico de Garantia
+                </h3>
+                <p className="text-slate-300 text-xs mt-1">
+                  Cliente: <strong className="text-white">{selectedSaleForHistory.client_name || selectedSaleForHistory.client?.name}</strong>
+                </p>
+              </div>
+              <button onClick={() => setIsHistoryModalOpen(false)} className="text-slate-400 hover:text-white text-xl font-semibold">&times;</button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-6">
+              <button 
+                onClick={() => setIsAddingHistoryOpen(!isAddingHistoryEntry)}
+                className="w-full border-2 border-dashed border-border rounded-xl p-4 text-center hover:bg-muted/50 transition cursor-pointer group"
+              >
+                <Plus className="h-6 w-6 mx-auto mb-2 text-muted-foreground group-hover:text-primary transition-colors" />
+                <span className="text-sm font-bold text-foreground">Novo Registro de Atendimento</span>
+              </button>
+
+              {isAddingHistoryEntry && (
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const formData = new FormData(e.currentTarget);
+                    addHistoryMutation.mutate({
+                      sale_id: selectedSaleForHistory.id,
+                      entry_date: formData.get('entry_date'),
+                      description: formData.get('description'),
+                      technical_evaluation: formData.get('technical_evaluation'),
+                      diagnosis: formData.get('diagnosis'),
+                      resolution: formData.get('resolution'),
+                      status: formData.get('status'),
+                      notes: formData.get('notes'),
+                    });
+                  }}
+                  className="bg-muted/30 border rounded-xl p-4 space-y-4 animate-in slide-in-from-top-4 duration-200"
+                >
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase text-muted-foreground">Data de Entrada</label>
+                      <input name="entry_date" type="date" required defaultValue={format(new Date(), 'yyyy-MM-dd')} className="w-full p-2 border rounded-lg bg-background text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase text-muted-foreground">Status Atual</label>
+                      <select name="status" required className="w-full p-2 border rounded-lg bg-background text-sm">
+                        <option value="Solicitação recebida">Solicitação recebida</option>
+                        <option value="Em avaliação técnica">Em avaliação técnica</option>
+                        <option value="Aguardando providência">Aguardando providência</option>
+                        <option value="Em reparo">Em reparo</option>
+                        <option value="Concluído">Concluído</option>
+                        <option value="Produto devolvido">Produto devolvido</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Descrição do Problema</label>
+                    <textarea name="description" required placeholder="Relato do cliente..." className="w-full p-2 border rounded-lg bg-background text-sm h-20" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Avaliação Técnica / Diagnóstico</label>
+                    <textarea name="technical_evaluation" placeholder="O que foi identificado..." className="w-full p-2 border rounded-lg bg-background text-sm h-20" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-muted-foreground">Resolução / Providência</label>
+                    <input name="resolution" placeholder="Ex: Troca de tela, Atualização de software..." className="w-full p-2 border rounded-lg bg-background text-sm" />
+                  </div>
+
+                  <div className="flex gap-2 justify-end">
+                    <button type="button" onClick={() => setIsAddingHistoryOpen(false)} className="px-4 py-2 text-sm font-medium hover:bg-muted rounded-lg">Cancelar</button>
+                    <button type="submit" className="px-4 py-2 bg-primary text-primary-foreground font-bold text-sm rounded-lg shadow hover:bg-primary/90">Salvar Registro</button>
+                  </div>
+                </form>
+              )}
+
+              <div className="space-y-4">
+                <h4 className="font-bold text-sm flex items-center gap-2 border-b pb-2">
+                  <Clock className="h-4 w-4 text-blue-500" />
+                  Atendimentos Anteriores
+                </h4>
+                {warrantyHistory.filter((h: any) => h.sale_id === selectedSaleForHistory.id).length === 0 ? (
+                  <p className="text-center py-8 text-muted-foreground text-sm italic">Nenhum atendimento registrado para esta venda.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {warrantyHistory
+                      .filter((h: any) => h.sale_id === selectedSaleForHistory.id)
+                      .map((h: any) => (
+                        <div key={h.id} className="border rounded-xl p-4 space-y-3 relative group">
+                          <button 
+                            onClick={() => deleteHistoryMutation.mutate(h.id)}
+                            className="absolute top-4 right-4 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                          
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full uppercase">
+                                {h.status}
+                              </span>
+                              <p className="text-xs text-muted-foreground mt-1 font-medium">{format(parseLocalDate(h.entry_date), 'dd/MM/yyyy')}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-3">
+                            <div>
+                              <span className="text-[10px] font-black text-slate-400 uppercase block">Problema Relatado:</span>
+                              <p className="text-sm text-foreground">{h.description}</p>
+                            </div>
+                            {h.technical_evaluation && (
+                              <div>
+                                <span className="text-[10px] font-black text-slate-400 uppercase block">Avaliação:</span>
+                                <p className="text-sm text-slate-600">{h.technical_evaluation}</p>
+                              </div>
+                            )}
+                            {h.resolution && (
+                              <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-100">
+                                <span className="text-[10px] font-black text-emerald-600 uppercase block">Resolução:</span>
+                                <p className="text-sm text-emerald-900 font-semibold">{h.resolution}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="bg-muted/40 p-4 border-t flex justify-end">
+              <button onClick={() => setIsHistoryModalOpen(false)} className="bg-slate-900 text-white px-6 py-2 rounded-xl font-bold text-sm shadow-lg hover:bg-slate-800 transition-colors">Fechar Histórico</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

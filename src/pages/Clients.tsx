@@ -1291,9 +1291,16 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                   <div>
                     <span className="block text-[10px] text-neutral-400 uppercase font-bold">Data de Nascimento</span>
                     <span className="font-semibold text-sm text-neutral-200">
-                      {selectedPreviewClient.birth_date 
-                        ? new Date(selectedPreviewClient.birth_date).toLocaleDateString('pt-BR') 
-                        : 'Não informada'}
+                      {(() => {
+                        if (!selectedPreviewClient.birth_date) return 'Não informada';
+                        try {
+                          const d = new Date(selectedPreviewClient.birth_date);
+                          if (isNaN(d.getTime())) return 'Não informada';
+                          return d.toLocaleDateString('pt-BR');
+                        } catch (e) {
+                          return 'Não informada';
+                        }
+                      })()}
                     </span>
                   </div>
                   <div>
@@ -1588,7 +1595,18 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
             </div>
             <div>
               <span className="block text-[8px] font-bold text-gray-500 uppercase">Data de Nascimento</span>
-              <span className="font-semibold text-black">{selectedPreviewClient.birth_date ? new Date(selectedPreviewClient.birth_date).toLocaleDateString('pt-BR') : 'Não informada'}</span>
+              <span className="font-semibold text-black">
+                {(() => {
+                  if (!selectedPreviewClient.birth_date) return 'Não informada';
+                  try {
+                    const d = new Date(selectedPreviewClient.birth_date);
+                    if (isNaN(d.getTime())) return 'Não informada';
+                    return d.toLocaleDateString('pt-BR');
+                  } catch (e) {
+                    return 'Não informada';
+                  }
+                })()}
+              </span>
             </div>
             <div>
               <span className="block text-[8px] font-bold text-gray-500 uppercase">Telefone / Celular</span>

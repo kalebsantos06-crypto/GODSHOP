@@ -70,7 +70,7 @@ export default function SignatureDisplay({
   className = 'max-h-12 object-contain',
   fallbackClassName = 'text-2xl text-blue-900 -rotate-2 font-bold select-none tracking-wide'
 }: SignatureDisplayProps) {
-  const [hasError, setHasError] = useState(false);
+  const [errorState, setErrorState] = useState(false);
   const [rasterizedUrl, setRasterizedUrl] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -89,11 +89,11 @@ export default function SignatureDisplay({
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (!ctx) return;
 
-        if (cleanData && !hasError) {
+        if (cleanData && !errorState) {
           const img = new Image();
           img.crossOrigin = 'anonymous';
           
-          // Add cache buster to bypass potential stale CORS headers
+          // Add cache buster to bypass potential stale CORS headers for external URLs
           const separator = cleanData.includes('?') ? '&' : '?';
           img.src = cleanData.startsWith('data:') ? cleanData : `${cleanData}${separator}t=${Date.now()}`;
           
@@ -101,7 +101,7 @@ export default function SignatureDisplay({
             if (!isMounted) return;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Draw a slight background or just the image
+            // Calculate aspect ratio to fit image in canvas
             const ratio = img.width / img.height;
             let drawWidth = canvas.width;
             let drawHeight = canvas.width / ratio;
@@ -122,7 +122,21 @@ export default function SignatureDisplay({
           
           img.onerror = () => {
             if (!isMounted) return;
-            setHasError(true);
+            setErrorState(true);
+            
+            // If image fails, try to render the text fallback immediately
+            if (signerName) {
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.font = 'italic bold 28px serif';
+              ctx.fillStyle = '#1e3a8a';
+              ctx.textBaseline = 'middle';
+              ctx.textAlign = 'center';
+              ctx.fillText(signerName, canvas.width / 2, canvas.height / 2);
+              
+              const dataUrl = canvas.toDataURL('image/png');
+              setRasterizedUrl(dataUrl);
+              setIsLoaded(true);
+            }
           };
         } else if (signerName) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -138,7 +152,7 @@ export default function SignatureDisplay({
         }
       } catch (err) {
         console.warn('Rasterization error:', err);
-        if (isMounted) setHasError(true);
+        if (isMounted) setErrorState(true);
       }
     };
 
@@ -147,7 +161,7 @@ export default function SignatureDisplay({
     return () => {
       isMounted = false;
     };
-  }, [cleanData, hasError, signerName]);
+  }, [cleanData, errorState, signerName]);
 
   return (
     <div className={cn("signature-wrapper relative inline-block overflow-visible", className)} style={{ minWidth: '120px', minHeight: '40px' }}>

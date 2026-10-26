@@ -83,8 +83,41 @@ export interface SaleItem {
   cost_price?: number;
 }
 
+export interface DeliveryChecklist {
+  condition: 'lacrado' | 'seminovo' | string;
+  marks_of_use: string;
+  accessories: {
+    box: boolean;
+    charger: boolean;
+    cable: boolean;
+    manual: boolean;
+    others: string;
+    // For consoles
+    controls?: number;
+    hdmi_cable?: boolean;
+    power_cable?: boolean;
+  };
+  observations?: string;
+}
+
+export interface WarrantyHistory {
+  id: string;
+  sale_id: string;
+  entry_date: string;
+  description: string;
+  technical_evaluation?: string;
+  diagnosis?: string;
+  resolution?: string;
+  status: 'Solicitação recebida' | 'Em avaliação técnica' | 'Aguardando providência' | 'Em reparo' | 'Concluído' | 'Produto devolvido';
+  return_date?: string;
+  notes?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface Sale {
   id: string;
+  warranty_term_id?: string;
   iphone_id?: string;
   console_id?: string;
   items?: SaleItem[];
@@ -109,6 +142,8 @@ export interface Sale {
   witness2_name?: string;
   witness2_cpf?: string;
   witness2_signature?: string;
+  delivery_checklist?: DeliveryChecklist;
+  warranty_months?: number;
 }
 
 export interface PriceTableItem {

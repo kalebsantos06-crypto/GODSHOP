@@ -9,7 +9,7 @@ import { format, addMonths, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { parseLocalDate, getSaleClient } from '../lib/dateUtils';
 import { getConditionLabel, getWarrantyMonths } from '../lib/utils';
-import { Printer, ArrowLeft, Download, MessageCircle, FileDown, Smartphone, Share2, Copy, Check, ExternalLink, ShieldCheck, PenTool, Camera, Trash2, Plus, Image as ImageIcon, Lock, AlertTriangle, Eye, RefreshCw, Sparkles, CheckSquare } from 'lucide-react';
+import { Printer, ArrowLeft, Download, MessageCircle, FileDown, Smartphone, Share2, Copy, Check, ExternalLink, ShieldCheck, PenTool, Camera, Trash2, Plus, Image as ImageIcon, Lock, AlertTriangle, Eye, RefreshCw, Sparkles, CheckSquare, User } from 'lucide-react';
 import { toast } from 'sonner';
 import SignatureDisplay from '../components/SignatureDisplay';
 import LoadingScreen from '../components/LoadingScreen';
@@ -33,11 +33,8 @@ const setLocalSales = (sales: any[]) => {
     const sliced = Array.isArray(sales) ? sales.slice(-40) : [];
     const sanitized = sliced.map(s => {
       if (!s) return s;
-      const copy = { ...s };
-      if (copy.signature_data && typeof copy.signature_data === 'string' && copy.signature_data.length > 500) {
-        copy.signature_data = copy.signature_data.substring(0, 100) + '...[truncated]';
-      }
-      return copy;
+      // DO NOT TRUNCATE signature_data anymore, as it causes loss of signature in PDFs and local view
+      return { ...s };
     });
     safeSetLocalStorage('db_fallback_sales', JSON.stringify(sanitized));
   } catch (e) {}
@@ -258,7 +255,10 @@ export default function GuaranteeNote() {
     return sale ? consoles.find(c => c.id === sale.console_id) : null;
   }, [sale, saleItems, consoles]);
 
-  const warrantyMonths = useMemo(() => getWarrantyMonths(iphone?.condition || consoleItem?.condition), [iphone, consoleItem]);
+  const warrantyMonths = useMemo(() => {
+    if (sale?.warranty_months) return Number(sale.warranty_months);
+    return getWarrantyMonths(iphone?.condition || consoleItem?.condition);
+  }, [sale, iphone, consoleItem]);
   const saleDate = useMemo(() => sale ? parseLocalDate(sale.sale_date) : new Date(), [sale]);
   const endDate = useMemo(() => addMonths(saleDate, warrantyMonths), [saleDate, warrantyMonths]);
 
@@ -509,7 +509,7 @@ export default function GuaranteeNote() {
     const printWindow = window.open('', '_blank', 'width=850,height=950');
     if (!printWindow) return toast.error('Pop-up bloqueado!');
     const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map(s => s.outerHTML).join('\n');
-    printWindow.document.write(`<html><head><title>Termo de Garantia</title>${styles}</head><body class="p-6">${printContent.innerHTML}<script>window.onload=()=>setTimeout(()=>{window.print();window.close()},400);</script></body></html>`);
+    printWindow.document.write(`<html><head><title>Termo de Garantia</title>${styles}</head><body class="p-6">${printContent.innerHTML}<script>window.onload=()=>setTimeout(()=>{window.print();window.close()},1000);</script></body></html>`);
     printWindow.document.close();
   };
 
@@ -518,7 +518,7 @@ export default function GuaranteeNote() {
     if (!printContent) return;
     const toastId = toast.loading('Gerando PDF do Termo de Garantia...');
     try {
-      // Ensure all images (logos and signatures) are fully loaded before capturing canvas
+      // 1. Pre-load all images including logos
       const images = Array.from(printContent.querySelectorAll('img'));
       await Promise.all(
         images.map(img => {
@@ -533,21 +533,19 @@ export default function GuaranteeNote() {
       const html2canvas = (await import('html2canvas-pro')).default;
       const { jsPDF } = await import('jspdf');
 
-      // Wait for all signature elements to be fully loaded
+      // 2. Wait for signature rasterization to complete
       const waitForSignatures = async () => {
-        const signatureElements = Array.from(printContent.querySelectorAll('[data-signature-loaded]'));
         let attempts = 0;
-        while (attempts < 25) {
-          const allLoaded = signatureElements.every(el => el.getAttribute('data-signature-loaded') === 'true');
-          if (allLoaded && signatureElements.length > 0) break;
-          // If no elements found yet but we expect them, wait a bit
-          if (signatureElements.length === 0 && attempts < 5) {
-             // Re-query in case they are mounting
-             const retryElements = Array.from(printContent.querySelectorAll('[data-signature-loaded]'));
-             if (retryElements.length > 0) {
-               attempts = 0; // reset
-               continue;
-             }
+        while (attempts < 60) {
+          const signatureElements = Array.from(printContent.querySelectorAll('[data-signature-loaded]'));
+          const wrappers = Array.from(printContent.querySelectorAll('.signature-wrapper'));
+          
+          if (wrappers.length > 0) {
+            const allLoaded = signatureElements.length === wrappers.length && 
+                             signatureElements.every(el => el.getAttribute('data-signature-loaded') === 'true');
+            if (allLoaded) break;
+          } else if (attempts > 5) {
+            break;
           }
           await new Promise(resolve => setTimeout(resolve, 200));
           attempts++;
@@ -555,153 +553,124 @@ export default function GuaranteeNote() {
       };
       await waitForSignatures();
 
-      // Ensure we are at the top for better capture consistency
+      // 3. Prepare for capture: temporary scroll and layout freeze
+      const originalStyle = printContent.style.cssText;
       const originalScrollY = window.scrollY;
-      window.scrollTo(0, 0);
+      
+      // Force the content to be fully visible and wide enough for A4 proportions
+      // Using a fixed width and letting height be auto ensures consistent aspect ratio
+      printContent.style.width = '794px'; // A4 width at 96 DPI
+      printContent.style.height = 'auto';
+      printContent.style.maxHeight = 'none';
+      printContent.style.overflow = 'visible';
+      printContent.style.position = 'absolute';
+      printContent.style.left = '0';
+      printContent.style.top = '0';
+      printContent.style.zIndex = '9999';
+      printContent.style.backgroundColor = '#ffffff';
 
-      // Wait a bit for layout to settle
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      window.scrollTo(0, 0);
+      // Give more time for the layout to settle and images to be painted
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       const canvas = await html2canvas(printContent, {
-        scale: 2,
+        scale: 3, // Higher quality for better text and signature legibility
         useCORS: true,
         allowTaint: true,
-        logging: true, // Enable logging to debug capture issues
+        logging: false,
         backgroundColor: '#ffffff',
-        width: printContent.offsetWidth,
-        height: printContent.scrollHeight,
-        windowWidth: 1200,
-        windowHeight: printContent.scrollHeight + 500,
-        y: 0,
+        width: 794,
+        height: printContent.scrollHeight + 40, // Add some padding at the bottom
+        windowWidth: 794,
         x: 0,
+        y: 0,
         scrollX: 0,
         scrollY: 0,
         onclone: (clonedDoc, element) => {
-          // Force all images to be visible and ensure they are loaded in the clone
-          const images = Array.from(clonedDoc.getElementsByTagName('img'));
-          for (const img of images) {
-            img.style.visibility = 'visible';
-            img.style.display = 'block';
-            img.style.opacity = '1';
-            
-            // Ensure data URIs are not mangled
-            if (img.src.startsWith('data:')) {
-               // Nothing to do, they are already local
-            }
-          }
+          const el = element as HTMLElement;
+          el.style.width = '794px';
+          el.style.height = 'auto';
+          el.style.padding = '40px';
           
-          // Ensure the signature wrappers are visible
-          const wrappers = clonedDoc.querySelectorAll('.signature-wrapper');
-          wrappers.forEach(w => {
-            const el = w as HTMLElement;
-            el.style.visibility = 'visible';
-            el.style.display = 'inline-block';
-            el.style.opacity = '1';
+          // Ensure all elements are visible in clone and prevent cutoffs
+          const allElements = el.querySelectorAll('*');
+          allElements.forEach(item => {
+            const node = item as HTMLElement;
+            if (node.style.overflow === 'hidden' || node.style.overflowY === 'auto') {
+              node.style.overflow = 'visible';
+              node.style.maxHeight = 'none';
+              node.style.height = 'auto';
+            }
+            // Fix for some CSS properties that can break canvas rendering
+            if (node.style.backdropFilter) node.style.backdropFilter = 'none';
           });
-
-          // Ensure the print container itself is fully visible and not clipped
-          if (element) {
-            element.style.height = 'auto';
-            element.style.maxHeight = 'none';
-            element.style.overflow = 'visible';
-            element.style.padding = '40px';
-            element.style.backgroundColor = '#ffffff';
-          }
-
-          // Force parent containers to not clip
-          let parent = element?.parentElement;
-          while (parent) {
-            parent.style.maxHeight = 'none';
-            parent.style.overflow = 'visible';
-            parent.style.height = 'auto';
-            parent = parent.parentElement;
-          }
         }
       });
 
-      // Restore scroll position
+      // Restore original state
+      printContent.style.cssText = originalStyle;
       window.scrollTo(0, originalScrollY);
 
-      const imgData = canvas.toDataURL('image/png');
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       
-      let heightLeft = pdfHeight;
+      // Calculate how many pages we need
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfImgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      let heightLeft = pdfImgHeight;
       let position = 0;
 
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+      // Add first page
+      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfImgHeight, undefined, 'FAST');
       heightLeft -= pageHeight;
 
-      while (heightLeft >= 0) {
-        position = heightLeft - pdfHeight;
+      // Add subsequent pages if content is longer than one A4
+      while (heightLeft > 0) {
+        position = heightLeft - pdfImgHeight;
         pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfImgHeight, undefined, 'FAST');
         heightLeft -= pageHeight;
       }
       
-      const fileName = `termo_garantia_${sale.id.slice(0, 8)}.pdf`;
+      const cleanClientName = (client?.name || 'Cliente').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 25);
+      const dateStr = format(saleDate, 'dd_MM_yyyy');
+      const fileName = `Termo_Garantia_${cleanClientName}_${dateStr}.pdf`;
 
       if (Capacitor.isNativePlatform()) {
         const pdfDataUri = pdf.output('datauristring');
         const base64Data = pdfDataUri.split(',')[1];
 
-        let savedFileUri = null;
         try {
-          const writeFileResult = await Filesystem.writeFile({
+          // Check for storage permission on Android
+          await checkAndRequestStoragePermission();
+          
+          await Filesystem.writeFile({
             path: fileName,
             data: base64Data,
-            directory: Directory.Documents,
+            directory: Directory.Cache,
             recursive: true
           });
-          savedFileUri = writeFileResult.uri;
-        } catch (e1) {
-          try {
-            const writeFileResult = await Filesystem.writeFile({
-              path: fileName,
-              data: base64Data,
-              directory: Directory.Cache,
-              recursive: true
-            });
-            savedFileUri = writeFileResult.uri;
-          } catch (e2) {
-            console.error('Filesystem write error:', e2);
-          }
-        }
+          
+          const uriResult = await Filesystem.getUri({
+            path: fileName,
+            directory: Directory.Cache
+          });
 
-        let fileUri = savedFileUri;
-        if (!fileUri) {
-          try {
-            const uriResult = await Filesystem.getUri({
-              path: fileName,
-              directory: Directory.Documents
-            });
-            fileUri = uriResult.uri;
-          } catch (e3) {}
-        }
-
-        const { Share } = await import('@capacitor/share');
-        if (Share) {
-          try {
-            await Share.share({
-              title: 'Termo de Garantia GODSHOP',
-              text: 'Aqui está o seu Termo de Garantia em PDF.',
-              url: fileUri || pdfDataUri,
-              dialogTitle: 'Salvar ou Compartilhar PDF'
-            });
-            toast.success('PDF gerado e pronto para compartilhar!', { id: toastId });
-            return;
-          } catch (shareErr) {
-            console.warn('Share error:', shareErr);
-          }
-        }
-
-        if (fileUri) {
-          toast.success('PDF salvo com sucesso!', { id: toastId });
-        } else {
+          const { Share } = await import('@capacitor/share');
+          await Share.share({
+            title: 'Termo de Garantia GODSHOP',
+            text: `Termo de Garantia - ${client?.name} (${dateStr})`,
+            url: uriResult.uri,
+            dialogTitle: 'Compartilhar Termo em PDF'
+          });
+          toast.success('PDF pronto para compartilhar!', { id: toastId });
+        } catch (e) {
+          console.error('Mobile PDF error:', e);
           pdf.save(fileName);
-          toast.success('PDF baixado!', { id: toastId });
+          toast.success('PDF baixado (diretório padrão)!', { id: toastId });
         }
       } else {
         pdf.save(fileName);
@@ -799,25 +768,43 @@ export default function GuaranteeNote() {
       <div className="bg-white border shadow-sm rounded-xl max-h-[82vh] overflow-y-auto">
         <div ref={printRef} className="p-6 sm:p-10 w-full space-y-6 text-slate-900 bg-white text-xs sm:text-sm">
           {/* Header */}
-          <div className="border-b pb-6 text-center">
-            {logoImage && <img src={logoImage} alt="Logo" className="h-16 w-16 object-contain mx-auto mb-3" />}
-            <h2 className="text-xl font-bold uppercase tracking-wider text-slate-900">Termo de Garantia e Contrato de Compra</h2>
-            <p className="text-xs text-slate-500 mt-1">Este termo estabelece a cobertura e as cláusulas acordadas para o produto comercializado.</p>
+          <div className="border-b-2 border-[#D4AF37] pb-6 text-center relative">
+            {logoImage && <img src={logoImage} alt="Logo" className="h-20 w-20 object-contain mx-auto mb-3" />}
+            <h1 className="text-2xl font-black uppercase tracking-[0.2em] text-slate-900">Termo de Garantia</h1>
+            <p className="text-[#D4AF37] font-bold text-xs uppercase tracking-widest mt-1">Contrato de Compra e Venda - GODSHOP</p>
+            
+            <div className="mt-4 flex justify-between items-end text-left px-2 border-t border-[#D4AF37]/20 pt-4">
+              <div className="space-y-1">
+                <span className="text-[9px] font-black text-slate-400 uppercase block leading-none tracking-tighter">Cliente</span>
+                <span className="text-sm font-black text-slate-900 leading-none">{client?.name || 'Cliente não identificado'}</span>
+              </div>
+              <div className="text-right space-y-1">
+                <span className="text-[9px] font-black text-slate-400 uppercase block leading-none tracking-tighter">Data da Venda</span>
+                <span className="text-sm font-black text-slate-900 leading-none">{format(saleDate, "dd/MM/yyyy", { locale: ptBR })}</span>
+              </div>
+            </div>
+
+            {sale.warranty_term_id && (
+              <div className="absolute top-0 right-0 text-right print:top-0">
+                <span className="text-[8px] font-black text-slate-400 uppercase block">Termo Nº</span>
+                <span className="text-xs font-black text-slate-900 font-mono">{sale.warranty_term_id}</span>
+              </div>
+            )}
           </div>
 
           {/* Section 1: Customer Info */}
           <section className="space-y-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 border-b pb-2">
-              Dados do Cliente
+            <h3 className="text-sm font-black uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-1.5 flex items-center gap-2">
+              <User className="h-4 w-4 text-[#D4AF37]" /> Dados do Titular
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-700">
-              <p><span className="font-semibold text-slate-900">Nome completo:</span> {client?.name}</p>
-              <p><span className="font-semibold text-slate-900">Telefone:</span> {client?.phone || 'Não informado'}</p>
-              {client?.cpf && <p><span className="font-semibold text-slate-900">CPF:</span> {client.cpf}</p>}
-              {client?.email && <p><span className="font-semibold text-slate-900">E-mail:</span> {client.email}</p>}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-700">
+              <p><span className="font-bold text-slate-900 uppercase text-[10px] block text-slate-400">Nome completo</span> {client?.name}</p>
+              <p><span className="font-bold text-slate-900 uppercase text-[10px] block text-slate-400">Telefone/WhatsApp</span> {client?.phone || 'Não informado'}</p>
+              {client?.cpf && <p><span className="font-bold text-slate-900 uppercase text-[10px] block text-slate-400">CPF</span> {client.cpf}</p>}
+              {client?.email && <p><span className="font-bold text-slate-900 uppercase text-[10px] block text-slate-400">E-mail</span> {client.email}</p>}
               {(client?.address || client?.city) && (
                 <p className="md:col-span-2">
-                  <span className="font-semibold text-slate-900">Endereço:</span> {client.address || ''} {client.city ? `- ${client.city}/${client.state || ''}` : ''}
+                  <span className="font-bold text-slate-900 uppercase text-[10px] block text-slate-400">Endereço de Registro</span> {client.address || ''} {client.city ? `- ${client.city}/${client.state || ''}` : ''}
                 </p>
               )}
             </div>
@@ -825,29 +812,31 @@ export default function GuaranteeNote() {
 
           {/* Section 2: Product Info */}
           <section className="space-y-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 border-b pb-2">
-              Detalhes do Aparelho / Equipamento
+            <h3 className="text-sm font-black uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-1.5 flex items-center gap-2">
+              <Smartphone className="h-4 w-4 text-[#D4AF37]" /> Identificação do Equipamento
             </h3>
             <div className="space-y-3">
               {saleItems.length > 0 ? (
-                saleItems.map((it: any, idx: number) => (
-                  <div key={idx} className="p-3 border rounded-xl bg-slate-50/50">
-                    <p className="font-bold text-slate-900">{it.name || it.model}</p>
-                    <div className="grid grid-cols-2 gap-2 mt-1 text-xs text-slate-500">
-                      {it.storage && <p><span>Armazenamento:</span> {it.storage}</p>}
-                      {it.color && <p><span>Cor:</span> {it.color}</p>}
-                      {it.imei && <p className="col-span-2 font-mono"><span>IMEI/Serial:</span> {it.imei}</p>}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {saleItems.map((it: any, idx: number) => (
+                    <div key={idx} className="p-3 border-l-4 border-[#D4AF37] bg-slate-50/80 rounded-r-xl">
+                      <p className="font-black text-slate-900 uppercase text-xs">{it.name || it.model}</p>
+                      <div className="grid grid-cols-2 gap-2 mt-1 text-[11px] text-slate-600 font-medium">
+                        {it.storage && <p>Capacidade: {it.storage}</p>}
+                        {it.color && <p>Cor: {it.color}</p>}
+                        {it.imei && <p className="col-span-2 font-mono text-[10px] tracking-tight">IMEI/SN: {it.imei}</p>}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               ) : (
-                <div className="p-3 border rounded-xl bg-slate-50/50">
-                  <p className="font-bold text-slate-900">{iphone ? `iPhone ${iphone.model} - ${iphone.storage} (${iphone.color})` : (consoleItem ? `${consoleItem.model} - ${consoleItem.version}` : 'Produto')}</p>
-                  <div className="grid grid-cols-2 gap-2 mt-1 text-xs text-slate-500">
-                    {iphone?.storage && <p><span>Armazenamento:</span> {iphone.storage}</p>}
-                    {iphone?.color && <p><span>Cor:</span> {iphone.color}</p>}
-                    {iphone?.imei && <p className="col-span-2 font-mono"><span>IMEI/Serial:</span> {iphone.imei}</p>}
-                    {iphone?.condition && <p className="capitalize"><span>Condição:</span> {getConditionLabel(iphone.condition)}</p>}
+                <div className="p-4 border-l-4 border-[#D4AF37] bg-slate-50/80 rounded-r-xl">
+                  <p className="font-black text-slate-900 uppercase text-sm">{iphone ? `iPhone ${iphone.model}` : (consoleItem ? `${consoleItem.model}` : 'Equipamento')}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2 text-[11px] text-slate-600 font-bold uppercase tracking-tight">
+                    {iphone?.storage && <div><span className="block text-[9px] text-slate-400">Armazenamento</span>{iphone.storage}</div>}
+                    {iphone?.color && <div><span className="block text-[9px] text-slate-400">Cor</span>{iphone.color}</div>}
+                    {iphone?.condition && <div><span className="block text-[9px] text-slate-400">Condição</span>{getConditionLabel(iphone.condition)}</div>}
+                    {iphone?.imei && <div className="col-span-2"><span className="block text-[9px] text-slate-400">Número de Série / IMEI</span><span className="font-mono text-xs">{iphone.imei}</span></div>}
                   </div>
                 </div>
               )}
@@ -856,100 +845,244 @@ export default function GuaranteeNote() {
 
           {/* Section 3: Sale Details */}
           <section className="space-y-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 border-b pb-2">
-              Dados de Venda e Pagamento
+            <h3 className="text-sm font-black uppercase tracking-wider text-slate-500 border-b border-slate-100 pb-1.5 flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-[#D4AF37]" /> Condições Comerciais
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-700">
-              <p><span className="font-semibold text-slate-900">Data da Compra:</span> {format(saleDate, "d 'de' MMMM 'de' yyyy", { locale: ptBR })}</p>
-              <p><span className="font-semibold text-slate-900">Valor do Equipamento:</span> {formatBRL(sale.sell_price)}</p>
-              {sale.down_payment && sale.down_payment > 0 ? (
-                <>
-                  <p><span className="font-semibold text-slate-900">Valor de Entrada:</span> {formatBRL(sale.down_payment)}</p>
-                  <p><span className="font-semibold text-slate-900">Saldo Restante:</span> {formatBRL(sale.sell_price - sale.down_payment)}</p>
-                </>
-              ) : null}
-              <p className="md:col-span-2">
-                <span className="font-semibold text-slate-900">Forma de Pagamento acordada:</span> {sale.payment_method || 'PIX'}
-                {sale.installments && sale.installments > 1 && (
-                  ` (${sale.installments}x ${sale.installment_frequency || 'Mensal'})`
-                )}
-              </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-slate-700">
+              <div>
+                <span className="font-bold text-slate-400 uppercase text-[9px] block mb-0.5">Data da Operação</span>
+                <span className="font-semibold">{format(saleDate, "dd/MM/yyyy", { locale: ptBR })}</span>
+              </div>
+              <div>
+                <span className="font-bold text-slate-400 uppercase text-[9px] block mb-0.5">Valor Total</span>
+                <span className="font-black text-slate-900">{formatBRL(sale.sell_price)}</span>
+              </div>
+              <div className="col-span-2">
+                <span className="font-bold text-slate-400 uppercase text-[9px] block mb-0.5">Forma de Pagamento</span>
+                <span className="font-semibold">{sale.payment_method || 'PIX'} {sale.installments && sale.installments > 1 && `(${sale.installments}x)`}</span>
+              </div>
             </div>
 
             {sale.installments && sale.installments > 1 && (
-              <div className="bg-slate-50 p-4 rounded-xl border mt-3 space-y-2 text-sm">
-                <p className="font-bold text-slate-800">Plano de Parcelamento Ativo:</p>
-                <p className="font-semibold text-blue-700">
-                  {sale.installments} parcelas de {formatBRL((sale.sell_price - (sale.down_payment || 0)) / sale.installments)} ({sale.installment_frequency === 'Semanal' ? 'Semanais' : (sale.installment_frequency === 'Quinzenal' ? 'Quinzenais' : 'Mensais')})
+              <div className="bg-slate-900 p-4 rounded-xl border border-[#D4AF37]/30 mt-3 space-y-1 text-white shadow-lg">
+                <p className="text-[10px] font-black text-[#D4AF37] uppercase tracking-[0.1em]">Plano de Pagamento Parcelado</p>
+                <p className="text-lg font-black tracking-tight">
+                  {sale.installments} parcelas de {formatBRL((sale.sell_price - (sale.down_payment || 0)) / sale.installments)}
                 </p>
-                <p className="text-[11px] text-slate-500 leading-normal">
-                  * A entrada de {formatBRL(sale.down_payment || 0)} foi devidamente abatida do saldo parcelado. Os pagamentos deverão ser realizados nos respectivos vencimentos para evitar mora.
+                <p className="text-[10px] text-slate-400 italic">
+                  * Periodicidade: {sale.installment_frequency || 'Mensal'}. O atraso superior a 10 dias poderá ensejar as medidas previstas na cláusula de Reserva de Domínio.
                 </p>
               </div>
             )}
           </section>
 
-          {/* Section 4: Warranty terms */}
-          <section className="space-y-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 border-b pb-2">
-              Cláusulas de Garantia Legal e Comercial
-            </h3>
-            <div className="bg-slate-50 p-4 rounded-xl border text-xs text-slate-600 space-y-3 leading-relaxed">
-              <p>1. <strong>Prazo e Cobertura:</strong> Este aparelho possui garantia de {warrantyMonths} meses, cobrindo exclusivamente defeitos de hardware decorrentes de fabricação. A garantia é válida de {format(saleDate, "d 'de' MMMM 'de' yyyy", { locale: ptBR })} até {format(endDate, "d 'de' MMMM 'de' yyyy", { locale: ptBR })}.</p>
-              <p>2. <strong>Exclusões da Garantia:</strong> Não cobrimos em hipótese alguma danos causados por quedas, batidas, tela quebrada ou riscada, trincados, contato com líquidos (água/umidade/oxidação), uso de carregadores paralelos, jailbreak ou software malicioso, nem violações de segurança. <strong className="text-red-700 bg-red-50 px-1 border border-red-100 rounded">ATENÇÃO: Caso o aparelho apresente qualquer sinal físico de dano ou marcas de queda, a cobertura de garantia é perdida imediatamente. O aparelho deve estar no mesmo perfeito estado de conservação em que foi retirado.</strong></p>
-              <p>3. <strong>Violação de Selos:</strong> Selos internos e externos rompidos ou removidos anulam imediatamente a cobertura técnica de garantia.</p>
-              <p>4. <strong>Backup de Dados:</strong> É de responsabilidade do comprador a preservação de seus dados e mídias. Não nos responsabilizamos por perdas de informações.</p>
-            </div>
-          </section>
-
-          {/* Section 5: Domain Reserve Clause (if installments exist) */}
-          {((sale.installments && sale.installments > 1) || sale.payment_method?.toLowerCase().includes('promissória') || sale.payment_method?.toLowerCase().includes('carnê')) && (
-            <section className="space-y-3">
-              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 border-b pb-2">
-                Reserva de Domínio e Inadimplência
+          {/* Section 4: Checklist de Entrega e Conferência (Premium Layout) */}
+          {(sale.delivery_checklist || checklistVerifiedAt) && (
+            <section className="space-y-4 bg-slate-50/50 p-6 rounded-2xl border border-slate-100 shadow-inner">
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2 border-b border-slate-200 pb-2">
+                <CheckSquare className="h-3.5 w-3.5 text-[#D4AF37]" /> Checklist de Conferência do Equipamento
               </h3>
-              <div className="bg-slate-50 p-4 rounded-xl border text-xs text-slate-600 space-y-2.5 leading-relaxed">
-                <p>O aparelho objeto deste contrato é vendido sob <strong>Reserva de Domínio</strong> (Art. 521 do Código Civil), permanecendo em propriedade resolúvel do vendedor até que todas as parcelas e encargos sejam quitados integralmente pelo comprador.</p>
-                <p>O comprador assume a posse direta e o encargo de depositário, ficando proibido de doar, alienar, vender ou empenhar o aparelho antes da quitação total das obrigações contratuais.</p>
-                <p>O atraso de qualquer parcela por mais de 10 (dez) dias autoriza o vendedor a declarar antecipadamente vencidas as obrigações e exigir o saldo total restante ou reaver o produto de forma imediata.</p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                {/* Condition and Marks */}
+                <div className="md:col-span-5 space-y-4">
+                  <div className="space-y-1">
+                    <span className="font-bold text-slate-400 uppercase text-[9px] block">Estado de Conservação</span>
+                    <div className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full bg-[#D4AF37]"></span>
+                      <span className="text-xs font-black uppercase text-slate-900">
+                        {sale.delivery_checklist?.condition === 'lacrado' ? 'Novo / Lacrado' : (sale.delivery_checklist?.condition === 'seminovo' ? 'Seminovo / Usado' : (sale.delivery_checklist?.condition || 'Não informado'))}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="font-bold text-slate-400 uppercase text-[9px] block">Marcas de Uso / Observações</span>
+                    <p className="text-[10px] font-medium text-slate-600 leading-relaxed bg-white p-3 rounded-lg border border-slate-200/60 italic">
+                      {sale.delivery_checklist?.marks_of_use || 'Nenhuma avaria ou marca de uso significativa identificada no ato da entrega.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Accessories Grid */}
+                <div className="md:col-span-7 space-y-2">
+                  <span className="font-bold text-slate-400 uppercase text-[9px] block mb-2">Acessórios e Itens Entregues</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {sale.delivery_checklist?.accessories ? (
+                      <>
+                        {[
+                          { key: 'box', label: 'Caixa Original' },
+                          { key: 'charger', label: 'Carregador' },
+                          { key: 'cable', label: 'Cabo USB' },
+                          { key: 'manual', label: 'Manual/Docs' },
+                          { key: 'hdmi_cable', label: 'Cabo HDMI' },
+                          { key: 'power_cable', label: 'Cabo Força' }
+                        ].map(acc => sale.delivery_checklist.accessories[acc.key] && (
+                          <div key={acc.key} className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-md">
+                            <Check className="h-3 w-3 text-emerald-600" />
+                            <span className="text-[9px] font-bold text-emerald-800 uppercase">{acc.label}</span>
+                          </div>
+                        ))}
+                        {sale.delivery_checklist.accessories.controls > 0 && (
+                          <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-md">
+                            <Check className="h-3 w-3 text-emerald-600" />
+                            <span className="text-[9px] font-bold text-emerald-800 uppercase">{sale.delivery_checklist.accessories.controls} Controle(s)</span>
+                          </div>
+                        )}
+                        {sale.delivery_checklist.accessories.others && (
+                          <div className="col-span-2 flex items-center gap-1.5 bg-blue-50 border border-blue-100 px-2 py-1 rounded-md">
+                            <Check className="h-3 w-3 text-blue-600" />
+                            <span className="text-[9px] font-bold text-blue-800 uppercase truncate">Outro: {sale.delivery_checklist.accessories.others}</span>
+                          </div>
+                        )}
+                        {!Object.values(sale.delivery_checklist.accessories).some(v => v === true || (typeof v === 'number' && v > 0) || (typeof v === 'string' && v.length > 0)) && (
+                          <span className="text-[10px] text-slate-400 italic col-span-3">Somente o aparelho principal (sem acessórios).</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 italic col-span-3">Informação não registrada.</span>
+                    )}
+                  </div>
+                  
+                  {checklistVerifiedAt && (
+                    <div className="mt-4 pt-2 border-t border-slate-200 flex justify-between items-center text-[8px] text-slate-400 font-bold uppercase tracking-wider">
+                      <span>Conferido em: {format(new Date(checklistVerifiedAt), 'dd/MM/yyyy HH:mm')}</span>
+                      <span>Por: {checklistVerifiedBy || 'Sistema'}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </section>
           )}
 
-          {/* Termo de Aceite */}
-          <section className="space-y-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 border-b pb-2">
-              Termo de Aceite
+          {/* Section 4: Improved Warranty Redação */}
+          <section className="space-y-4">
+            <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1.5 flex items-center gap-2">
+              Cláusulas e Condições de Garantia
             </h3>
-            <div className="bg-slate-50 p-4 rounded-xl border text-xs text-slate-600 leading-relaxed text-justify">
-              Declaro que conferi pessoalmente o produto, seus acessórios e seu funcionamento, incluindo os itens marcados como "Verificado" neste checklist. Confirmo que o equipamento foi entregue nas condições descritas e concordo que este checklist e as fotografias anexadas passam a integrar o Termo de Garantia e o Contrato de Compra e Venda para todos os efeitos legais.
+            
+            <div className="space-y-6 text-[10px] sm:text-[11px] leading-relaxed text-slate-700 text-justify">
+              {/* Cláusula 1: Prazo e Cobertura */}
+              <div className="space-y-2">
+                <p className="font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+                  <span className="bg-slate-900 text-white px-1.5 py-0.5 rounded text-[9px]">01</span> Prazo e Cobertura da Garantia
+                </p>
+                <div className="p-4 bg-slate-50/50 rounded-xl border border-slate-100 space-y-2 text-[10px]">
+                  <p>A garantia oferecida pela <strong>GODSHOP</strong> compreende o período total de <strong>{warrantyMonths} meses</strong>, contados a partir da data de emissão deste termo ({format(saleDate, "dd/MM/yyyy")}). Este prazo já inclui os 90 dias de garantia legal previstos no Art. 26, II, do Código de Defesa do Consumidor (CDC).</p>
+                  <p>A cobertura abrange exclusivamente defeitos de fabricação ou vícios ocultos de hardware que se manifestem sob condições normais de uso. Componentes sujeitos a desgaste natural, como baterias e acessórios, possuem cobertura limitada de 90 dias conforme legislação.</p>
+                </div>
+              </div>
+
+              {/* Cláusula 2: Exclusões */}
+              <div className="space-y-2">
+                <p className="font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+                  <span className="bg-slate-900 text-white px-1.5 py-0.5 rounded text-[9px]">02</span> Hipóteses de Exclusão da Cobertura
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="p-3 bg-red-50/30 border border-red-100 rounded-lg">
+                    <p className="font-bold text-red-900 mb-1">Danos Físicos e Líquidos</p>
+                    <ul className="space-y-1 text-[10px]">
+                      <li>• Quedas, impactos, pressão física ou torção do chassi.</li>
+                      <li>• Contato com líquidos, umidade excessiva ou oxidação.</li>
+                      <li>• Telas quebradas, trincadas ou com manchas de pressão.</li>
+                    </ul>
+                  </div>
+                  <div className="p-3 bg-amber-50/30 border border-amber-100 rounded-lg">
+                    <p className="font-bold text-amber-900 mb-1">Uso Inadequado e Intervenções</p>
+                    <ul className="space-y-1 text-[10px]">
+                      <li>• Uso de acessórios (carregadores/cabos) incompatíveis.</li>
+                      <li>• Reparos ou abertura por técnicos não autorizados.</li>
+                      <li>• Violação dos selos internos de segurança da loja.</li>
+                    </ul>
+                  </div>
+                </div>
+                <p className="text-[10px] bg-slate-100 p-2 rounded border-l-2 border-slate-400">
+                  <strong className="text-slate-900">Nota:</strong> A presença de riscos estéticos ou marcas de uso leve, sem relação causal com o defeito reclamado, não enseja a perda automática da garantia.
+                </p>
+              </div>
+
+              {/* Cláusula 3: Atendimento */}
+              <div className="space-y-2">
+                <p className="font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+                  <span className="bg-slate-900 text-white px-1.5 py-0.5 rounded text-[9px]">03</span> Procedimento para Acionamento
+                </p>
+                <div className="p-4 border border-dashed border-slate-300 rounded-xl">
+                  <ol className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 list-decimal list-inside text-[10px]">
+                    <li>Contatar a GODSHOP pelos canais oficiais registrados.</li>
+                    <li>Apresentar o número deste termo ou comprovante de venda.</li>
+                    <li>Relatar detalhadamente a falha técnica identificada.</li>
+                    <li>Entregar o produto para avaliação técnica (prazo legal de até 30 dias).</li>
+                  </ol>
+                </div>
+              </div>
+
+              {/* Cláusula 4: Backup e Dados */}
+              <div className="space-y-2">
+                <p className="font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+                  <span className="bg-slate-900 text-white px-1.5 py-0.5 rounded text-[9px]">04</span> Backup e Privacidade de Dados
+                </p>
+                <p>É responsabilidade exclusiva do cliente realizar o backup de seus dados antes da entrega do aparelho. A GODSHOP não se responsabiliza por perdas de informações decorrentes de reparos necessários. O acesso técnico será limitado ao necessário para a solução do vício.</p>
+              </div>
             </div>
           </section>
 
-          {/* Signatures */}
-          <div className="pt-12 grid grid-cols-2 gap-10 text-center border-t border-dashed opacity-100 visible" style={{ minHeight: '180px' }}>
-            <div className="pt-3 flex flex-col items-center justify-end">
-              <div className="min-h-[80px] flex items-center justify-center mb-2 w-full overflow-visible">
+          {/* Section 5: LGPD e Privacidade */}
+          <div className="mt-6 p-4 bg-slate-50 border-t border-[#D4AF37] rounded-b-xl text-[9px] text-slate-400 leading-tight">
+            <p className="font-bold text-slate-500 uppercase mb-1 flex items-center gap-1">
+              <Lock className="h-3 w-3" /> Proteção de Dados (LGPD)
+            </p>
+            <p>Em conformidade com a Lei nº 13.709/2018, os dados pessoais aqui registrados (Nome, CPF, Endereço, Contatos e Identificadores do Produto) são utilizados estritamente para a finalidade de gestão comercial, controle de garantia e cumprimento de obrigações fiscais e legais, sendo vedado o compartilhamento com terceiros sem base legal ou consentimento expresso.</p>
+          </div>
+
+          {/* Termo de Aceite */}
+          <section className="space-y-4 pt-4">
+            <div className="bg-slate-50 p-5 rounded-2xl border-2 border-dashed border-slate-200 text-[11px] text-slate-700 leading-relaxed text-center italic">
+              “Declaro que recebi o(s) produto(s) identificado(s) neste documento e que tive a oportunidade de conferir suas condições externas, seu funcionamento, quando possível, e os acessórios entregues, conforme os registros preenchidos neste termo. Declaro também que recebi as informações sobre as condições de garantia aplicáveis, sem que este aceite implique renúncia aos direitos assegurados pela legislação.”
+            </div>
+          </section>
+
+          {/* Signatures organized side by side */}
+          <div className="pt-12 grid grid-cols-2 gap-12 text-center" style={{ minHeight: '180px' }}>
+            {/* Buyer Side */}
+            <div className="flex flex-col items-center justify-end">
+              <div className="min-h-[90px] flex items-center justify-center mb-2 w-full overflow-visible">
                 {currentSignatureData ? (
-                  <SignatureDisplay signatureData={currentSignatureData} signerName={signatureInfo?.client_name || client?.name} className="w-full max-w-[280px] h-auto object-contain" />
+                  <SignatureDisplay 
+                    signatureData={currentSignatureData} 
+                    signerName={signatureInfo?.client_name || client?.name} 
+                    className="w-full max-w-[240px] h-auto object-contain" 
+                  />
                 ) : (
-                  <span className="text-[11px] text-muted-foreground italic">(Pendente de Assinatura Digital)</span>
+                  <span className="text-[10px] text-slate-400 italic font-medium uppercase tracking-widest border border-slate-100 px-4 py-2 rounded-lg">Pendente de Assinatura</span>
                 )}
               </div>
-              <div className="border-t border-slate-300 w-4/5 mx-auto pt-1">
-                <p className="font-bold text-xs text-slate-900 uppercase">Comprador</p>
-                <p className="text-[10px] text-slate-600">{client?.name}</p>
+              <div className="border-t-2 border-slate-900 w-full pt-2">
+                <p className="font-black text-[11px] text-slate-900 uppercase tracking-tighter text-slate-400">Assinatura do Comprador</p>
+                <p className="text-[10px] text-slate-900 font-black uppercase mt-0.5">{client?.name}</p>
+                {client?.cpf && <p className="text-[8px] text-slate-400 font-mono">CPF: {client.cpf}</p>}
               </div>
             </div>
-            <div className="pt-3 flex flex-col items-center justify-end">
-              <div className="min-h-[80px] flex items-center justify-center mb-2 w-full">
-                <span className="text-2xl italic font-serif text-blue-900 font-bold">Kaleb Santos</span>
+
+            {/* Merchant Side */}
+            <div className="flex flex-col items-center justify-end">
+              <div className="min-h-[90px] flex items-center justify-center mb-2 w-full">
+                <div className="flex flex-col items-center">
+                  <div className="h-16 w-16 border-2 border-[#D4AF37]/20 rounded-full flex items-center justify-center mb-1">
+                     <ShieldCheck className="h-8 w-8 text-[#D4AF37]" />
+                  </div>
+                  <span className="text-[9px] font-black text-[#D4AF37] uppercase tracking-widest">GODSHOP Verificado</span>
+                </div>
               </div>
-              <div className="border-t border-slate-300 w-4/5 mx-auto pt-1">
-                <p className="font-bold text-xs text-slate-900 uppercase">Vendedor</p>
-                <p className="text-[10px] text-slate-600">Kaleb Santos (GODSHOP)</p>
+              <div className="border-t-2 border-slate-900 w-full pt-2">
+                <p className="font-black text-[11px] text-slate-900 uppercase tracking-tighter text-slate-400">Representante GODSHOP</p>
+                <p className="text-[10px] text-slate-900 font-black uppercase mt-0.5">Kaleb Santos</p>
+                <p className="text-[8px] text-slate-400 uppercase tracking-tighter text-slate-300">Selo de Autenticidade Digital</p>
               </div>
             </div>
+          </div>
+
+          {/* Page numbering placeholder for PDF engine */}
+          <div className="pt-8 text-center text-[8px] text-slate-300 uppercase tracking-[0.3em] font-black">
+            Documento Autenticado Digitalmente • {format(new Date(), "yyyy")} • Página 1 de 1
           </div>
         </div>
       </div>

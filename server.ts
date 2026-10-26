@@ -50,6 +50,17 @@ async function supabaseQuery(table: string, userId: string) {
 
 app.use(express.json({ limit: "15mb" }));
 
+// CORS middleware to allow cross-origin requests from any source (essential for APK/EXE cross-communication)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Serve static assets from public folder
 const PUBLIC_DIR = path.join(process.cwd(), "public");
 if (fs.existsSync(PUBLIC_DIR)) {

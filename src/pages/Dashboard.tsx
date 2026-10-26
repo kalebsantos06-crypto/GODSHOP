@@ -288,15 +288,27 @@ export default function Dashboard() {
   const upcomingInstallments = allNotificationsList.slice(0, 3);
 
   // 3. EVENT HANDLERS
-  const handleRefreshAll = () => {
-    refetchIphones();
-    refetchConsoles();
-    refetchSales();
-    refetchClients();
-    refetchGiftPurchases();
-    refetchAccessorySales();
-    refetchTip();
-    toast.success('Dados atualizados!');
+  const handleRefreshAll = async () => {
+    const toastId = toast.loading('Sincronizando dados...');
+    try {
+      // Pull latest from Cloud Server (essential for paired devices)
+      await db.pullFromCloud();
+      
+      // Refresh all local queries
+      await Promise.all([
+        refetchIphones(),
+        refetchConsoles(),
+        refetchSales(),
+        refetchClients(),
+        refetchGiftPurchases(),
+        refetchAccessorySales(),
+        refetchTip()
+      ]);
+      
+      toast.success('Dados atualizados!', { id: toastId });
+    } catch (e) {
+      toast.error('Erro ao atualizar dados.', { id: toastId });
+    }
   };
 
   const handleTriggerAutomations = async () => {

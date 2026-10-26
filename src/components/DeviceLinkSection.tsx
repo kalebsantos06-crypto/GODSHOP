@@ -4,7 +4,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
-import { db, getCloudApiUrl } from '../services/db';
+import { db, getCloudApiUrl, getCurrentUserId } from '../services/db';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -27,24 +27,40 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
 
   const handleClearAllPairings = async () => {
     try {
-      // 1. Clear locally
+      // 1. Clear locally first for immediate UI feedback
       localStorage.removeItem('godshop_linked_devices');
       setLinkedDevices([]);
       
       // 2. Clear server-side
-      const url = getCloudApiUrl('/api/pair/clear');
+      const endpoint = '/api/pair/clear';
+      const url = getCloudApiUrl(endpoint);
       console.log('[Pairing] Unpairing all, target URL:', url);
-      const res = await fetch(url, { method: 'POST' });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Falha ao desvincular no servidor.');
+      
+      try {
+        const res = await fetch(url, { 
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          mode: 'cors' // Explicitly use CORS mode
+        });
+        
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          console.warn('[Pairing] Server returned error:', errorData);
+        } else {
+          toast.success('Todos os dispositivos foram desvinculados no servidor.');
+        }
+      } catch (fetchErr) {
+        console.warn('[Pairing] Server unreachable, but local pairings were cleared:', fetchErr);
+        toast.info('Vínculos locais removidos. O servidor pode estar offline temporariamente.');
       }
       
-      toast.success('Todos os dispositivos foram desvinculados.');
       setShowClearAllConfirm(false);
     } catch (e: any) {
       console.error('[Pairing] Clear all error:', e);
-      toast.error('Erro ao desvincular: ' + (e.message || 'Falha desconhecida'));
+      toast.error('Erro ao processar: ' + (e.message || 'Falha desconhecida'));
     }
   };
 
@@ -77,11 +93,17 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
 
       let code = Math.floor(100000 + Math.random() * 900000).toString();
 
+      const authUserStr = localStorage.getItem('auth_cached_user');
+      const authUser = authUserStr ? JSON.parse(authUserStr) : null;
+      const currentUserId = await getCurrentUserId();
+
       const pairingPayload = {
         code,
         supabaseUrl: supaUrl,
         supabaseKey: supaKey,
         serverUrl: serverUrl,
+        authUser: authUser,
+        userId: currentUserId,
         deviceName: navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE',
         expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         createdAt: new Date().toISOString()
@@ -218,6 +240,12 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
       if (data.serverUrl) {
         localStorage.setItem('custom_cloud_server_url', data.serverUrl);
         localStorage.setItem('custom_app_domain', data.serverUrl);
+      }
+      if (data.authUser) {
+        localStorage.setItem('auth_cached_user', JSON.stringify(data.authUser));
+      }
+      if (data.userId) {
+        localStorage.setItem('last_known_user_id', data.userId);
       }
       
       const newDev = {
