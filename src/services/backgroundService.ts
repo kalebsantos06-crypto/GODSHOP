@@ -276,38 +276,10 @@ class BackgroundService {
   private startKeepAlive(): void {
     if (this.keepAliveInterval) return;
 
-    // Heartbeat every 60 seconds
+    // Lightweight heartbeat every 120 seconds for optimal battery and zero lag
     this.keepAliveInterval = setInterval(() => {
       this.triggerSync();
-    }, 60000);
-
-    // Setup silent audio keep-alive upon first user gesture
-    const enableSilentAudio = () => {
-      try {
-        if (!this.audioContext && (window.AudioContext || (window as any).webkitAudioContext)) {
-          const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-          this.audioContext = new AudioCtx();
-          
-          // Create an inaudible buffer oscillator (zero gain)
-          const osc = this.audioContext.createOscillator();
-          const gain = this.audioContext.createGain();
-          gain.gain.value = 0.00001; // virtually silent
-          osc.connect(gain);
-          gain.connect(this.audioContext.destination);
-          osc.start();
-          console.log('[BackgroundService] Inaudible background keep-alive audio active.');
-        } else if (this.audioContext && this.audioContext.state === 'suspended') {
-          this.audioContext.resume();
-        }
-      } catch (e) {
-        // AudioContext might require user interaction first
-      }
-    };
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('click', enableSilentAudio, { once: true });
-      window.addEventListener('touchstart', enableSilentAudio, { once: true });
-    }
+    }, 120000);
   }
 
   private stopKeepAlive(): void {

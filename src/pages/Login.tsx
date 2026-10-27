@@ -262,22 +262,22 @@ export default function Login() {
   const activeEmailDisplay = isUsingSavedUser ? savedUserEmail : email;
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4 sm:p-6 relative overflow-hidden bg-[#07080c] selection:bg-emerald-500/30 selection:text-emerald-200">
+    <div className="min-h-screen w-full flex items-center justify-center p-4 sm:p-6 relative overflow-hidden bg-slate-950 text-slate-100 selection:bg-emerald-500/30 selection:text-emerald-200">
       {/* Background Ambience & Lighting */}
       <div className="fixed inset-0 pointer-events-none z-0">
         {bgImage && (
           <div 
-            className="absolute inset-0 bg-cover bg-center opacity-20 filter blur-[3px] scale-105 transition-all duration-1000"
+            className="absolute inset-0 bg-cover bg-center opacity-35 filter blur-[2px] scale-105 transition-all duration-1000"
             style={{ backgroundImage: `url(${bgImage})` }}
           />
         )}
         
         {/* Subtle radial luxury gradients */}
-        <div className="absolute -top-[20%] left-1/2 -translate-x-1/2 w-[700px] h-[500px] bg-gradient-to-b from-emerald-500/10 via-cyan-500/5 to-transparent rounded-full blur-[120px]" />
-        <div className="absolute -bottom-[20%] right-1/4 w-[500px] h-[500px] bg-gradient-to-t from-emerald-600/5 to-transparent rounded-full blur-[140px]" />
+        <div className="absolute -top-[20%] left-1/2 -translate-x-1/2 w-[700px] h-[500px] bg-gradient-to-b from-emerald-500/20 via-teal-500/10 to-transparent rounded-full blur-[100px]" />
+        <div className="absolute -bottom-[20%] right-1/4 w-[500px] h-[500px] bg-gradient-to-t from-emerald-600/15 to-transparent rounded-full blur-[120px]" />
         
         {/* Fine-grain noise/vignette overlay */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/80" />
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-950/40 via-slate-900/20 to-slate-950/70" />
       </div>
 
       {/* Main Container */}

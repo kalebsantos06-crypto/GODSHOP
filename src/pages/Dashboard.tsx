@@ -9,7 +9,7 @@ import StatCard from '../components/shared/StatCard';
 import { formatBRL } from '../lib/formatCurrency';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addDays, addMonths, startOfDay, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { parseLocalDate, getSaleNotifications, getCalculatedInstallments } from '../lib/dateUtils';
+import { parseLocalDate, safeFormatDate, getSaleNotifications, getCalculatedInstallments } from '../lib/dateUtils';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
@@ -169,7 +169,7 @@ export default function Dashboard() {
       return {
         label: clientDisplay,
         value: formatBRL(db.getProfit(sale, iphones, consoles)),
-        sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
+        sublabel: safeFormatDate(sale.sale_date, 'dd/MM')
       };
     });
   }, [sales, iphones, consoles, clients]);
@@ -189,7 +189,7 @@ export default function Dashboard() {
       return {
         label: clientDisplay,
         value: formatBRL(Number(sale.sell_price) || 0),
-        sublabel: format(parseLocalDate(sale.sale_date), 'dd/MM')
+        sublabel: safeFormatDate(sale.sale_date, 'dd/MM')
       };
     });
   }, [sales, iphones, consoles, clients]);
@@ -227,17 +227,17 @@ export default function Dashboard() {
 
   const stockPreview = useMemo(() => {
     return [...availableIphones, ...availableConsoles]
-      .sort((a, b) => new Date(b.buy_date).getTime() - new Date(a.buy_date).getTime())
+      .sort((a, b) => parseLocalDate(b.buy_date).getTime() - parseLocalDate(a.buy_date).getTime())
       .slice(0, 3)
       .map(item => ({
-        label: item.model,
+        label: item.model || 'Aparelho',
         value: 'Disponível',
         sublabel: 'storage' in item ? item.storage : item.version
       }));
   }, [availableIphones, availableConsoles]);
 
   const avgProfitPreview = useMemo(() => {
-    const models = Array.from(new Set([...iphones, ...consoles].map(i => i.model)));
+    const models = Array.from(new Set([...iphones, ...consoles].map(i => i.model).filter(Boolean)));
     return models
       .map(model => {
         const modelSales = sales.filter(s => {
@@ -245,10 +245,13 @@ export default function Dashboard() {
           return item?.model === model;
         });
         if (modelSales.length === 0) return null;
-        const profit = modelSales.reduce((sum, s) => sum + db.getProfit(s, iphones, consoles), 0);
+        const profit = modelSales.reduce((sum, s) => {
+          const p = db.getProfit(s, iphones, consoles);
+          return sum + (isNaN(p) ? 0 : p);
+        }, 0);
         return { model, avg: profit / modelSales.length };
       })
-      .filter((item): item is { model: string; avg: number } => item !== null)
+      .filter((item): item is { model: string; avg: number } => item !== null && !isNaN(item.avg))
       .sort((a, b) => b.avg - a.avg)
       .slice(0, 3)
       .map(item => ({
@@ -259,25 +262,33 @@ export default function Dashboard() {
   }, [iphones, consoles, sales]);
 
   const monthlyData = useMemo(() => {
-    const now = new Date();
-    const months = eachMonthOfInterval({
-      start: subMonths(startOfMonth(now), 5),
-      end: startOfMonth(now),
-    });
-
-    return months.map(month => {
-      const monthStart = startOfMonth(month);
-      const monthEnd = endOfMonth(month);
-      const monthSales = sales.filter(s => {
-        const d = new Date(s.sale_date);
-        return d >= monthStart && d <= monthEnd;
+    try {
+      const now = new Date();
+      const months = eachMonthOfInterval({
+        start: subMonths(startOfMonth(now), 5),
+        end: startOfMonth(now),
       });
-      const profit = monthSales.reduce((sum, sale) => sum + db.getProfit(sale, iphones, consoles), 0);
-      return {
-        name: format(month, 'MMM', { locale: ptBR }),
-        lucro: profit,
-      };
-    });
+
+      return months.map(month => {
+        const monthStart = startOfMonth(month);
+        const monthEnd = endOfMonth(month);
+        const monthSales = (sales || []).filter(s => {
+          if (!s || !s.sale_date) return false;
+          const d = parseLocalDate(s.sale_date);
+          return !isNaN(d.getTime()) && d >= monthStart && d <= monthEnd;
+        });
+        const profit = monthSales.reduce((sum, sale) => {
+          const p = db.getProfit(sale, iphones, consoles);
+          return sum + (isNaN(p) ? 0 : p);
+        }, 0);
+        return {
+          name: safeFormatDate(month, 'MMM', { locale: ptBR }),
+          lucro: isNaN(profit) ? 0 : profit,
+        };
+      });
+    } catch (e) {
+      return [];
+    }
   }, [sales, iphones, consoles]);
 
   const allNotificationsList = useMemo(() => {
@@ -431,7 +442,7 @@ export default function Dashboard() {
                   <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                     <Database className="h-3 w-3 text-emerald-500" />
                     <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider">
-                      Sincronizado: {format(new Date(Number(lastSync)), 'HH:mm:ss')}
+                      Sincronizado: {safeFormatDate(Number(lastSync), 'HH:mm:ss')}
                     </span>
                   </div>
                 )}
@@ -607,7 +618,7 @@ export default function Dashboard() {
                               <a
                                 href={`https://api.whatsapp.com/send?phone=${inst.clientPhone}&text=${encodeURIComponent(
                                   `Olá, *${inst.clientName}*! 😊 Aqui é a *${attendantName}*, assistente virtual da *GODSHOP*. (Esta é uma mensagem automática)\n\nPassando para lembrar que a *${inst.installmentIndex}ª Parcela* de *${formatBRL(inst.expectedAmount)}* referente à compra do *${inst.itemName}* ` +
-                                  (inst.daysDiff === 0 ? "vence *HOJE*!" : inst.daysDiff === 1 ? "vence *AMANHÃ*!" : inst.daysDiff === 2 ? "vence em *2 DIAS*!" : inst.daysDiff === 3 ? "vence em *3 DIAS*!" : inst.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${format(typeof inst.dueDate === 'string' ? parseLocalDate(inst.dueDate) : inst.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
+                                  (inst.daysDiff === 0 ? "vence *HOJE*!" : inst.daysDiff === 1 ? "vence *AMANHÃ*!" : inst.daysDiff === 2 ? "vence em *2 DIAS*!" : inst.daysDiff === 3 ? "vence em *3 DIAS*!" : inst.daysDiff === -1 ? "venceu *ONTEM*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -2 ? "venceu há *2 DIAS*. Caso já tenha pago, favor desconsiderar." : inst.daysDiff === -3 ? "venceu há *3 DIAS*. Caso já tenha pago, favor desconsiderar." : `venceu em ${safeFormatDate(inst.dueDate, 'dd/MM/yyyy')}. Caso já tenha pago, favor desconsiderar.`) +
                                   `\n\nPor favor, realize o pagamento via Pix utilizando a chave abaixo:\n\n*${pixInfo}*\n\nCaso já tenha realizado o pagamento, por favor desconsidere. Caso precise de ajuda, estamos à disposição! 🤍`
                                 )}`}
                                 target="_blank"
@@ -692,7 +703,7 @@ export default function Dashboard() {
                         <div key={sale.id} className="flex items-center justify-between p-2 rounded bg-muted/30 border border-border/50">
                           <div className="flex flex-col">
                             <span className="text-[11px] font-bold truncate max-w-[120px]">{client?.name || 'Cliente'}</span>
-                            <span className="text-[9px] text-muted-foreground">{format(parseLocalDate(sale.sale_date), 'dd/MM')}</span>
+                            <span className="text-[9px] text-muted-foreground">{safeFormatDate(sale.sale_date, 'dd/MM')}</span>
                           </div>
                           <button 
                             onClick={async () => {

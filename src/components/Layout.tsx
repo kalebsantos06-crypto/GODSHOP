@@ -21,7 +21,6 @@ import { formatBRL } from '../lib/formatCurrency';
 import { checkNotificationPermission, requestNotificationPermission, openNotificationSettings, showNotification, scheduleBackgroundNotifications } from '../lib/pushNotifications';
 import { safeSaveStoreSetting } from '../utils/imageStorageUtils';
 
-
 export default function Layout() {
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -625,8 +624,6 @@ export default function Layout() {
     { name: 'Estoque', href: '/inventory', icon: Smartphone },
     { name: 'Eletrônicos', href: '/consoles', icon: Tv },
     { name: 'Brindes & Acc', href: '/gifts', icon: Gift },
-    { name: 'Encartes / Tags', href: '/offer-tags', icon: Sparkles },
-    { name: 'Studio', href: '/studio', icon: Wand2 },
     { name: 'Vendas', href: '/sales', icon: ShoppingCart },
     { name: 'Clientes', href: '/clients', icon: Users },
     { name: 'Fornecedores', href: '/suppliers', icon: Truck },
@@ -730,11 +727,14 @@ export default function Layout() {
         </div>
       )}
 
-      {/* Fixed Background Layer to avoid bg-fixed mobile issues */}
+      {/* Fixed Background Layer with vibrant, luminous contrast */}
       <div 
-        className="fixed inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-700"
+        className={cn(
+          "fixed inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-700",
+          theme === 'dark' ? "bg-slate-950" : "bg-slate-100"
+        )}
         style={{ 
-          backgroundImage: `linear-gradient(to bottom, ${theme === 'dark' ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.8)'}, ${theme === 'dark' ? 'rgba(0,0,0,0.95)' : 'rgba(255,255,255,0.9)'}), url(${bgImage})`,
+          backgroundImage: bgImage ? `linear-gradient(to bottom, ${theme === 'dark' ? 'rgba(15,23,42,0.25)' : 'rgba(255,255,255,0.85)'}, ${theme === 'dark' ? 'rgba(15,23,42,0.45)' : 'rgba(241,245,249,0.92)'}), url(${bgImage})` : undefined,
         }}
       />
 
@@ -753,7 +753,10 @@ export default function Layout() {
         </div>
         
         <div className="flex-none flex items-center justify-center py-1.5 gap-2 sm:gap-3 max-w-[70%] sm:max-w-none">
-          <div className="flex items-center gap-2 sm:gap-3 group cursor-default">
+          <Link 
+            to="/"
+            className="flex items-center gap-2 sm:gap-3 group cursor-pointer"
+          >
             {logoImage ? (
               <div className="relative shrink-0">
                 <div className={cn(
@@ -772,7 +775,7 @@ export default function Layout() {
                     }
                   }}
                   className={cn(
-                    "relative h-9 w-9 sm:h-11 sm:w-11 object-cover rounded-lg sm:rounded-xl shadow-lg border transition-all duration-300 group-hover:scale-105",
+                    "relative h-9 w-9 sm:h-11 sm:w-11 object-cover rounded-lg sm:rounded-xl shadow-lg border transition-all duration-300 group-hover:scale-105 group-hover:rotate-3",
                     theme === 'dark' ? "border-white/30" : "border-black/15"
                   )} 
                 />
@@ -788,7 +791,7 @@ export default function Layout() {
             <div className="flex flex-col items-center min-w-0">
               <h1 className="text-xl sm:text-2xl tracking-[0.15em] sm:tracking-[0.2em] leading-none flex items-baseline truncate">
                 <span className={cn(
-                  "font-black transition-all duration-300 group-hover:tracking-[0.22em]",
+                  "font-black transition-all duration-300 group-hover:tracking-[0.22em] group-hover:text-emerald-400",
                   theme === 'dark' ? "text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]" : "text-black drop-shadow-[0_0_15px_rgba(0,0,0,0.15)]"
                 )}>
                   GOD
@@ -799,10 +802,10 @@ export default function Layout() {
               </h1>
               <div className={cn(
                 "h-[2px] w-full mt-1 transition-all duration-500 group-hover:w-[120%]",
-                theme === 'dark' ? "bg-gradient-to-r from-transparent via-white/50 to-transparent" : "bg-gradient-to-r from-transparent via-black/30 to-transparent"
+                theme === 'dark' ? "bg-gradient-to-r from-transparent via-emerald-400 to-transparent" : "bg-gradient-to-r from-transparent via-emerald-600 to-transparent"
               )}></div>
             </div>
-          </div>
+          </Link>
         </div>
 
         <div className="flex-1 flex justify-end items-center gap-1.5 sm:gap-2">

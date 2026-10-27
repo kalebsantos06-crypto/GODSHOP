@@ -30,13 +30,11 @@ import GuaranteeNote from './pages/GuaranteeNote';
 import PriceTable from './pages/PriceTable';
 import Settings from './pages/Settings';
 import UsersPage from './pages/Users';
-import OfferTagGenerator from './pages/OfferTagGenerator';
 import Notes from './pages/Notes';
 import Login from './pages/Login';
 import FiscalHub from './pages/fiscal/FiscalHub';
 import ClientSignature from './pages/ClientSignature';
 import ClientRemoteRegister from './pages/ClientRemoteRegister';
-import Studio from './pages/Studio';
 
 // High performance Query Client configuration with intelligent caching
 const queryClient = new QueryClient({
@@ -105,10 +103,8 @@ function AppContent() {
       '/suppliers': 'GODSHOP | Fornecedores',
       '/prices': 'GODSHOP | Tabela de Preços',
       '/notes': 'GODSHOP | Anotações & Áudios',
-      '/offer-tags': 'GODSHOP | Encartes & Tags',
       '/users': 'GODSHOP | Gestão de Usuários',
       '/settings': 'GODSHOP | Configurações',
-      '/studio': 'GODSHOP | Studio Profissional',
       '/fiscal': 'GODSHOP | Módulo Fiscal NF-e',
       '/invoices': 'GODSHOP | Carnês & Boletos',
       '/login': 'GODSHOP | Acesso ao Sistema',
@@ -180,16 +176,16 @@ function AppContent() {
     // Register sync task to run with background keep-alive
     const unregisterBgSync = backgroundService.registerSyncTask(performSync);
 
-    // High-frequency polling interval: syncs every 60 seconds for stability
+    // High-performance background sync interval: 120 seconds
     const interval = setInterval(() => {
       performSync();
-    }, 60000);
+    }, 120000);
 
-    // Sync immediately when user switches tabs, clicks window, or unlocks their phone (throttled to 2s)
+    // Throttled focus sync (minimum 15s delay between focus syncs)
     let lastFocusSync = 0;
     const handleFocusOrActivity = () => {
       const now = Date.now();
-      if (now - lastFocusSync > 2000) {
+      if (now - lastFocusSync > 15000) {
         performSync();
         lastFocusSync = now;
       }
@@ -250,11 +246,9 @@ function AppContent() {
                 <Route path="invoices" element={<Invoices />} />
                 <Route path="prices" element={<PriceTable />} />
                 <Route path="notes" element={<Notes />} />
-                <Route path="offer-tags" element={<OfferTagGenerator />} />
                 <Route path="clients" element={<Clients />} />
                 <Route path="suppliers" element={<Suppliers />} />
                 <Route path="users" element={<UsersPage />} />
-                <Route path="studio" element={<Studio />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="guarantee/:id" element={<GuaranteeNote />} />
 

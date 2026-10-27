@@ -5,35 +5,29 @@ import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
 import { pruneLocalStorageQuota } from './utils/imageStorageUtils';
 
-// Auto-purge any stale legacy 5MB quota bloat from localStorage on app startup
-pruneLocalStorageQuota();
+try {
+  // Auto-purge any stale legacy 5MB quota bloat from localStorage on app startup
+  pruneLocalStorageQuota();
+} catch (e) {
+  console.warn('[Startup] pruneLocalStorageQuota warning:', e);
+}
 
-// 1. Monkeypatch Node/Element prototypes to permanently eliminate React NotFoundError
-const protos = [
-  typeof Node !== 'undefined' ? Node.prototype : null,
-  typeof Element !== 'undefined' ? Element.prototype : null,
-  typeof HTMLElement !== 'undefined' ? HTMLElement.prototype : null,
-  typeof DocumentFragment !== 'undefined' ? DocumentFragment.prototype : null,
-  typeof CharacterData !== 'undefined' ? (CharacterData as any).prototype : null
-].filter(Boolean);
+try {
+  // 1. Monkeypatch Node/Element prototypes to permanently eliminate React NotFoundError
+  const protos = [
+    typeof Node !== 'undefined' ? Node.prototype : null,
+    typeof Element !== 'undefined' ? Element.prototype : null,
+    typeof HTMLElement !== 'undefined' ? HTMLElement.prototype : null,
+    typeof DocumentFragment !== 'undefined' ? DocumentFragment.prototype : null,
+    typeof CharacterData !== 'undefined' ? (CharacterData as any).prototype : null
+  ].filter(Boolean);
 
-protos.forEach((proto: any) => {
-  if (proto && proto.removeChild) {
-    const originalRemoveChild = proto.removeChild;
-    proto.removeChild = function (this: any, child: any): any {
-      if (!child) return child;
-      if (child.parentNode !== this) {
-        try {
-          if (child.parentNode) {
-            return child.parentNode.removeChild(child);
-          }
-        } catch (e) {}
-        return child;
-      }
-      try {
-        return originalRemoveChild.apply(this, arguments as any);
-      } catch (err: any) {
-        if (err && (err.name === 'NotFoundError' || String(err).includes('removeChild') || String(err).includes('not a child'))) {
+  protos.forEach((proto: any) => {
+    if (proto && proto.removeChild) {
+      const originalRemoveChild = proto.removeChild;
+      proto.removeChild = function (this: any, child: any): any {
+        if (!child) return child;
+        if (child.parentNode !== this) {
           try {
             if (child.parentNode) {
               return child.parentNode.removeChild(child);
@@ -41,54 +35,72 @@ protos.forEach((proto: any) => {
           } catch (e) {}
           return child;
         }
-        throw err;
-      }
-    };
-  }
-
-  if (proto && proto.insertBefore) {
-    const originalInsertBefore = proto.insertBefore;
-    proto.insertBefore = function (this: any, newNode: any, referenceNode: any): any {
-      if (!newNode) return newNode;
-      if (referenceNode && referenceNode.parentNode !== this) {
         try {
-          if (referenceNode.parentNode) {
-            return referenceNode.parentNode.insertBefore(newNode, referenceNode);
+          return originalRemoveChild.apply(this, arguments as any);
+        } catch (err: any) {
+          if (err && (err.name === 'NotFoundError' || String(err).includes('removeChild') || String(err).includes('not a child'))) {
+            try {
+              if (child.parentNode) {
+                return child.parentNode.removeChild(child);
+              }
+            } catch (e) {}
+            return child;
           }
-        } catch (e) {}
-        return newNode;
-      }
-      try {
-        return originalInsertBefore.apply(this, arguments as any);
-      } catch (err: any) {
-        if (err && (err.name === 'NotFoundError' || String(err).includes('insertBefore') || String(err).includes('not a child'))) {
+          throw err;
+        }
+      };
+    }
+
+    if (proto && proto.insertBefore) {
+      const originalInsertBefore = proto.insertBefore;
+      proto.insertBefore = function (this: any, newNode: any, referenceNode: any): any {
+        if (!newNode) return newNode;
+        if (referenceNode && referenceNode.parentNode !== this) {
           try {
-            if (referenceNode && referenceNode.parentNode) {
+            if (referenceNode.parentNode) {
               return referenceNode.parentNode.insertBefore(newNode, referenceNode);
             }
           } catch (e) {}
           return newNode;
         }
-        throw err;
-      }
-    };
-  }
-});
+        try {
+          return originalInsertBefore.apply(this, arguments as any);
+        } catch (err: any) {
+          if (err && (err.name === 'NotFoundError' || String(err).includes('insertBefore') || String(err).includes('not a child'))) {
+            try {
+              if (referenceNode && referenceNode.parentNode) {
+                return referenceNode.parentNode.insertBefore(newNode, referenceNode);
+              }
+            } catch (e) {}
+            return newNode;
+          }
+          throw err;
+        }
+      };
+    }
+  });
+} catch (e) {
+  console.warn('[Startup] Node prototype patch warning:', e);
+}
 
-// Force template update for registration & templates
-const regKey = 'auto_template_registration';
-const currentReg = typeof window !== 'undefined' ? localStorage.getItem(regKey) : null;
-if (currentReg && (currentReg.includes('Karen') || currentReg.includes('PIX') || currentReg.includes('13036942637') || currentReg.includes('Status:'))) {
-  localStorage.setItem(regKey, "É um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.");
-}
-if (typeof window !== 'undefined' && localStorage.getItem('auto_template_client_remote_confirmation')) {
-  localStorage.setItem('auto_template_client_remote_confirmation', "É um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.");
-}
-if (typeof window !== 'undefined') {
-  const currentStorePhone = localStorage.getItem('auto_store_phone');
-  if (!currentStorePhone || currentStorePhone.includes('13036942637') || currentStorePhone.length < 10) {
-    localStorage.setItem('auto_store_phone', '5532999634583');
+try {
+  // Force template update for registration & templates
+  const regKey = 'auto_template_registration';
+  const currentReg = typeof window !== 'undefined' ? localStorage.getItem(regKey) : null;
+  if (currentReg && (currentReg.includes('Karen') || currentReg.includes('PIX') || currentReg.includes('13036942637') || currentReg.includes('Status:'))) {
+    localStorage.setItem(regKey, "É um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.");
   }
+  if (typeof window !== 'undefined' && localStorage.getItem('auto_template_client_remote_confirmation')) {
+    localStorage.setItem('auto_template_client_remote_confirmation', "É um prazer tê-lo(a) conosco! Confirmamos que seu cadastro na GODSHOP foi concluído com sucesso em nosso sistema.");
+  }
+  if (typeof window !== 'undefined') {
+    const currentStorePhone = localStorage.getItem('auto_store_phone');
+    if (!currentStorePhone || currentStorePhone.includes('13036942637') || currentStorePhone.length < 10) {
+      localStorage.setItem('auto_store_phone', '5532999634583');
+    }
+  }
+} catch (e) {
+  console.warn('[Startup] Template update warning:', e);
 }
 
 // Intercept and suppress benign network / HMR / WebSocket / Failed to fetch errors in sandbox

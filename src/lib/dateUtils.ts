@@ -1,11 +1,13 @@
-import { addDays, addMonths, startOfDay, differenceInDays } from 'date-fns';
+import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-fns';
 
 /**
  * Parses a date string (either YYYY-MM-DD or full ISO format) 
  * as a local date object, preventing timezone-induced day shifts.
  */
 export function parseLocalDate(dateStr: string | null | undefined): Date {
-  if (!dateStr) return new Date();
+  if (!dateStr || typeof dateStr !== 'string' || dateStr === '[truncated]') {
+    return new Date();
+  }
   
   // Extract YYYY-MM-DD from the string
   const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -14,10 +16,29 @@ export function parseLocalDate(dateStr: string | null | undefined): Date {
     const month = parseInt(match[2], 10) - 1; // 0-indexed
     const day = parseInt(match[3], 10);
     // Set to 12:00:00 local time to avoid any daylight savings or timezone shift
-    return new Date(year, month, day, 12, 0, 0);
+    const constructed = new Date(year, month, day, 12, 0, 0);
+    if (!isNaN(constructed.getTime())) {
+      return constructed;
+    }
   }
   
-  return new Date(dateStr);
+  const parsed = new Date(dateStr);
+  if (isNaN(parsed.getTime())) {
+    return new Date();
+  }
+  return parsed;
+}
+
+export function safeFormatDate(date: any, formatStr: string, options?: any): string {
+  try {
+    const d = typeof date === 'string' ? parseLocalDate(date) : (date instanceof Date ? date : new Date(date));
+    if (!d || isNaN(d.getTime())) {
+      return format(new Date(), formatStr, options);
+    }
+    return format(d, formatStr, options);
+  } catch (e) {
+    return '--/--';
+  }
 }
 
 export interface CalculatedInstallment {
