@@ -4,7 +4,8 @@ import { Plus, Trash2, Edit2, Search, Check, Mail, Phone, Shield, User, Users, C
 import { toast } from 'sonner';
 import { useAuth } from '../types/AuthContext';
 import ConfirmationModal from '../components/ui/ConfirmationModal';
-import { fetchPendingRemoteClients } from '../services/clientLinkService';
+import { fetchPendingRemoteClients, dismissPendingRemoteClients } from '../services/clientLinkService';
+import { db } from '../services/db';
 import { safeFetchJson } from '../lib/safeFetch';
 
 interface SystemUser {
@@ -61,6 +62,72 @@ export default function UsersPage() {
       }
     },
     enabled: !!currentUser?.id,
+  });
+
+  // Listen to remote_client_dismissed event
+  React.useEffect(() => {
+    const handleDismissed = () => {
+      refetchExternal();
+    };
+    window.addEventListener('remote_client_dismissed', handleDismissed);
+    return () => window.removeEventListener('remote_client_dismissed', handleDismissed);
+  }, [refetchExternal]);
+
+  const approveExternalMutation = useMutation({
+    mutationFn: async (remoteClient: any) => {
+      const { id: remoteId, created_at, ...cleanClient } = remoteClient;
+      const tokens = [remoteId];
+      if (remoteClient.token_cadastro) tokens.push(remoteClient.token_cadastro);
+
+      await dismissPendingRemoteClients(currentUser?.id || 'admin', [remoteId], tokens);
+      try {
+        await db.clients.create(cleanClient);
+      } catch (err) {
+        console.warn('Notice saving client in db:', err);
+      }
+    },
+    onMutate: async (remoteClient: any) => {
+      const targetId = remoteClient?.id;
+      const targetToken = remoteClient?.token_cadastro;
+      queryClient.setQueryData(['externalRegistrations', currentUser?.id], (old: any[] = []) =>
+        old.filter((item: any) => item.id !== targetId && item.token_cadastro !== targetId && item.token_cadastro !== targetToken)
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clients'] });
+      queryClient.invalidateQueries({ queryKey: ['pendingRemote'] });
+      refetchExternal();
+      toast.success('Cliente cadastrado com sucesso!');
+    },
+    onError: () => {
+      refetchExternal();
+      toast.error('Erro ao aprovar cadastro.');
+    }
+  });
+
+  const rejectExternalMutation = useMutation({
+    mutationFn: async (remoteClient: any) => {
+      const remoteId = remoteClient.id;
+      const tokens = [remoteId];
+      if (remoteClient.token_cadastro) tokens.push(remoteClient.token_cadastro);
+
+      await dismissPendingRemoteClients(currentUser?.id || 'admin', [remoteId], tokens);
+    },
+    onMutate: async (remoteClient: any) => {
+      const targetId = remoteClient?.id;
+      queryClient.setQueryData(['externalRegistrations', currentUser?.id], (old: any[] = []) =>
+        old.filter((item: any) => item.id !== targetId && item.token_cadastro !== targetId)
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pendingRemote'] });
+      refetchExternal();
+      toast.success('Solicitação removida.');
+    },
+    onError: () => {
+      refetchExternal();
+      toast.error('Erro ao recusar solicitação.');
+    }
   });
 
   // Mutations for System Users (with localStorage fallback for Cloudflare Pages / APK)
@@ -529,6 +596,27 @@ export default function UsersPage() {
                         </div>
                       </div>
                     )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2 pt-2 border-t border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => rejectExternalMutation.mutate(r)}
+                      disabled={rejectExternalMutation.isPending || approveExternalMutation.isPending}
+                      className="flex-1 bg-muted hover:bg-muted/80 text-muted-foreground py-1.5 px-2 rounded-md text-xs font-semibold transition cursor-pointer text-center disabled:opacity-50"
+                    >
+                      Recusar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => approveExternalMutation.mutate(r)}
+                      disabled={rejectExternalMutation.isPending || approveExternalMutation.isPending}
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 px-2 rounded-md text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Aprovar
+                    </button>
                   </div>
                 </div>
               ))}

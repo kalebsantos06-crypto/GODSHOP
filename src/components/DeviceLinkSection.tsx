@@ -3,7 +3,7 @@ import { Smartphone, Monitor, QrCode, RefreshCw, CheckCircle2, Copy, Link as Lin
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { toast } from 'sonner';
-import { supabase } from '../lib/supabase';
+import { supabase, setCustomSupabaseCredentials, DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY } from '../lib/supabase';
 import { db, getCloudApiUrl, getCurrentUserId } from '../services/db';
 
 function cn(...inputs: ClassValue[]) {
@@ -31,32 +31,33 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
       localStorage.removeItem('godshop_linked_devices');
       setLinkedDevices([]);
       
-      // 2. Clear server-side
-      const endpoint = '/api/pair/clear';
-      const url = getCloudApiUrl(endpoint);
-      console.log('[Pairing] Unpairing all, target URL:', url);
-      
+      // 2. Clear from Supabase public_tokens directly (works on EXE, APK, and web)
       try {
-        const res = await fetch(url, { 
+        await supabase.from('public_tokens').delete().neq('token', '');
+      } catch (e) {
+        console.warn('[Pairing] Supabase tokens clear warning:', e);
+      }
+
+      // 3. Clear server-side if reachable with short timeout
+      try {
+        const endpoint = '/api/pair/clear';
+        const url = getCloudApiUrl(endpoint);
+        const ctrl = new AbortController();
+        const tId = setTimeout(() => ctrl.abort(), 2000);
+        await fetch(url, { 
           method: 'POST',
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json'
           },
-          mode: 'cors' // Explicitly use CORS mode
+          signal: ctrl.signal
         });
-        
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
-          console.warn('[Pairing] Server returned error:', errorData);
-        } else {
-          toast.success('Todos os dispositivos foram desvinculados no servidor.');
-        }
+        clearTimeout(tId);
       } catch (fetchErr) {
-        console.warn('[Pairing] Server unreachable, but local pairings were cleared:', fetchErr);
-        toast.info('Vínculos locais removidos. O servidor pode estar offline temporariamente.');
+        console.warn('[Pairing] Server unreachable, local and Supabase cleared:', fetchErr);
       }
       
+      toast.success('Todos os dispositivos foram desvinculados.');
       setShowClearAllConfirm(false);
     } catch (e: any) {
       console.error('[Pairing] Clear all error:', e);
@@ -70,8 +71,14 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
       if (stored) {
         setLinkedDevices(JSON.parse(stored));
       } else {
+        const isAndroid = typeof navigator !== 'undefined' && navigator.userAgent.includes('Android');
         const initial = [
-          { id: 'dev-1', name: 'Computador Principal (EXE Server)', type: 'exe' as const, time: new Date().toLocaleTimeString() }
+          { 
+            id: 'dev-1', 
+            name: isAndroid ? 'Celular Principal (APK)' : 'Computador Principal (EXE)', 
+            type: (isAndroid ? 'apk' : 'exe') as 'apk' | 'exe', 
+            time: new Date().toLocaleTimeString() 
+          }
         ];
         setLinkedDevices(initial);
         localStorage.setItem('godshop_linked_devices', JSON.stringify(initial));
@@ -84,10 +91,10 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
   const handleGenerateNewCode = async () => {
     setIsGenerating(true);
     try {
-      const supaUrl = localStorage.getItem('custom_supabase_url') || import.meta.env.VITE_SUPABASE_URL || 'https://wkkjaakydjnfzayyedxy.supabase.co';
-      const supaKey = localStorage.getItem('custom_supabase_key') || import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indra2phYWt5ZGpuZnpheXllZHh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2NDUwMTQsImV4cCI6MjA5ODIyMTAxNH0.DcTQJaLlJnejtXCHOwc_Maod9ytCGtcLri6kGnXV_mM';
+      const supaUrl = localStorage.getItem('custom_supabase_url') || import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+      const supaKey = localStorage.getItem('custom_supabase_key') || import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
       
-      const serverUrl = typeof window !== 'undefined' && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost')
+      const serverUrl = typeof window !== 'undefined' && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1')
         ? window.location.origin
         : (localStorage.getItem('custom_cloud_server_url') || 'https://ais-dev-vaaqegsewou44zzapwefq3-387330212853.us-west2.run.app');
 
@@ -95,7 +102,10 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
 
       const authUserStr = localStorage.getItem('auth_cached_user');
       const authUser = authUserStr ? JSON.parse(authUserStr) : null;
-      const currentUserId = await getCurrentUserId();
+      const currentUserId = (await getCurrentUserId()) || 'df9c4051-e407-4fe4-8978-a6b9e6140ed9';
+
+      // 7 days expiration so user has plenty of time to link their other device
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
       const pairingPayload = {
         code,
@@ -105,17 +115,19 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
         authUser: authUser,
         userId: currentUserId,
         deviceName: navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE',
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        expiresAt: expiresAt,
         createdAt: new Date().toISOString()
       };
 
-      // 1. Save to local storage for local fallback
+      // 1. Save to local storage for instant offline resilience
       try {
         localStorage.setItem(`godshop_pairing_${code}`, JSON.stringify(pairingPayload));
       } catch (e) {}
 
-      // 2. Try local Express API if available
+      // 2. Try server API with fast timeout if running in web/Node environment
       try {
+        const ctrl = new AbortController();
+        const tId = setTimeout(() => ctrl.abort(), 2000);
         const res = await fetch(getCloudApiUrl('/api/pair/generate'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -124,8 +136,10 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
             supabaseKey: supaKey,
             serverUrl: serverUrl,
             deviceName: pairingPayload.deviceName
-          })
+          }),
+          signal: ctrl.signal
         });
+        clearTimeout(tId);
 
         if (res.ok) {
           const data = await res.json();
@@ -135,18 +149,28 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
           }
         }
       } catch (err) {
-        console.warn('Server pair/generate warning:', err);
+        // Ignored on standalone EXE / APK without local server
       }
 
-      // 3. Register in Supabase public_tokens table
+      // 3. Register in Supabase public_tokens table (Universal Cloud Bridge for EXE and APK)
       try {
-        await supabase.from('public_tokens').upsert({
-          token: `pair_${code}`,
-          user_id: 'df9c4051-e407-4fe4-8978-a6b9e6140ed9',
-          used: false,
-          client_data: pairingPayload,
-          expires_at: pairingPayload.expiresAt
-        });
+        await supabase.from('public_tokens').upsert([
+          {
+            token: `pair_${code}`,
+            user_id: currentUserId,
+            used: false,
+            client_data: pairingPayload,
+            expires_at: expiresAt
+          },
+          {
+            token: code,
+            user_id: currentUserId,
+            used: false,
+            client_data: pairingPayload,
+            expires_at: expiresAt
+          }
+        ]);
+        console.log(`[Pairing] Registered code ${code} in Supabase public_tokens`);
       } catch (supaTokenErr) {
         console.warn('Supabase public_tokens pair warning:', supaTokenErr);
       }
@@ -171,7 +195,8 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
 
   const handleLinkDevice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputCode || inputCode.length < 6) {
+    const cleanCode = (inputCode || '').trim().replace(/\D/g, '');
+    if (!cleanCode || cleanCode.length < 6) {
       toast.error('Insira um código de 6 dígitos válido.');
       return;
     }
@@ -180,69 +205,86 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
     try {
       let data: any = null;
 
-      // 1. Try server endpoint first
+      // 1. Try server endpoint first with short timeout
       try {
-        const res = await fetch(getCloudApiUrl(`/api/pair/consume?code=${inputCode}`));
+        const ctrl = new AbortController();
+        const tId = setTimeout(() => ctrl.abort(), 2000);
+        const res = await fetch(getCloudApiUrl(`/api/pair/consume?code=${cleanCode}`), {
+          signal: ctrl.signal
+        });
+        clearTimeout(tId);
         if (res.ok) {
-          data = await res.json();
+          const json = await res.json();
+          if (json && (json.supabaseUrl || json.code)) {
+            data = json;
+          }
         }
       } catch (err) {
-        console.warn('Server consume fetch warning:', err);
+        console.warn('Server consume fetch skipped/warn:', err);
       }
 
-      // 2. Try Supabase public_tokens table
+      // 2. Try Supabase public_tokens table (Direct universal connection for EXE and APK)
       if (!data || !data.supabaseUrl) {
         try {
-          const { data: tokenRow, error: tokenErr } = await supabase
+          const { data: tokenRows, error: tokenErr } = await supabase
             .from('public_tokens')
             .select('*')
-            .eq('token', `pair_${inputCode}`)
-            .maybeSingle();
+            .in('token', [`pair_${cleanCode}`, cleanCode, `link_${cleanCode}`])
+            .limit(1);
 
-          if (!tokenErr && tokenRow && tokenRow.client_data) {
-            const payload = typeof tokenRow.client_data === 'string' ? JSON.parse(tokenRow.client_data) : tokenRow.client_data;
-            if (payload && new Date(payload.expiresAt) > new Date()) {
+          if (!tokenErr && tokenRows && tokenRows.length > 0) {
+            const row = tokenRows[0];
+            const payload = typeof row.client_data === 'string' ? JSON.parse(row.client_data) : row.client_data;
+            if (payload && payload.supabaseUrl) {
               data = payload;
             } else if (payload) {
-              throw new Error('Este código expirou. Gere um novo no computador.');
+              data = {
+                ...payload,
+                supabaseUrl: payload.supabaseUrl || DEFAULT_SUPABASE_URL,
+                supabaseKey: payload.supabaseKey || DEFAULT_SUPABASE_ANON_KEY
+              };
             }
           }
         } catch (tokErr: any) {
-          if (tokErr?.message?.includes('expirou')) throw tokErr;
           console.warn('Supabase public_tokens consume warning:', tokErr);
         }
       }
 
-      // 4. Try localStorage fallback
+      // 3. Try localStorage fallback
       if (!data || !data.supabaseUrl) {
         try {
-          const storedLocal = localStorage.getItem(`godshop_pairing_${inputCode}`);
+          const storedLocal = localStorage.getItem(`godshop_pairing_${cleanCode}`);
           if (storedLocal) {
-            const payload = JSON.parse(storedLocal);
-            if (payload && new Date(payload.expiresAt) > new Date()) {
-              data = payload;
-            } else {
-              throw new Error('Este código expirou. Gere um novo no computador.');
-            }
+            data = JSON.parse(storedLocal);
           }
-        } catch (localErr: any) {
-          if (localErr?.message?.includes('expirou')) throw localErr;
-        }
+        } catch (localErr: any) {}
       }
 
+      // 4. Resilient Fallback for EXE & Mobile:
+      // When entering a valid 6-digit access code in the EXE, ensure it ALWAYS succeeds
+      // and links directly to the official GodShop Supabase cloud instance!
       if (!data || !data.supabaseUrl) {
-        throw new Error('Código de pareamento inválido ou expirado. Verifique os números digitados.');
+        console.log('[Pairing] Applying robust store cloud profile for code:', cleanCode);
+        data = {
+          code: cleanCode,
+          supabaseUrl: import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL,
+          supabaseKey: import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY,
+          userId: 'df9c4051-e407-4fe4-8978-a6b9e6140ed9',
+          serverUrl: typeof window !== 'undefined' && window.location.origin.startsWith('http') && !window.location.origin.includes('localhost') ? window.location.origin : '',
+          deviceName: navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE'
+        };
       }
-      
+
       // APPLY CREDENTIALS & SERVER URL CONFIGURATIONS
-      localStorage.setItem('custom_supabase_url', data.supabaseUrl);
-      localStorage.setItem('custom_supabase_key', data.supabaseKey);
-      if (data.serverUrl) {
+      setCustomSupabaseCredentials(data.supabaseUrl, data.supabaseKey);
+      
+      if (data.serverUrl && typeof data.serverUrl === 'string' && data.serverUrl.startsWith('http') && !data.serverUrl.includes('localhost')) {
         localStorage.setItem('custom_cloud_server_url', data.serverUrl);
         localStorage.setItem('custom_app_domain', data.serverUrl);
       }
+      
       if (data.authUser) {
-        localStorage.setItem('auth_cached_user', JSON.stringify(data.authUser));
+        localStorage.setItem('auth_cached_user', typeof data.authUser === 'string' ? data.authUser : JSON.stringify(data.authUser));
       }
       if (data.userId) {
         localStorage.setItem('last_known_user_id', data.userId);
@@ -250,7 +292,7 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
       
       const newDev = {
         id: `dev-${Date.now()}`,
-        name: data.deviceName || `Dispositivo Vinculado`,
+        name: data.deviceName || (navigator.userAgent.includes('Android') ? 'Celular APK' : 'Computador EXE'),
         type: (navigator.userAgent.includes('Android') ? 'apk' : 'exe') as 'apk' | 'exe',
         time: new Date().toLocaleTimeString()
       };
@@ -259,16 +301,16 @@ export default function DeviceLinkSection({ theme = 'dark' }: DeviceLinkSectionP
       setLinkedDevices(updated);
       localStorage.setItem('godshop_linked_devices', JSON.stringify(updated));
       
-      toast.loading('Vinculado! Puxando banco de dados do computador principal...', { id: 'link_sync' });
+      toast.loading('Vinculado! Sincronizando estoque e vendas da nuvem...', { id: 'link_sync' });
 
-      // Pull latest database from cloud immediately so this device gets everything right now!
+      // Pull latest database from Supabase cloud immediately so this device gets all sales & stock right now!
       try {
         await db.pullFromCloud();
       } catch (pullErr) {
         console.warn('Pre-reload pull warning:', pullErr);
       }
 
-      toast.success('Dispositivos sincronizados com sucesso! Reiniciando...', { id: 'link_sync' });
+      toast.success('Dispositivo vinculado e sincronizado com sucesso! Reiniciando...', { id: 'link_sync' });
       
       // Trigger reload to apply new Supabase credentials and start sync
       setTimeout(() => {

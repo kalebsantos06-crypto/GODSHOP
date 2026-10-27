@@ -36,6 +36,7 @@ import Login from './pages/Login';
 import FiscalHub from './pages/fiscal/FiscalHub';
 import ClientSignature from './pages/ClientSignature';
 import ClientRemoteRegister from './pages/ClientRemoteRegister';
+import Studio from './pages/Studio';
 
 // High performance Query Client configuration with intelligent caching
 const queryClient = new QueryClient({
@@ -107,6 +108,7 @@ function AppContent() {
       '/offer-tags': 'GODSHOP | Encartes & Tags',
       '/users': 'GODSHOP | Gestão de Usuários',
       '/settings': 'GODSHOP | Configurações',
+      '/studio': 'GODSHOP | Studio Profissional',
       '/fiscal': 'GODSHOP | Módulo Fiscal NF-e',
       '/invoices': 'GODSHOP | Carnês & Boletos',
       '/login': 'GODSHOP | Acesso ao Sistema',
@@ -252,6 +254,7 @@ function AppContent() {
                 <Route path="clients" element={<Clients />} />
                 <Route path="suppliers" element={<Suppliers />} />
                 <Route path="users" element={<UsersPage />} />
+                <Route path="studio" element={<Studio />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="guarantee/:id" element={<GuaranteeNote />} />
 

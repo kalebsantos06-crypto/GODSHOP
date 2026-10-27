@@ -1489,7 +1489,7 @@ app.post("/api/pair/generate", async (req, res) => {
     supabaseKey: resolvedSupaKey,
     serverUrl: serverUrl || `https://${req.headers.host || 'ais-dev-vaaqegsewou44zzapwefq3-387330212853.us-west2.run.app'}`,
     deviceName: deviceName || "Dispositivo Principal",
-    expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 60 mins expiry
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days expiry
     createdAt: new Date().toISOString()
   };
 
@@ -1521,13 +1521,22 @@ app.post("/api/pair/generate", async (req, res) => {
         'Authorization': `Bearer ${resolvedSupaKey}`,
         'Prefer': 'resolution=merge-duplicates'
       },
-      body: JSON.stringify({
-        token: `pair_${code}`,
-        user_id: 'df9c4051-e407-4fe4-8978-a6b9e6140ed9',
-        used: false,
-        client_data: pairingRecord,
-        expires_at: pairingRecord.expiresAt
-      })
+      body: JSON.stringify([
+        {
+          token: `pair_${code}`,
+          user_id: 'df9c4051-e407-4fe4-8978-a6b9e6140ed9',
+          used: false,
+          client_data: pairingRecord,
+          expires_at: pairingRecord.expiresAt
+        },
+        {
+          token: code,
+          user_id: 'df9c4051-e407-4fe4-8978-a6b9e6140ed9',
+          used: false,
+          client_data: pairingRecord,
+          expires_at: pairingRecord.expiresAt
+        }
+      ])
     });
     console.log(`[Pairing] Bridged code ${code} to Supabase public_tokens successfully.`);
   } catch (supaErr) {
@@ -1571,7 +1580,7 @@ app.get("/api/pair/consume", async (req, res) => {
       else if (cleanUrl.endsWith('/rest/v1')) cleanUrl = cleanUrl.slice(0, -8);
 
       if (cleanUrl && supaKey) {
-        const supaRes = await fetch(`${cleanUrl}/rest/v1/public_tokens?token=eq.pair_${code}&select=*`, {
+        const supaRes = await fetch(`${cleanUrl}/rest/v1/public_tokens?token=in.(pair_${code},${code})&select=*`, {
           headers: {
             'apikey': supaKey,
             'Authorization': `Bearer ${supaKey}`
@@ -2009,20 +2018,42 @@ app.get("/api/public-clients", async (req, res) => {
   res.json(pending);
 });
 
-// Merchant completed syncing these remote registrations
+// Merchant completed syncing or rejecting these remote registrations
 app.post("/api/public-clients/sync-done", async (req, res) => {
   const { userId, clientIds } = req.body;
-  if (!userId || !clientIds || !Array.isArray(clientIds)) {
-    return res.status(400).json({ error: "userId e lista de clientIds são obrigatórios" });
+  if (!clientIds || !Array.isArray(clientIds) || clientIds.length === 0) {
+    return res.status(400).json({ error: "clientIds é obrigatório" });
   }
 
+  // 1. Remove from all keys in public_clients file
   const clients = readPublicClients();
-  if (clients[userId]) {
-    clients[userId] = clients[userId].filter(c => !clientIds.includes(c.id));
-    writePublicClients(clients);
+  for (const k of Object.keys(clients)) {
+    if (Array.isArray(clients[k])) {
+      clients[k] = clients[k].filter((c: any) => 
+        !clientIds.includes(c.id) && 
+        !clientIds.includes(c.token_cadastro) &&
+        !clientIds.includes(c.token)
+      );
+    }
   }
+  writePublicClients(clients);
 
-  // Try deleting from Supabase
+  // 2. Remove from public_tokens file
+  const tokens = readPublicTokens();
+  for (const cid of clientIds) {
+    if (tokens[cid]) {
+      delete tokens[cid];
+    }
+    for (const tKey of Object.keys(tokens)) {
+      const tItem = tokens[tKey];
+      if (tItem?.client_data?.id === cid || tItem?.clientData?.id === cid || tKey === cid) {
+        delete tokens[tKey];
+      }
+    }
+  }
+  writePublicTokens(tokens);
+
+  // 3. Try deleting from Supabase
   let supabaseUrl = process.env.VITE_SUPABASE_URL || '';
   if (supabaseUrl.endsWith('/rest/v1/')) {
     supabaseUrl = supabaseUrl.slice(0, -9);
@@ -2034,7 +2065,21 @@ app.post("/api/public-clients/sync-done", async (req, res) => {
   if (supabaseUrl && supabaseAnonKey && clientIds.length > 0) {
     try {
       for (const cid of clientIds) {
-        await fetch(`${supabaseUrl}/rest/v1/public_clients?id=eq.${cid}`, {
+        await fetch(`${supabaseUrl}/rest/v1/public_clients?id=eq.${encodeURIComponent(cid)}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': supabaseAnonKey,
+            'Authorization': `Bearer ${supabaseAnonKey}`
+          }
+        });
+        await fetch(`${supabaseUrl}/rest/v1/public_clients?token_cadastro=eq.${encodeURIComponent(cid)}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': supabaseAnonKey,
+            'Authorization': `Bearer ${supabaseAnonKey}`
+          }
+        });
+        await fetch(`${supabaseUrl}/rest/v1/public_tokens?token=eq.${encodeURIComponent(cid)}`, {
           method: 'DELETE',
           headers: {
             'apikey': supabaseAnonKey,
@@ -2312,6 +2357,69 @@ app.post("/api/settings", (req, res) => {
 
   writePublicSettings(settings);
   res.json({ success: true });
+});
+
+// Endpoint for GodShop Studio AI copywriting generation
+app.post("/api/studio/generate-copy", async (req, res) => {
+  try {
+    const { productName, price, tone } = req.body;
+    if (!productName) {
+      return res.status(400).json({ error: "Nome do produto é obrigatório" });
+    }
+
+    const formattedPrice = price ? Number(price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '';
+    
+    // Check if GEMINI_API_KEY is available
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const ai = new GoogleGenAI({});
+        const prompt = `Você é o copywriter comercial da GODSHOP, uma loja de elite de iPhones, consoles e eletrônicos premium (estética preto, branco e dourado).
+Gere uma copy altamente persuasiva e comercial para o seguinte produto:
+Produto: ${productName}
+Preço: ${formattedPrice}
+Tom desejado: ${tone || 'urgente'}
+
+Retorne EXCLUSIVAMENTE um objeto JSON válido (sem blocos markdown adicionais ou texto fora do JSON) com os seguintes campos:
+{
+  "headline": "Título de alto impacto curto para a arte publicitária (max 5 palavras)",
+  "subheadline": "Subtítulo chamativo para a arte (max 8 palavras)",
+  "badge": "Frase de selo/destaque em caixa alta (ex: '⚡ OFERTA LIMITADA 24H ⚡')",
+  "instagramCaption": "Legenda completa para post do Instagram com emojis, benefícios, garantia GodShop, formas de pagamento (12x no cartão ou Pix) e chamada para ação no direct/WhatsApp",
+  "whatsAppText": "Mensagem formatada e atraente para disparo direto no WhatsApp para a lista de clientes"
+}`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: {
+            responseMimeType: 'application/json'
+          }
+        });
+
+        if (response.text) {
+          const parsed = JSON.parse(response.text.trim());
+          return res.json(parsed);
+        }
+      } catch (geminiErr) {
+        console.warn("[Studio AI] Gemini API fallback triggered:", geminiErr);
+      }
+    }
+
+    // High quality tailored fallback if Gemini API is offline or key not provided
+    const toneVal = tone || 'urgente';
+    const fallback = {
+      headline: toneVal === 'luxo' ? 'SUPREMACIA & TECNOLOGIA' : (toneVal === 'urgente' ? 'ÚLTIMAS UNIDADES EM ESTOQUE' : 'O UPGRADE QUE VOCÊ MERECE'),
+      subheadline: `${productName} com Garantia GodShop e Pronta Entrega`,
+      badge: toneVal === 'urgente' ? '⚡ OFERTA VÁLIDA POR TEMPO LIMITADO ⚡' : '⭐ CONDIÇÃO EXCLUSIVA VIP ⭐',
+      instagramCaption: `✨ Chegou a oportunidade que você estava esperando na GODSHOP!\n\n📱 ${productName}\n💰 Por apenas ${formattedPrice || 'Consulte valor exclusivo'}\n💳 Em até 12x no cartão ou com super desconto à vista no Pix!\n\n🛡️ Garantia GodShop inclusa.\n📦 Acompanha carregador e mimos.\n\n📍 Chame nossa equipe no direct ou no link da bio e garanta o seu antes que acabe! 🚀`,
+      whatsAppText: `🔥 *OPORTUNIDADE EXCLUSIVA GODSHOP* 🔥\n\nFala cliente amigo! Acabou de entrar no estoque da GodShop uma unidade impecável:\n\n📱 *${productName}*\n💵 *Valor:* ${formattedPrice || 'Consulte preço'}\n💳 *Condição:* Em até 12x ou Pix com desconto!\n🛡️ *Garantia:* Total GodShop\n\nQuer que eu reserve pra você antes de anunciar no feed? Responda aqui! 🏃‍♂️💨`
+    };
+
+    return res.json(fallback);
+  } catch (err: any) {
+    console.error("[Studio AI Error]:", err);
+    res.status(500).json({ error: "Erro interno ao processar texto com IA" });
+  }
 });
 
 // Vite middleware setup

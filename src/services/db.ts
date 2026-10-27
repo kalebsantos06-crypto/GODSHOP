@@ -342,7 +342,10 @@ export const cloudApi = {
   pullAll: async (): Promise<any> => {
     if (!shouldAttemptCloudFetch()) return null;
     try {
-      const res = await fetch(getCloudApiUrl('/api/cloud-db'));
+      const ctrl = new AbortController();
+      const tId = setTimeout(() => ctrl.abort(), 3500);
+      const res = await fetch(getCloudApiUrl('/api/cloud-db'), { signal: ctrl.signal });
+      clearTimeout(tId);
       if (res.ok) {
         cloudApiAvailable = true;
         const json = await res.json();
@@ -361,11 +364,15 @@ export const cloudApi = {
   pushAll: async (data: any): Promise<any> => {
     if (!shouldAttemptCloudFetch()) return null;
     try {
+      const ctrl = new AbortController();
+      const tId = setTimeout(() => ctrl.abort(), 3500);
       const res = await fetch(getCloudApiUrl('/api/cloud-db/push'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data })
+        body: JSON.stringify({ data }),
+        signal: ctrl.signal
       });
+      clearTimeout(tId);
       if (res.ok) {
         cloudApiAvailable = true;
         const json = await res.json();
@@ -384,7 +391,10 @@ export const cloudApi = {
   getStats: async (): Promise<any> => {
     if (!shouldAttemptCloudFetch()) return null;
     try {
-      const res = await fetch(getCloudApiUrl('/api/cloud-db/stats'));
+      const ctrl = new AbortController();
+      const tId = setTimeout(() => ctrl.abort(), 3500);
+      const res = await fetch(getCloudApiUrl('/api/cloud-db/stats'), { signal: ctrl.signal });
+      clearTimeout(tId);
       if (res.ok) {
         cloudApiAvailable = true;
         const json = await res.json();
@@ -497,6 +507,55 @@ export const db = {
   pullFromCloud: async (): Promise<{ success: boolean; message: string; count?: number; hasChanged?: boolean }> => {
     try {
       let cloudData = await cloudApi.pullAll() || {};
+
+      // If Express cloud database is not available (e.g. running in standalone EXE, APK, or remote client),
+      // directly pull the tables from Supabase so all devices share the exact same data!
+      if (!cloudData || Object.keys(cloudData).length === 0) {
+        try {
+          const [salesRes, clientsRes, iphonesRes, consolesRes, suppliersRes, pricesRes, publicSalesRes] = await Promise.all([
+            supabase.from('sales').select('*'),
+            supabase.from('clients').select('*'),
+            supabase.from('iphones').select('*'),
+            supabase.from('consoles').select('*'),
+            supabase.from('suppliers').select('*'),
+            supabase.from('prices').select('*'),
+            supabase.from('public_sales').select('*')
+          ]);
+
+          const supaSales = salesRes.data || [];
+          const publicSales = publicSalesRes.data || [];
+
+          // Enrich sales with signatures from public_sales if available
+          if (publicSales.length > 0 && supaSales.length > 0) {
+            for (const s of supaSales) {
+              const pub = publicSales.find((p: any) => p.id === s.id || p.sale_id === s.id);
+              if (pub) {
+                const sigData = pub.signature_data || pub.sale_data?.signatureInfo?.signature_data || pub.sale_data?.signature_data;
+                const sigAt = pub.signed_at || pub.sale_data?.signatureInfo?.signed_at || pub.sale_data?.signed_at;
+                const sigIp = pub.signed_ip || pub.sale_data?.signatureInfo?.signed_ip || pub.sale_data?.signed_ip;
+                if (sigData && !s.signature_data) {
+                  s.signature_data = sigData;
+                  s.signed_at = sigAt;
+                  s.signed_ip = sigIp;
+                }
+              }
+            }
+          }
+
+          if (supaSales.length > 0 || (clientsRes.data && clientsRes.data.length > 0)) {
+            cloudData = {
+              sales: supaSales,
+              clients: clientsRes.data || [],
+              iphones: iphonesRes.data || [],
+              consoles: consolesRes.data || [],
+              suppliers: suppliersRes.data || [],
+              prices: pricesRes.data || []
+            };
+          }
+        } catch (supaPullErr) {
+          console.warn('[Direct Supabase Pull] Warning:', supaPullErr);
+        }
+      }
 
       if (!cloudData || Object.keys(cloudData).length === 0) {
         return { success: true, message: 'Operando em modo local resiliente.', count: 0, hasChanged: false };
@@ -781,6 +840,24 @@ export const db = {
           data: result
         };
       }
+      // If cloudApi is not reachable (e.g. standalone EXE/APK outside web server), push directly to Supabase!
+      try {
+        const syncRes = await db.syncAll();
+        if (typeof window !== 'undefined') {
+          safeSetLocalStorage('last_cloud_sync_ts', String(Date.now()));
+          window.dispatchEvent(new CustomEvent('cloud_sync_completed', { 
+            detail: { timestamp: Date.now() } 
+          }));
+        }
+        return {
+          success: true,
+          message: 'Dados sincronizados com o Supabase!',
+          data: syncRes
+        };
+      } catch (syncErr) {
+        console.warn('[Supabase Fallback Sync] Warning:', syncErr);
+      }
+
       return { success: false, message: 'Falha ao salvar dados na nuvem.' };
     } catch (e: any) {
       console.error('[Cloud Push] Error:', e);

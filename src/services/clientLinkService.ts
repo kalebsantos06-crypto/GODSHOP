@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { getBaseUrl } from '../utils/url';
 import { safeFetchJson } from '../lib/safeFetch';
+import { getCloudApiUrl } from './db';
 
 export interface RemoteClientPayload {
   id?: string;
@@ -45,6 +46,38 @@ export interface TokenValidationResult {
 
 const LOCAL_TOKENS_STORAGE_KEY = 'godshop_public_tokens';
 const LOCAL_PENDING_CLIENTS_KEY = 'godshop_pending_remote_clients';
+const DISMISSED_CLIENTS_KEY = 'godshop_dismissed_remote_clients';
+
+// Helper to read dismissed client IDs and tokens
+export function getDismissedClientIds(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(DISMISSED_CLIENTS_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+// Helper to persistently record dismissed/handled client IDs or tokens
+export function recordDismissedClientIds(ids: string[]) {
+  if (!ids || !Array.isArray(ids) || ids.length === 0) return;
+  try {
+    const current = getDismissedClientIds();
+    let updated = false;
+    for (const rawId of ids) {
+      const id = String(rawId || '').trim();
+      if (id && !current.includes(id)) {
+        current.push(id);
+        updated = true;
+      }
+    }
+    if (updated) {
+      // Keep up to 2000 historical IDs to prevent memory growth
+      localStorage.setItem(DISMISSED_CLIENTS_KEY, JSON.stringify(current.slice(-2000)));
+    }
+  } catch (e) {
+    console.warn('Could not record dismissed client IDs:', e);
+  }
+}
 
 const isValidUuid = (id?: string | null): boolean => {
   if (!id) return false;
@@ -120,7 +153,7 @@ export async function generateRegistrationLink(userId: string): Promise<Generate
 
   // 4. Also optionally notify Express server in local dev, gracefully ignoring 405 / network errors
   try {
-    fetch('/api/tokens/generate', {
+    fetch(getCloudApiUrl('/api/tokens/generate'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: effectiveUuid }),
@@ -216,7 +249,7 @@ export async function validateRegistrationToken(
   // Attempt Express API if available (dev environment)
   if (activeToken) {
     try {
-      const serverRes = await safeFetchJson<any>(`/api/tokens/validate?token=${activeToken}`);
+      const serverRes = await safeFetchJson<any>(getCloudApiUrl(`/api/tokens/validate?token=${activeToken}`));
       if (serverRes && typeof serverRes.valid === 'boolean') {
         if (serverRes.valid) {
           return {
@@ -322,7 +355,7 @@ export async function submitClientRemoteRegistration(
 
   // 3. Fallback: Also post to Express server if running
   try {
-    await fetch('/api/public-clients', {
+    await fetch(getCloudApiUrl('/api/public-clients'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -348,16 +381,27 @@ export async function submitClientRemoteRegistration(
 
 /**
  * Fetches pending remote client registrations for the merchant dashboard.
- * Queries Supabase public_clients, public_tokens, and local storage combined.
+ * Queries Supabase public_clients, public_tokens, and local storage combined,
+ * and filters out any registrations that have been accepted, rejected, or dismissed.
  */
 export async function fetchPendingRemoteClients(userId?: string): Promise<any[]> {
   const combinedMap = new Map<string, any>();
+  const dismissedList = getDismissedClientIds();
+  const dismissedSet = new Set<string>(dismissedList);
+
+  const isDismissed = (item: any): boolean => {
+    if (!item) return true;
+    if (item.id && dismissedSet.has(item.id)) return true;
+    if (item.token_cadastro && dismissedSet.has(item.token_cadastro)) return true;
+    if (item.token && dismissedSet.has(item.token)) return true;
+    return false;
+  };
 
   // 1. Check local pending clients first
   try {
     const localList: any[] = JSON.parse(localStorage.getItem(LOCAL_PENDING_CLIENTS_KEY) || '[]');
     localList.forEach(item => {
-      if (item && item.id) {
+      if (item && item.id && !isDismissed(item)) {
         combinedMap.set(item.id, item);
       }
     });
@@ -373,7 +417,7 @@ export async function fetchPendingRemoteClients(userId?: string): Promise<any[]>
 
       if (!error && Array.isArray(data)) {
         data.forEach(item => {
-          if (item && item.id && !combinedMap.has(item.id)) {
+          if (item && item.id && !isDismissed(item) && !combinedMap.has(item.id)) {
             combinedMap.set(item.id, item);
           }
         });
@@ -389,10 +433,13 @@ export async function fetchPendingRemoteClients(userId?: string): Promise<any[]>
 
       if (!tokenErr && Array.isArray(tokenData)) {
         tokenData.forEach(t => {
-          if (t.client_data) {
+          if (t.client_data && !isDismissed({ token: t.token })) {
             const clientItem = typeof t.client_data === 'string' ? JSON.parse(t.client_data) : t.client_data;
-            if (clientItem && clientItem.id && !combinedMap.has(clientItem.id)) {
-              combinedMap.set(clientItem.id, clientItem);
+            if (clientItem && clientItem.id && !isDismissed(clientItem) && !combinedMap.has(clientItem.id)) {
+              combinedMap.set(clientItem.id, {
+                ...clientItem,
+                token_cadastro: clientItem.token_cadastro || t.token
+              });
             }
           }
         });
@@ -400,13 +447,14 @@ export async function fetchPendingRemoteClients(userId?: string): Promise<any[]>
     } catch (e) {}
   }
 
-  // 4. Try Express server API (Dev mode)
+  // 4. Try Express server API (works seamlessly across APK, EXE, and Web via getCloudApiUrl)
   try {
-    const url = userId ? `/api/public-clients?userId=${encodeURIComponent(userId)}` : '/api/public-clients';
-    const serverList = await safeFetchJson<any[]>(url, undefined, []);
+    const endpoint = userId ? `/api/public-clients?userId=${encodeURIComponent(userId)}` : '/api/public-clients';
+    const serverUrl = getCloudApiUrl(endpoint);
+    const serverList = await safeFetchJson<any[]>(serverUrl, undefined, []);
     if (Array.isArray(serverList)) {
       serverList.forEach(item => {
-        if (item && item.id && !combinedMap.has(item.id)) {
+        if (item && item.id && !isDismissed(item) && !combinedMap.has(item.id)) {
           combinedMap.set(item.id, item);
         }
       });
@@ -418,34 +466,98 @@ export async function fetchPendingRemoteClients(userId?: string): Promise<any[]>
 
 /**
  * Dismisses / marks remote client registrations as synchronized or rejected.
+ * Completely cleans Supabase (both public_clients and public_tokens),
+ * local storage caches, and Express backend, guaranteeing the item disappears forever.
  */
-export async function dismissPendingRemoteClients(userId: string, clientIds: string[]): Promise<void> {
-  if (!clientIds.length) return;
-
-  // 1. Remove from Supabase public_clients
-  if (isSupabaseConfigured()) {
-    try {
-      for (const id of clientIds) {
-        await supabase.from('public_clients').delete().eq('id', id);
-      }
-    } catch (e) {
-      console.warn('Error deleting from Supabase public_clients:', e);
-    }
+export async function dismissPendingRemoteClients(
+  userId: string, 
+  clientIds: string[], 
+  tokens?: string[]
+): Promise<void> {
+  const allIdsToDismiss: string[] = [];
+  
+  if (Array.isArray(clientIds)) {
+    clientIds.forEach(id => {
+      if (id && typeof id === 'string') allIdsToDismiss.push(id.trim());
+    });
+  }
+  if (Array.isArray(tokens)) {
+    tokens.forEach(tok => {
+      if (tok && typeof tok === 'string') allIdsToDismiss.push(tok.trim());
+    });
   }
 
-  // 2. Remove from local storage
+  if (!allIdsToDismiss.length) return;
+
+  // 1. Immediately record in persistent dismissed IDs (prevents ghost re-queries)
+  recordDismissedClientIds(allIdsToDismiss);
+
+  // 2. Remove from local storage pending list
   try {
     const localList: any[] = JSON.parse(localStorage.getItem(LOCAL_PENDING_CLIENTS_KEY) || '[]');
-    const filtered = localList.filter(item => !clientIds.includes(item.id));
+    const filtered = localList.filter(item => 
+      !allIdsToDismiss.includes(item.id) && 
+      !allIdsToDismiss.includes(item.token_cadastro) &&
+      !allIdsToDismiss.includes(item.token)
+    );
     localStorage.setItem(LOCAL_PENDING_CLIENTS_KEY, JSON.stringify(filtered));
   } catch (e) {}
 
-  // 3. Notify Express server if running (ignore 405)
+  // 3. Remove/clean from local storage stored tokens
   try {
-    await fetch('/api/public-clients/sync-done', {
+    const localTokens = getStoredTokens();
+    let tokensChanged = false;
+    for (const id of allIdsToDismiss) {
+      if (localTokens[id]) {
+        delete localTokens[id];
+        tokensChanged = true;
+      }
+      for (const tKey of Object.keys(localTokens)) {
+        const item = localTokens[tKey];
+        if (item?.clientData?.id === id || item?.client_data?.id === id || tKey === id) {
+          delete localTokens[tKey];
+          tokensChanged = true;
+        }
+      }
+    }
+    if (tokensChanged) {
+      saveStoredTokens(localTokens);
+    }
+  } catch (e) {}
+
+  // 4. Remove from Supabase public_clients AND public_tokens (crucial to avoid ghost reappearance)
+  if (isSupabaseConfigured()) {
+    try {
+      for (const id of allIdsToDismiss) {
+        // Delete row in public_clients table
+        await supabase.from('public_clients').delete().eq('id', id);
+        await supabase.from('public_clients').delete().eq('token_cadastro', id);
+
+        // Clear client_data and delete from public_tokens table
+        await supabase.from('public_tokens').update({ client_data: null }).eq('token', id);
+        await supabase.from('public_tokens').delete().eq('token', id);
+      }
+    } catch (e) {
+      console.warn('Notice removing from Supabase public_clients / tokens:', e);
+    }
+  }
+
+  // 5. Notify Express server using getCloudApiUrl so APK & Desktop reach the cloud database properly
+  try {
+    const syncUrl = getCloudApiUrl('/api/public-clients/sync-done');
+    await fetch(syncUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, clientIds })
+      body: JSON.stringify({ userId, clientIds: allIdsToDismiss })
     });
   } catch (e) {}
+
+  // 6. Broadcast event so UI across open views reacts immediately
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent('remote_client_dismissed', { 
+        detail: { clientIds: allIdsToDismiss } 
+      }));
+    } catch (e) {}
+  }
 }

@@ -6,7 +6,7 @@ import {
   User, LogIn, LogOut, X, Download, Eye, EyeOff, Tv, Gift,
   Bell, AlertCircle, AlertTriangle, Calendar, MessageSquare, ExternalLink, Check, DollarSign, Sparkles, Zap,
   BarChart3, PlusCircle, Package, ShieldCheck, ClipboardList, Archive, ShieldAlert, Sliders, Cloud, RefreshCw,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Wand2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { triggerHaptic } from '../lib/haptics';
@@ -626,6 +626,7 @@ export default function Layout() {
     { name: 'Eletrônicos', href: '/consoles', icon: Tv },
     { name: 'Brindes & Acc', href: '/gifts', icon: Gift },
     { name: 'Encartes / Tags', href: '/offer-tags', icon: Sparkles },
+    { name: 'Studio', href: '/studio', icon: Wand2 },
     { name: 'Vendas', href: '/sales', icon: ShoppingCart },
     { name: 'Clientes', href: '/clients', icon: Users },
     { name: 'Fornecedores', href: '/suppliers', icon: Truck },

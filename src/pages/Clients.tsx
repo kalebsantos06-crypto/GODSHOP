@@ -396,14 +396,38 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     }
   }, [refetchPending]);
 
+  // Synchronize when any remote client is dismissed locally or across tabs
+  useEffect(() => {
+    const handleDismissedEvent = () => {
+      refetchPending();
+    };
+    window.addEventListener('remote_client_dismissed', handleDismissedEvent);
+    return () => window.removeEventListener('remote_client_dismissed', handleDismissedEvent);
+  }, [refetchPending]);
+
   const approveRemoteMutation = useMutation({
     mutationFn: async (remoteClient: any) => {
-      // 1. Create client locally/Supabase
       const { id: remoteId, created_at, ...cleanClient } = remoteClient;
-      await db.clients.create(cleanClient);
-      
-      // 2. Mark as synchronized and remove from pending (Cloudflare Pages, APK, Supabase)
-      await dismissPendingRemoteClients(user?.id || 'admin', [remoteId]);
+      const tokensToDismiss = [remoteId];
+      if (remoteClient.token_cadastro) tokensToDismiss.push(remoteClient.token_cadastro);
+
+      // 1. Immediately dismiss so it disappears persistently on all devices
+      await dismissPendingRemoteClients(user?.id || 'admin', [remoteId], tokensToDismiss);
+
+      // 2. Create the real client in the database
+      try {
+        await db.clients.create(cleanClient);
+      } catch (createErr) {
+        console.warn('Notice saving approved client to database:', createErr);
+      }
+    },
+    onMutate: async (remoteClient: any) => {
+      // Optimistic update: immediately drop from UI list
+      const targetId = remoteClient?.id;
+      const targetToken = remoteClient?.token_cadastro;
+      queryClient.setQueryData(['pendingRemote', user?.id], (old: any[] = []) =>
+        old.filter((item: any) => item.id !== targetId && item.token_cadastro !== targetId && item.token_cadastro !== targetToken)
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['clients'] });
@@ -412,13 +436,26 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     },
     onError: (err) => {
       console.error(err);
-      toast.error('Erro ao cadastrar cliente remoto.');
+      refetchPending();
+      toast.error('Erro ao aprovar cliente remoto.');
     }
   });
 
   const rejectRemoteMutation = useMutation({
-    mutationFn: async (remoteClientId: string) => {
-      await dismissPendingRemoteClients(user?.id || 'admin', [remoteClientId]);
+    mutationFn: async (remoteClientOrId: any) => {
+      const remoteId = typeof remoteClientOrId === 'string' ? remoteClientOrId : remoteClientOrId.id;
+      const token = typeof remoteClientOrId === 'object' ? remoteClientOrId.token_cadastro : undefined;
+      const tokensToDismiss = [remoteId];
+      if (token) tokensToDismiss.push(token);
+
+      await dismissPendingRemoteClients(user?.id || 'admin', [remoteId], tokensToDismiss);
+    },
+    onMutate: async (remoteClientOrId: any) => {
+      // Optimistic update: immediately drop from UI list
+      const targetId = typeof remoteClientOrId === 'string' ? remoteClientOrId : remoteClientOrId.id;
+      queryClient.setQueryData(['pendingRemote', user?.id], (old: any[] = []) =>
+        old.filter((item: any) => item.id !== targetId && item.token_cadastro !== targetId)
+      );
     },
     onSuccess: () => {
       refetchPending();
@@ -426,6 +463,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     },
     onError: (err) => {
       console.error(err);
+      refetchPending();
       toast.error('Erro ao recusar cadastro.');
     }
   });
@@ -796,16 +834,18 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                     Ver
                   </button>
                   <button
-                    onClick={() => rejectRemoteMutation.mutate(remoteClient.id)}
-                    className="flex-1 bg-muted hover:bg-muted/80 text-muted-foreground py-1 px-1 rounded-md text-xs font-semibold transition cursor-pointer text-center"
+                    onClick={() => rejectRemoteMutation.mutate(remoteClient)}
+                    disabled={rejectRemoteMutation.isPending || approveRemoteMutation.isPending}
+                    className="flex-1 bg-muted hover:bg-muted/80 text-muted-foreground py-1.5 px-2 rounded-md text-xs font-semibold transition cursor-pointer text-center disabled:opacity-50"
                   >
                     Recusar
                   </button>
                   <button
                     onClick={() => approveRemoteMutation.mutate(remoteClient)}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-1 px-2 rounded-md text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer"
+                    disabled={rejectRemoteMutation.isPending || approveRemoteMutation.isPending}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 px-2 rounded-md text-xs font-semibold transition flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
                   >
-                    <Check className="h-3 w-3" />
+                    <Check className="h-3.5 w-3.5" />
                     Aprovar
                   </button>
                 </div>
@@ -1554,8 +1594,39 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
             </div>
 
             {/* Modal Footer - Fixed */}
-            <div className="p-6 border-t border-white/5 flex justify-end shrink-0 bg-[#0C0C0E]">
+            <div className="p-6 border-t border-white/5 flex flex-wrap items-center justify-between gap-3 shrink-0 bg-[#0C0C0E]">
+              {pendingRemote.some(p => p.id === selectedPreviewClient.id) ? (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clientToReject = selectedPreviewClient;
+                      setSelectedPreviewClient(null);
+                      rejectRemoteMutation.mutate(clientToReject);
+                    }}
+                    disabled={rejectRemoteMutation.isPending || approveRemoteMutation.isPending}
+                    className="bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                  >
+                    Recusar Solicitação
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clientToApprove = selectedPreviewClient;
+                      setSelectedPreviewClient(null);
+                      approveRemoteMutation.mutate(clientToApprove);
+                    }}
+                    disabled={rejectRemoteMutation.isPending || approveRemoteMutation.isPending}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md disabled:opacity-50"
+                  >
+                    <Check className="h-4 w-4" />
+                    Aprovar Cadastro
+                  </button>
+                </div>
+              ) : <div />}
+
               <button
+                type="button"
                 onClick={() => setSelectedPreviewClient(null)}
                 className="bg-[#D4AF37] hover:bg-[#B38F1D] text-black px-6 py-2 rounded-xl text-xs font-bold uppercase tracking-widest transition shadow-md cursor-pointer"
               >
