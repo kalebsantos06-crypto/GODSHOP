@@ -82,6 +82,183 @@ const tryCacheUserIdFromRows = (rows: any[]) => {
   }
 };
 
+export function sanitizeIphoneForSupabase(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  const clean = { ...item };
+
+  delete clean.supplier;
+  delete clean.supplier_name;
+  delete clean.client;
+  delete clean.iphone;
+  delete clean.console;
+
+  if (clean.battery_health !== undefined && clean.battery_health !== null) {
+    if (typeof clean.battery_health === 'string') {
+      const digits = clean.battery_health.replace(/[^0-9]/g, '');
+      clean.battery_health = digits ? parseInt(digits, 10) : null;
+    } else if (typeof clean.battery_health === 'number') {
+      clean.battery_health = isNaN(clean.battery_health) ? null : Math.round(clean.battery_health);
+    } else {
+      clean.battery_health = null;
+    }
+  } else {
+    clean.battery_health = null;
+  }
+
+  if (clean.condition && typeof clean.condition === 'string') {
+    const lower = clean.condition.toLowerCase();
+    if (lower.includes('lacrad')) {
+      clean.condition = 'lacrado';
+    } else if (lower.includes('seminov')) {
+      clean.condition = 'seminovo';
+    }
+  }
+
+  if (clean.buy_price !== undefined) clean.buy_price = Number(clean.buy_price) || 0;
+  if (clean.sell_price !== undefined) clean.sell_price = clean.sell_price ? Number(clean.sell_price) || null : null;
+  if (clean.cost_price !== undefined) clean.cost_price = clean.cost_price ? Number(clean.cost_price) || null : null;
+
+  if (!clean.buy_date || clean.buy_date === '') clean.buy_date = null;
+
+  return clean;
+}
+
+export function sanitizeConsoleForSupabase(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  const clean = { ...item };
+
+  delete clean.supplier;
+  delete clean.supplier_name;
+  delete clean.client;
+  delete clean.iphone;
+  delete clean.console;
+
+  if (clean.condition && typeof clean.condition === 'string') {
+    const lower = clean.condition.toLowerCase();
+    if (lower.includes('lacrad')) {
+      clean.condition = 'lacrado';
+    } else if (lower.includes('seminov')) {
+      clean.condition = 'seminovo';
+    }
+  }
+
+  if (clean.buy_price !== undefined) clean.buy_price = Number(clean.buy_price) || 0;
+  if (clean.sell_price !== undefined) clean.sell_price = clean.sell_price ? Number(clean.sell_price) || null : null;
+  if (!clean.buy_date || clean.buy_date === '') clean.buy_date = null;
+
+  return clean;
+}
+
+export function sanitizeClientForSupabase(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  const clean = { ...item };
+
+  delete clean.sales;
+  delete clean.purchases;
+  delete clean.total_spent;
+  delete clean.client_name;
+
+  ['birth_date', 'token_expira_em', 'created_at', 'updated_at'].forEach(field => {
+    if (clean[field] === '') clean[field] = null;
+  });
+
+  return clean;
+}
+
+export function sanitizeSupplierForSupabase(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  const clean = { ...item };
+
+  delete clean.iphones;
+  delete clean.consoles;
+  delete clean.products;
+  delete clean.purchases;
+
+  ['created_at', 'updated_at'].forEach(field => {
+    if (clean[field] === '') clean[field] = null;
+  });
+
+  return clean;
+}
+
+export function sanitizeFiscalConfigForSupabase(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  const clean = { ...item };
+  delete clean.client;
+  delete clean.supplier;
+  delete clean.iphones;
+  delete clean.consoles;
+  ['created_at', 'updated_at'].forEach(field => {
+    if (clean[field] === '') clean[field] = null;
+  });
+  return clean;
+}
+
+export function sanitizeSaleForSupabase(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  const clean = { ...item };
+
+  const salesCalculatedFields = [
+    'installments_list', 
+    'client', 
+    'iphone', 
+    'console', 
+    'supplier',
+    'first_installment_date_formatted',
+    'client_name',
+    'item_name'
+  ];
+  salesCalculatedFields.forEach(col => delete clean[col]);
+
+  if (clean.witness1_name || clean.witness1_cpf || clean.witness1_signature || clean.witness2_name || clean.witness2_cpf || clean.witness2_signature) {
+    let sigObj: any = {};
+    if (clean.signature_data) {
+      if (typeof clean.signature_data === 'string') {
+        try { sigObj = JSON.parse(clean.signature_data); } catch (e) { sigObj = { raw: clean.signature_data }; }
+      } else if (typeof clean.signature_data === 'object') {
+        sigObj = { ...clean.signature_data };
+      }
+    }
+    sigObj.witness1_name = clean.witness1_name || sigObj.witness1_name;
+    sigObj.witness1_cpf = clean.witness1_cpf || sigObj.witness1_cpf;
+    sigObj.witness1_signature = clean.witness1_signature || sigObj.witness1_signature;
+    sigObj.witness2_name = clean.witness2_name || sigObj.witness2_name;
+    sigObj.witness2_cpf = clean.witness2_cpf || sigObj.witness2_cpf;
+    sigObj.witness2_signature = clean.witness2_signature || sigObj.witness2_signature;
+    clean.signature_data = JSON.stringify(sigObj);
+  }
+
+  delete clean.witness1_name;
+  delete clean.witness1_cpf;
+  delete clean.witness1_signature;
+  delete clean.witness2_name;
+  delete clean.witness2_cpf;
+  delete clean.witness2_signature;
+
+  const validFrequencies = ['Semanal', 'Quinzenal', 'Mensal'];
+  let freq = clean.installment_frequency;
+  if (freq && typeof freq === 'string' && freq.trim()) {
+    const lower = freq.trim().toLowerCase();
+    if (lower.startsWith('seman')) freq = 'Semanal';
+    else if (lower.startsWith('quinzen')) freq = 'Quinzenal';
+    else freq = 'Mensal';
+  } else {
+    freq = 'Mensal';
+  }
+  clean.installment_frequency = freq;
+
+  if (clean.first_installment_date === '') clean.first_installment_date = null;
+  if (!clean.sale_date || clean.sale_date === '') clean.sale_date = new Date().toISOString();
+
+  if (clean.sell_price !== undefined) clean.sell_price = Number(clean.sell_price) || 0;
+  if (clean.down_payment !== undefined) clean.down_payment = Number(clean.down_payment) || 0;
+  if (clean.buy_price !== undefined) clean.buy_price = Number(clean.buy_price) || 0;
+  if (clean.installments !== undefined) clean.installments = Number(clean.installments) || 1;
+  if (clean.installments_paid !== undefined) clean.installments_paid = Number(clean.installments_paid) || 0;
+
+  return clean;
+}
+
 // --- LOCAL STORAGE RESILIENCY ENGINE & REAL-TIME CLOUD SYNC ---
 export const recordLocalDelete = (table: string, id: string) => {
   try {
@@ -133,12 +310,20 @@ const getLocalData = (table: string): any[] => {
   }
 };
 
+let isPushingToCloud = false;
 let cloudPushTimeout: any = null;
 const scheduleCloudPush = () => {
+  if (isPushingToCloud) return;
   if (cloudPushTimeout) clearTimeout(cloudPushTimeout);
   cloudPushTimeout = setTimeout(() => {
-    db.pushToCloud().catch(err => console.warn('[Auto Cloud Push] Warn:', err));
-  }, 200);
+    if (isPushingToCloud) return;
+    isPushingToCloud = true;
+    db.pushToCloud()
+      .catch(() => {})
+      .finally(() => {
+        isPushingToCloud = false;
+      });
+  }, 1000);
 };
 
 const sanitizeForLocalStorage = (table: string, data: any[]): any[] => {
@@ -152,9 +337,6 @@ const sanitizeForLocalStorage = (table: string, data: any[]): any[] => {
     if (!item) return item;
     const copy = { ...item };
     
-    // We NO LONGER truncate signature_data because it's needed for offline visibility and PDF generation.
-    // However, if storage is full, the safeSetLocalStorage logic will handle it by trying smaller sets.
-    
     if (table === 'product_photos') {
       if (copy.photo_base64 && typeof copy.photo_base64 === 'string' && copy.photo_base64.length > 500) {
         copy.photo_base64 = '[truncated]';
@@ -164,7 +346,7 @@ const sanitizeForLocalStorage = (table: string, data: any[]): any[] => {
   });
 };
 
-const setLocalData = (table: string, data: any[]) => {
+const setLocalData = (table: string, data: any[], skipBroadcast = false) => {
   try {
     const sanitized = sanitizeForLocalStorage(table, data);
     let jsonStr = JSON.stringify(sanitized);
@@ -182,15 +364,12 @@ const setLocalData = (table: string, data: any[]) => {
       }
     }
     
-    if (!saved) {
-      console.warn(`[Storage] Failed to save local data for ${table} even after trimming.`);
+    if (!skipBroadcast) {
+      broadcastLocalChange(table);
+      scheduleCloudPush();
     }
-    
-    broadcastLocalChange(table);
-    // Automatically replicate change to Cloud Server in the background
-    scheduleCloudPush();
   } catch (e) {
-    console.error(`Error saving local data for ${table}:`, e);
+    // Handled silently
   }
 };
 
@@ -712,7 +891,7 @@ export const db = {
         const mergedJson = JSON.stringify(merged);
 
         if (localJson !== mergedJson) {
-          setLocalData(table, merged);
+          setLocalData(table, merged, true);
           hasChanged = true;
         }
         totalImported += merged.length;
@@ -870,14 +1049,11 @@ export const db = {
   },
 
   syncAll: async () => {
-    // 1. Always push and pull with the server Cloud Database first
-    await db.pushToCloud().catch(e => console.warn('Cloud DB push warning:', e));
+    // 1. Pull latest cloud changes first
     await db.pullFromCloud().catch(e => console.warn('Cloud DB pull warning:', e));
 
     const userId = await getCurrentUserId();
     
-    // We proceed even if userId is null, but we log it. 
-    // This allows syncing with custom Supabase instances where RLS might be disabled or using public access.
     if (!userId) {
       console.warn('[Sync] No userId found, proceeding with public/anon sync if possible.');
     }
@@ -887,139 +1063,55 @@ export const db = {
 
     for (const table of tables) {
       const localItems = getLocalData(table);
-      if (localItems.length === 0) continue;
-      
-      let tableModified = false;
-      missingColumnsByTable[table] = new Set();
+      if (!localItems || localItems.length === 0) continue;
 
+      const sanitizedList: any[] = [];
       for (const item of localItems) {
-        try {
-          // Clean the item: remove nested objects and null values that might cause issues
-          let cleanItem: any = { ...item, user_id: userId };
-          
-          if (table === 'sales') {
-            const validFrequencies = ['Semanal', 'Quinzenal', 'Mensal'];
-            let freq: any = cleanItem.installment_frequency;
-            
-            if (freq && typeof freq !== 'string') {
-              freq = String(freq);
-            }
-            
-            if (typeof freq === 'string' && freq.trim()) {
-              const trimmed = freq.trim();
-              const lower = trimmed.toLowerCase();
-              if (lower.startsWith('seman')) freq = 'Semanal';
-              else if (lower.startsWith('quinzen')) freq = 'Quinzenal';
-              else if (lower.startsWith('mens')) freq = 'Mensal';
-              else freq = 'Mensal';
-            } else {
-              freq = 'Mensal';
-            }
-            
-            // Re-verify strictly
-            if (!validFrequencies.includes(freq)) {
-              freq = 'Mensal';
-            }
-            
-            // Force valid value on both cleanItem (for DB) and original item (for cache)
-            cleanItem.installment_frequency = freq;
-            if (item.installment_frequency !== freq) {
-              item.installment_frequency = freq;
-              tableModified = true;
-            }
+        if (!item || typeof item !== 'object') continue;
+        let cleanItem: any = { ...item };
+        if (userId) cleanItem.user_id = userId;
 
-            // Ensure date fields are either valid ISO strings or null (avoid empty strings)
-            if (cleanItem.first_installment_date === "") {
-              cleanItem.first_installment_date = null;
-              tableModified = true;
-            }
-            if (cleanItem.sale_date === "") {
-              cleanItem.sale_date = new Date().toISOString();
-              tableModified = true;
-            }
-
-            // CRITICAL: Proactively remove ALL known problematic columns that are NOT in the DB schema
-            const salesCalculatedFields = [
-              'installments_list', 
-              'client', 
-              'iphone', 
-              'console', 
-              'supplier',
-              'first_installment_date_formatted',
-              'client_name',
-              'item_name'
-            ];
-            salesCalculatedFields.forEach(col => {
-              if (col in cleanItem) {
-                delete cleanItem[col];
-                tableModified = true;
-              }
-            });
-          }
-          
-          // List of known nested object keys to remove before syncing
-          const keysToRemove = ['iphone', 'console', 'client', 'supplier', 'installments_list'];
-          keysToRemove.forEach(key => delete cleanItem[key]);
-          
-          // Remove columns previously identified as missing for this table
-          missingColumnsByTable[table].forEach(col => delete cleanItem[col]);
-
-          // Attempt upsert with retry logic for missing columns
-          let retryCount = 0;
-          let currentError: any = null;
-          
-          while (retryCount < 5) {
-            const { error } = await supabase.from(table).upsert(cleanItem);
-            currentError = error;
-            
-            if (!error) break;
-
-            // Handle specific error: Check Constraint Violation
-            if (error.code === '23514' || error.message?.includes('check constraint')) {
-              if (table === 'sales' && error.message?.includes('installment_frequency')) {
-                cleanItem.installment_frequency = 'Mensal';
-                retryCount++;
-                continue;
-              }
-              if ((table === 'iphones' || table === 'consoles') && cleanItem.condition && cleanItem.condition.includes('_')) {
-                cleanItem.condition = cleanItem.condition.split('_')[0];
-                retryCount++;
-                continue;
-              }
-              break; // Unrecoverable constraint error
-            }
-
-            // Handle specific column missing errors
-            if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('schema cache')) {
-              const columnMatch1 = error.message?.match(/column ['"](.+?)['"]/);
-              const columnMatch2 = error.message?.match(/['"](.+?)['"] column/);
-              
-              const columnName = (columnMatch2 ? columnMatch2[1] : null) || (columnMatch1 ? columnMatch1[1] : null);
-
-              if (columnName) {
-                console.warn(`Removing missing column '${columnName}' from ${table} and retrying...`);
-                missingColumnsByTable[table].add(columnName);
-                delete cleanItem[columnName];
-                retryCount++;
-                continue;
-              }
-            }
-            
-            break;
-          }
-
-          if (!currentError) {
-            results.synced++;
-          } else {
-            results.failed++;
-          }
-        } catch (e: any) {
-          results.failed++;
+        if (table === 'sales') {
+          cleanItem = sanitizeSaleForSupabase(cleanItem);
+        } else if (table === 'iphones') {
+          cleanItem = sanitizeIphoneForSupabase(cleanItem);
+        } else if (table === 'consoles') {
+          cleanItem = sanitizeConsoleForSupabase(cleanItem);
+        } else if (table === 'clients') {
+          cleanItem = sanitizeClientForSupabase(cleanItem);
+        } else if (table === 'suppliers') {
+          cleanItem = sanitizeSupplierForSupabase(cleanItem);
+        } else if (table === 'fiscal_configs') {
+          cleanItem = sanitizeFiscalConfigForSupabase(cleanItem);
         }
+
+        const keysToRemove = ['iphone', 'console', 'client', 'supplier', 'installments_list', 'purchases', 'products'];
+        keysToRemove.forEach(key => delete cleanItem[key]);
+
+        sanitizedList.push(cleanItem);
       }
-      
-      if (tableModified) {
-        setLocalData(table, localItems);
+
+      // Chunk batch upserts in batches of 20 items to prevent REST rate limits
+      for (let i = 0; i < sanitizedList.length; i += 20) {
+        const chunk = sanitizedList.slice(i, i + 20);
+        try {
+          const { error } = await supabase.from(table).upsert(chunk);
+          if (!error) {
+            results.synced += chunk.length;
+          } else {
+            // If batch encounters an item constraint issue, fallback to single item upsert
+            for (const singleItem of chunk) {
+              const { error: singleErr } = await supabase.from(table).upsert(singleItem);
+              if (!singleErr) {
+                results.synced++;
+              } else {
+                results.failed++;
+              }
+            }
+          }
+        } catch (e) {
+          results.failed += chunk.length;
+        }
       }
     }
 
@@ -1204,12 +1296,13 @@ export const db = {
     create: async (data: Omit<iPhone, 'id'>) => {
       const id = generateId();
       clearLocalDeleteRecord('iphones', id);
-      const insertData = { ...data, id } as any;
+      const rawInsert = { ...data, id } as any;
       try {
         const userId = await getCurrentUserId();
         if (userId) {
-          insertData.user_id = userId;
+          rawInsert.user_id = userId;
         }
+        const insertData = sanitizeIphoneForSupabase(rawInsert);
         let { data: newItem, error } = await supabase.from('iphones').insert(insertData).select().single();
         
         if (error) {
@@ -1291,9 +1384,7 @@ export const db = {
     },
     update: async (id: string, data: Partial<iPhone>) => {
       try {
-        const updateData = { ...data } as any;
-        delete updateData.client;
-        delete updateData.supplier;
+        const updateData = sanitizeIphoneForSupabase({ ...data });
 
         if (missingColumnsByTable['iphones']) {
           for (const col of missingColumnsByTable['iphones']) {
@@ -1454,7 +1545,7 @@ export const db = {
         
         let newItem: any = null;
         let attemptError: any = null;
-        let currentData = { ...insertData };
+        let currentData = sanitizeClientForSupabase({ ...insertData });
         let maxRetries = 20; // Safeguard against infinite loops
         
         while (maxRetries > 0) {
@@ -1549,7 +1640,7 @@ export const db = {
     },
     update: async (id: string, data: Partial<Client>) => {
       try {
-        const updateData = { ...data } as any;
+        const updateData = sanitizeClientForSupabase({ ...data });
 
         if (missingColumnsByTable['clients']) {
           for (const col of missingColumnsByTable['clients']) {
@@ -1634,13 +1725,13 @@ export const db = {
     },
     create: async (data: Omit<Supplier, 'id'>) => {
       const id = generateId();
-      const insertData = { ...data, id } as any;
+      const rawInsert = { ...data, id } as any;
       try {
         const userId = await getCurrentUserId();
         if (userId) {
-          insertData.user_id = userId;
+          rawInsert.user_id = userId;
         }
-
+        const insertData = sanitizeSupplierForSupabase(rawInsert);
         let { data: newItem, error } = await supabase.from('suppliers').insert(insertData).select().single();
         
         if (error) {
@@ -1688,7 +1779,7 @@ export const db = {
     },
     update: async (id: string, data: Partial<Supplier>) => {
       try {
-        const updateData = { ...data } as any;
+        const updateData = sanitizeSupplierForSupabase({ ...data });
 
         if (missingColumnsByTable['suppliers']) {
           for (const col of missingColumnsByTable['suppliers']) {

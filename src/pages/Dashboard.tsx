@@ -418,7 +418,7 @@ export default function Dashboard() {
   };
 
   // 4. CONDITIONAL RENDER (AFTER ALL HOOKS)
-  if (isLoadingIphones || isLoadingSales || isLoadingConsoles || isLoadingClients) {
+  if ((isLoadingIphones || isLoadingSales || isLoadingConsoles || isLoadingClients) && iphones.length === 0 && sales.length === 0 && consoles.length === 0) {
     return <LoadingScreen message="Carregando Dashboard..." />;
   }
 

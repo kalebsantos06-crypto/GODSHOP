@@ -43,12 +43,29 @@ const handleInvalidToken = async () => {
 };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const cached = safeGetStorage('auth_cached_user');
+      return cached ? JSON.parse(cached) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      const cached = safeGetStorage('auth_cached_user');
+      return !!cached;
+    } catch (e) {
+      return false;
+    }
+  });
+
   const [isOfflineMode, setIsOfflineMode] = useState<boolean>(() => {
     return safeGetStorage('auth_offline_mode') === 'true';
   });
-  const [loading, setLoading] = useState(true);
+
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let isMounted = true;

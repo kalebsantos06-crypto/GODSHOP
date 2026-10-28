@@ -464,44 +464,26 @@ export default function ClientSignature({ id: propId }: { id?: string }) {
           }
         };
 
-        let dbErr = null;
-        let retryCount = 0;
-
-        while (retryCount < 5) {
-          const { error } = await supabase.from('public_sales').update(updateData).eq('id', id);
-          dbErr = error;
-          
-          if (!error) break;
-
-          if (error.code === '42703' || error.message?.includes('column') || error.message?.includes('schema cache')) {
-            const columnMatch1 = error.message?.match(/column ['"](.+?)['"]/);
-            const columnMatch2 = error.message?.match(/['"](.+?)['"] column/);
-            const columnName = (columnMatch2 ? columnMatch2[1] : null) || (columnMatch1 ? columnMatch1[1] : null);
-            
-            if (columnName) {
-              console.warn(`Removing missing column '${columnName}' from public_sales update and retrying...`);
-              delete updateData[columnName];
-              retryCount++;
-              continue;
-            }
-          }
-          break; // Stop if not a missing column error
-        }
+        const { error: dbErr } = await supabase.from('public_sales').update(updateData).eq('id', id);
 
         if (!dbErr) {
           // Update main sales table in Supabase directly so all apps/APKs fetching 'sales' table immediately see signature
           try {
             await supabase.from('sales').update({
-              signature_data,
+              signature_data: JSON.stringify({
+                signature: signature_data,
+                signedAt,
+                signedIp: clientIp,
+                clientName: fullName,
+                witness1Name: witness1Name || null,
+                witness1Cpf: witness1Cpf || null,
+                witness1Signature: witness1_signature || null,
+                witness2Name: witness2Name || null,
+                witness2Cpf: witness2Cpf || null,
+                witness2Signature: witness2_signature || null
+              }),
               signed_at: signedAt,
-              signed_ip: clientIp,
-              client_name: fullName,
-              witness1_name: witness1Name || null,
-              witness1_cpf: witness1Cpf || null,
-              witness1_signature: witness1_signature || null,
-              witness2_name: witness2Name || null,
-              witness2_cpf: witness2Cpf || null,
-              witness2_signature: witness2_signature || null
+              signed_ip: clientIp
             }).eq('id', id);
           } catch (salesUpdateErr) {
             console.warn('Could not update sales table in Supabase directly:', salesUpdateErr);

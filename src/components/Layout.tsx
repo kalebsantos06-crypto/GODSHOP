@@ -731,16 +731,16 @@ export default function Layout() {
       <div 
         className={cn(
           "fixed inset-0 z-0 bg-cover bg-center bg-no-repeat transition-all duration-700",
-          theme === 'dark' ? "bg-slate-950" : "bg-slate-100"
+          theme === 'dark' ? "bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950/40" : "bg-gradient-to-br from-slate-50 via-slate-100 to-emerald-50/30"
         )}
         style={{ 
-          backgroundImage: bgImage ? `linear-gradient(to bottom, ${theme === 'dark' ? 'rgba(15,23,42,0.25)' : 'rgba(255,255,255,0.85)'}, ${theme === 'dark' ? 'rgba(15,23,42,0.45)' : 'rgba(241,245,249,0.92)'}), url(${bgImage})` : undefined,
+          backgroundImage: bgImage ? `linear-gradient(to bottom, ${theme === 'dark' ? 'rgba(15,23,42,0.35)' : 'rgba(255,255,255,0.85)'}, ${theme === 'dark' ? 'rgba(15,23,42,0.55)' : 'rgba(241,245,249,0.92)'}), url(${bgImage})` : undefined,
         }}
       />
 
-      {/* Metallic Glow Overlay */}
-      <div className="fixed inset-0 pointer-events-none opacity-40 dark:opacity-30 mix-blend-screen z-0">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] rounded-full bg-white/5 blur-[150px]"></div>
+      {/* Luminous Ambient Glow Overlay */}
+      <div className="fixed inset-0 pointer-events-none opacity-50 dark:opacity-40 mix-blend-screen z-0">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80%] h-[80%] rounded-full bg-emerald-500/10 blur-[150px]"></div>
       </div>
 
       {/* Header */}

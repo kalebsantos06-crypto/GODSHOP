@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, lazy, ComponentType } from 'react';
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -17,24 +17,41 @@ import { backgroundService } from './services/backgroundService';
 import LoadingScreen from './components/LoadingScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 
-// Import all application route pages directly for maximum reliability and zero dynamic chunk loading failures
+// Direct static imports for primary boot screens (instant startup with zero 429 rate limit delays)
 import Dashboard from './pages/Dashboard';
-import Inventory from './pages/Inventory';
-import Sales from './pages/Sales';
-import ConsolesStock from './pages/ConsolesStock';
-import GiftsAndAccessories from './pages/GiftsAndAccessories';
-import Invoices from './pages/Invoices';
-import Clients from './pages/Clients';
-import Suppliers from './pages/Suppliers';
-import GuaranteeNote from './pages/GuaranteeNote';
-import PriceTable from './pages/PriceTable';
-import Settings from './pages/Settings';
-import UsersPage from './pages/Users';
-import Notes from './pages/Notes';
 import Login from './pages/Login';
-import FiscalHub from './pages/fiscal/FiscalHub';
-import ClientSignature from './pages/ClientSignature';
-import ClientRemoteRegister from './pages/ClientRemoteRegister';
+
+// Helper to safely lazy load sub-route chunks with auto-retry on network rate limits
+function lazyWithRetry<T extends ComponentType<any>>(
+  componentImport: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    try {
+      return await componentImport();
+    } catch (error) {
+      // Retry once after 200ms if initial request was rate limited or aborted
+      await new Promise((r) => setTimeout(r, 200));
+      return componentImport();
+    }
+  });
+}
+
+// Resilient on-demand lazy loading for heavy sub-pages
+const Inventory = lazyWithRetry(() => import('./pages/Inventory'));
+const Sales = lazyWithRetry(() => import('./pages/Sales'));
+const ConsolesStock = lazyWithRetry(() => import('./pages/ConsolesStock'));
+const GiftsAndAccessories = lazyWithRetry(() => import('./pages/GiftsAndAccessories'));
+const Invoices = lazyWithRetry(() => import('./pages/Invoices'));
+const Clients = lazyWithRetry(() => import('./pages/Clients'));
+const Suppliers = lazyWithRetry(() => import('./pages/Suppliers'));
+const GuaranteeNote = lazyWithRetry(() => import('./pages/GuaranteeNote'));
+const PriceTable = lazyWithRetry(() => import('./pages/PriceTable'));
+const Settings = lazyWithRetry(() => import('./pages/Settings'));
+const UsersPage = lazyWithRetry(() => import('./pages/Users'));
+const Notes = lazyWithRetry(() => import('./pages/Notes'));
+const FiscalHub = lazyWithRetry(() => import('./pages/fiscal/FiscalHub'));
+const ClientSignature = lazyWithRetry(() => import('./pages/ClientSignature'));
+const ClientRemoteRegister = lazyWithRetry(() => import('./pages/ClientRemoteRegister'));
 
 // High performance Query Client configuration with intelligent caching
 const queryClient = new QueryClient({
@@ -62,24 +79,19 @@ function handleInitialRedirects() {
   const search = window.location.search || '';
   const hash = window.location.hash || '';
 
-  // Direct path-based links for client self-registration or client signature only
+  // If hash is already present, do not perform URL rewrites to avoid reload loops
+  if (hash && hash.length > 1) {
+    return;
+  }
+
+  // Safely translate path-based links for client self-registration or client signature into hash routes without page reload
   if (pathname.startsWith('/cadastro-cliente')) {
-    window.location.replace(`${window.location.origin}/#/cadastro-cliente${search}`);
+    window.history.replaceState(null, '', `${window.location.origin}/#/cadastro-cliente${search}`);
     return;
   }
   if (pathname.startsWith('/assinar')) {
-    window.location.replace(`${window.location.origin}/#${pathname}${search}`);
+    window.history.replaceState(null, '', `${window.location.origin}/#${pathname}${search}`);
     return;
-  }
-
-  // Preserve public standalone client links
-  if (hash.startsWith('#/cadastro-cliente') || hash.startsWith('#/assinar/')) {
-    return;
-  }
-
-  // On cold start/restart, always reset internal sub-routes (such as guarantee note) back to Dashboard
-  if (hash.startsWith('#/guarantee') || hash.startsWith('#/invoices')) {
-    window.location.hash = '/';
   }
 }
 
@@ -148,25 +160,32 @@ function AppContent() {
   // Multi-device Cloud Sync & Background Execution Engine (APK & Desktop)
   useEffect(() => {
     let isSubscribed = true;
+    let isSyncing = false;
 
-    // Initialize background execution and listeners
+    // Initialize background execution
     backgroundService.init();
 
     const performSync = async () => {
+      if (isSyncing || !isSubscribed) return;
       if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+      isSyncing = true;
       try {
         // 1. Pull latest cloud data so all devices get all saved items immediately
         const pullRes = await db.pullFromCloud();
-        if (pullRes.success && isSubscribed) {
-          if (pullRes.hasChanged) {
-            queryClient.invalidateQueries();
-          }
+        if (pullRes.success && pullRes.hasChanged && isSubscribed) {
+          queryClient.invalidateQueries({ queryKey: ['sales'] });
+          queryClient.invalidateQueries({ queryKey: ['iphones'] });
+          queryClient.invalidateQueries({ queryKey: ['consoles'] });
+          queryClient.invalidateQueries({ queryKey: ['clients'] });
         }
 
         // 2. Push any local items to cloud so they are never lost
         await db.pushToCloud();
       } catch (err: any) {
-        // Handled silently
+        // Handled
+      } finally {
+        isSyncing = false;
       }
     };
 
@@ -181,51 +200,61 @@ function AppContent() {
       performSync();
     }, 120000);
 
-    // Throttled focus sync (minimum 15s delay between focus syncs)
+    // Throttled focus sync (minimum 30s delay between focus syncs)
     let lastFocusSync = 0;
     const handleFocusOrActivity = () => {
       const now = Date.now();
-      if (now - lastFocusSync > 15000) {
+      if (now - lastFocusSync > 30000) {
         performSync();
         lastFocusSync = now;
       }
     };
-    
-    const handleSyncCompleted = (e: any) => {
-      if (e?.detail?.hasChanged && isSubscribed) {
-        queryClient.invalidateQueries();
-      }
-    };
-
-    const handleDeviceMutation = () => {
-      if (isSubscribed) {
-        performSync();
-      }
-    };
-
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key && e.key.startsWith('db_fallback_') && isSubscribed) {
-        queryClient.invalidateQueries();
-      }
-    };
 
     window.addEventListener('focus', handleFocusOrActivity);
-    window.addEventListener('cloud_sync_completed', handleSyncCompleted);
     window.addEventListener('visibilitychange', handleFocusOrActivity);
-    window.addEventListener('device_data_mutated', handleDeviceMutation);
-    window.addEventListener('storage', handleStorageChange);
 
     return () => {
       isSubscribed = false;
       clearInterval(interval);
       unregisterBgSync();
       window.removeEventListener('focus', handleFocusOrActivity);
-      window.removeEventListener('cloud_sync_completed', handleSyncCompleted);
       window.removeEventListener('visibilitychange', handleFocusOrActivity);
-      window.removeEventListener('device_data_mutated', handleDeviceMutation);
-      window.removeEventListener('storage', handleStorageChange);
     };
-  }, [isAuthenticated, user?.id]); // Use user.id to avoid unnecessary re-triggers
+  }, []);
+
+  // Background Database Warmup (Android APK & Capacitor Safety - Non Blocking)
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initLocalDatabase() {
+      try {
+        if (typeof window !== 'undefined') {
+          // Pre-warm local storage cache keys for core tables
+          ['iphones', 'consoles', 'sales', 'clients', 'suppliers', 'prices'].forEach(table => {
+            const key = `db_fallback_${table}`;
+            try {
+              if (!localStorage.getItem(key)) {
+                localStorage.setItem(key, '[]');
+              }
+            } catch (e) {}
+          });
+        }
+
+        // Background cloud pull with safety race
+        const pullPromise = db.pullFromCloud();
+        const timeoutPromise = new Promise(resolve => setTimeout(resolve, 2000));
+        await Promise.race([pullPromise, timeoutPromise]);
+      } catch (err) {
+        // Silenced
+      }
+    }
+
+    initLocalDatabase();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <>

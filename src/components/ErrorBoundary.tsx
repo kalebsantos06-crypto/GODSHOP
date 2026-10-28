@@ -20,58 +20,34 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public static getDerivedStateFromError(error: Error): Partial<State> {
     const errorStr = String(error?.message || error || '').toLowerCase();
-    const isDomNodeError = 
-      error?.name === 'NotFoundError' ||
-      errorStr.includes('removechild') || 
-      errorStr.includes('insertbefore') || 
-      errorStr.includes('not a child') ||
-      errorStr.includes('notfounderror');
 
     const isDynamicImportError =
       errorStr.includes('dynamically imported module') ||
-      errorStr.includes('failed to fetch dynamically imported module');
+      errorStr.includes('failed to fetch dynamically imported module') ||
+      errorStr.includes('loading chunk');
 
-    // Handle dynamic chunk import failure (e.g. after code update or dev server refresh)
+    // Auto reload once on stale build chunk error
     if (isDynamicImportError) {
-      console.warn('Dynamic import error caught in ErrorBoundary:', error);
       try {
         const lastReload = sessionStorage.getItem('last_dyn_import_reload');
         const now = Date.now();
         if (!lastReload || now - Number(lastReload) > 10000) {
           sessionStorage.setItem('last_dyn_import_reload', String(now));
           window.location.reload();
-          return { hasError: false, error: null };
         }
       } catch (e) {}
-      return { hasError: true, error };
     }
 
-    const isNetworkFetchError =
-      errorStr.includes('failed to fetch') ||
-      errorStr.includes('networkerror') ||
-      errorStr.includes('load failed') ||
-      errorStr.includes('failed to connect');
-
-    // If it is a benign DOM mutation error or network fetch glitch, suppress crash
-    if (isDomNodeError || isNetworkFetchError) {
-      console.warn('Recovered from benign error in ErrorBoundary:', error);
-      return { hasError: false, error: null };
-    }
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     const errorStr = String(error?.message || error || '').toLowerCase();
-    const isDomNodeError = 
-      error?.name === 'NotFoundError' ||
-      errorStr.includes('removechild') || 
-      errorStr.includes('insertbefore') || 
-      errorStr.includes('not a child') ||
-      errorStr.includes('notfounderror');
 
     const isDynamicImportError =
       errorStr.includes('dynamically imported module') ||
-      errorStr.includes('failed to fetch dynamically imported module');
+      errorStr.includes('failed to fetch dynamically imported module') ||
+      errorStr.includes('loading chunk');
 
     if (isDynamicImportError) {
       try {
@@ -85,18 +61,7 @@ export class ErrorBoundary extends Component<Props, State> {
       } catch (e) {}
     }
 
-    const isNetworkFetchError =
-      errorStr.includes('failed to fetch') ||
-      errorStr.includes('networkerror') ||
-      errorStr.includes('load failed') ||
-      errorStr.includes('failed to connect');
-
-    if (isDomNodeError || isNetworkFetchError) {
-      console.warn('Ignored exception in ErrorBoundary:', error);
-      this.setState({ hasError: false, error: null });
-      return;
-    }
-    console.error('Unhandled React Error:', error, errorInfo);
+    console.error('Unhandled React Error caught by ErrorBoundary:', error, errorInfo);
     this.setState({ errorInfo });
   }
 

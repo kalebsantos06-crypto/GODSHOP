@@ -18,18 +18,18 @@
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script>
-      // Suppress benign Vite HMR WebSocket connection errors in sandbox/cloud preview environments
+      // Suppress benign Vite HMR WebSocket connection errors & Chrome Origin Trial warnings
       window.addEventListener('unhandledrejection', function(e) {
         var reason = e && (e.reason || e);
         var str = String(reason && (reason.message || reason) || '');
-        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened')) {
+        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened') || str.includes('writer') || str.includes('rewriter') || str.includes('proofreader')) {
           e.preventDefault();
           if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         }
       });
       window.addEventListener('error', function(e) {
         var str = String(e && (e.message || e) || '');
-        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened')) {
+        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened') || str.includes('writer') || str.includes('rewriter') || str.includes('proofreader')) {
           e.preventDefault();
           if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         }

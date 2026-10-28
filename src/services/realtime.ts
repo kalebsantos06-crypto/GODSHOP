@@ -8,6 +8,8 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const INITIAL_RECONNECT_DELAY = 3000;
 
+const TAB_ID = Math.random().toString(36).substring(2);
+
 // BroadcastChannel for instant local cross-tab sync
 const BC_NAME = 'godshop_realtime_broadcast';
 let broadcastChannel: BroadcastChannel | null = null;
@@ -29,6 +31,7 @@ export function broadcastLocalChange(table?: string) {
       broadcastChannel.postMessage({
         type: 'LOCAL_DATA_CHANGED',
         table,
+        senderId: TAB_ID,
         timestamp: Date.now()
       });
     } catch (e) {
@@ -73,7 +76,7 @@ function updateLocalFallbackCache(table: string, eventType: string, newRecord: a
 
     localStorage.setItem(key, JSON.stringify(items));
   } catch (err) {
-    console.warn(`[Realtime Cache] Table ${table}:`, err);
+    // Silenced
   }
 }
 
@@ -86,11 +89,13 @@ export function initRealtimeSync(queryClient: QueryClient) {
   // Listen to BroadcastChannel for multi-tab sync
   if (broadcastChannel) {
     broadcastChannel.onmessage = (event) => {
-      if (event.data && event.data.type === 'LOCAL_DATA_CHANGED') {
+      // Only process broadcast events from DIFFERENT tabs to avoid self-triggering invalidation loops
+      if (event.data && event.data.type === 'LOCAL_DATA_CHANGED' && event.data.senderId !== TAB_ID) {
         if (event.data.table) {
           queryClient.invalidateQueries({ queryKey: [event.data.table] });
+        } else {
+          queryClient.invalidateQueries();
         }
-        queryClient.invalidateQueries();
       }
     };
   }

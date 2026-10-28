@@ -10,8 +10,21 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-router-dom',
+      '@tanstack/react-query',
+      'lucide-react',
+      'date-fns',
+      'sonner',
+      '@supabase/supabase-js'
+    ],
+  },
   build: {
     outDir: 'dist',
+    chunkSizeWarningLimit: 1600,
   },
   server: {
     hmr: false,
