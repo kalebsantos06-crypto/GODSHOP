@@ -349,7 +349,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       canvas.removeEventListener('touchend', handleTouchEnd);
       canvas.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [isAdding, editingClient, signatureData]);
+  }, [isAdding, editingClient]);
 
   const clearSignature = () => {
     const canvas = canvasRef.current;
@@ -374,7 +374,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       }
     },
     enabled: true,
-    refetchInterval: 5000, // auto-refetch every 5 seconds to catch remote registrations
+    refetchInterval: 10000, // auto-refetch every 10 seconds to catch remote registrations
   });
 
   // Real-time synchronization for new client registrations via Supabase
@@ -384,7 +384,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
       const channel = supabase
         .channel('realtime_public_clients_list')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'public_clients' }, () => {
-          refetchPending();
+          queryClient.invalidateQueries({ queryKey: ['pendingRemote'] });
         })
         .subscribe();
 
@@ -394,16 +394,16 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
     } catch (e) {
       console.warn('Realtime subscription notice:', e);
     }
-  }, [refetchPending]);
+  }, [queryClient]);
 
   // Synchronize when any remote client is dismissed locally or across tabs
   useEffect(() => {
     const handleDismissedEvent = () => {
-      refetchPending();
+      queryClient.invalidateQueries({ queryKey: ['pendingRemote'] });
     };
     window.addEventListener('remote_client_dismissed', handleDismissedEvent);
     return () => window.removeEventListener('remote_client_dismissed', handleDismissedEvent);
-  }, [refetchPending]);
+  }, [queryClient]);
 
   const approveRemoteMutation = useMutation({
     mutationFn: async (remoteClient: any) => {
@@ -657,16 +657,23 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
 
       {/* Modal para Visualizar / Copiar e Enviar Link de Cadastro Externo */}
       {showLinkModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border border-border w-full max-w-lg rounded-2xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+        <div 
+          onClick={() => setShowLinkModal(false)}
+          className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-150"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border w-full max-w-lg rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90vh] overflow-y-auto custom-scrollbar animate-in zoom-in-95 duration-150"
+          >
             <div className="flex items-center justify-between border-b border-border/50 pb-3">
               <h3 className="font-bold text-base flex items-center gap-2 text-foreground">
                 <LinkIcon className="h-5 w-5 text-emerald-400" />
                 Link Único de Cadastro de Cliente
               </h3>
               <button
+                type="button"
                 onClick={() => setShowLinkModal(false)}
-                className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 cursor-pointer"
+                className="text-muted-foreground hover:text-foreground text-sm font-bold p-1 rounded-lg hover:bg-muted transition cursor-pointer"
               >
                 ✕
               </button>
@@ -676,7 +683,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
               Envie este link seguro para o cliente preencher os dados e assinar digitalmente. O cadastro aparecerá diretamente no seu aplicativo e painel assim que enviado:
             </p>
 
-            <div className="p-3 rounded-xl bg-background border border-input font-mono text-xs break-all text-emerald-400 select-all">
+            <div className="p-3 rounded-xl bg-background border border-input font-mono text-xs break-all text-emerald-400 select-all shadow-inner">
               {generatedLinkUrl}
             </div>
 
@@ -691,7 +698,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                     setTimeout(() => setCopied(false), 2500);
                   }
                 }}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md active:scale-95"
               >
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 {copied ? 'Copiado!' : 'Copiar Link'}
@@ -704,7 +711,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                   const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
                   window.open(waUrl, '_blank');
                 }}
-                className="bg-[#25D366] hover:bg-[#20ba59] text-black font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md"
+                className="bg-[#25D366] hover:bg-[#20ba59] text-black font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md active:scale-95"
               >
                 <MessageCircle className="h-4 w-4" />
                 WhatsApp
@@ -723,7 +730,7 @@ Token de Cadastro: ${client.token_cadastro || 'Nenhum'}
                     toast.success('Menu de compartilhamento aberto!');
                   }
                 }}
-                className="bg-muted hover:bg-muted/80 text-foreground font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                className="bg-muted hover:bg-muted/80 text-foreground font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
               >
                 <Share2 className="h-4 w-4" />
                 Compartilhar

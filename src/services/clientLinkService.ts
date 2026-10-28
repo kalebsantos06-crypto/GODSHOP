@@ -131,27 +131,28 @@ export async function generateRegistrationLink(userId: string): Promise<Generate
   currentTokens[tokenUuid] = tokenRecord;
   saveStoredTokens(currentTokens);
 
-  // 3. Persist to Supabase if configured (works in Cloudflare Pages and APK)
+  // 3. Persist to Supabase in background (non-blocking for ultra-fast UI)
   if (isSupabaseConfigured()) {
-    try {
-      const insertPayload: any = {
-        token: tokenUuid,
-        user_id: effectiveUuid,
-        used: false,
-        expires_at: expiresAt,
-        created_at: createdAt
-      };
-
-      const { error } = await supabase.from('public_tokens').insert([insertPayload]);
-      if (error) {
-        console.warn('Notice inserting public_token in Supabase:', error.message);
+    Promise.resolve().then(async () => {
+      try {
+        const insertPayload: any = {
+          token: tokenUuid,
+          user_id: effectiveUuid,
+          used: false,
+          expires_at: expiresAt,
+          created_at: createdAt
+        };
+        const { error } = await supabase.from('public_tokens').insert([insertPayload]);
+        if (error) {
+          console.warn('Notice inserting public_token in Supabase:', error.message);
+        }
+      } catch (supaErr) {
+        console.warn('Supabase public_tokens insert exception:', supaErr);
       }
-    } catch (supaErr) {
-      console.warn('Supabase public_tokens insert exception:', supaErr);
-    }
+    });
   }
 
-  // 4. Also optionally notify Express server in local dev, gracefully ignoring 405 / network errors
+  // 4. Optionally notify Express server in background
   try {
     fetch(getCloudApiUrl('/api/tokens/generate'), {
       method: 'POST',

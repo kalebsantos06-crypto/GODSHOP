@@ -67,11 +67,11 @@ export default function UsersPage() {
   // Listen to remote_client_dismissed event
   React.useEffect(() => {
     const handleDismissed = () => {
-      refetchExternal();
+      queryClient.invalidateQueries({ queryKey: ['externalRegistrations'] });
     };
     window.addEventListener('remote_client_dismissed', handleDismissed);
     return () => window.removeEventListener('remote_client_dismissed', handleDismissed);
-  }, [refetchExternal]);
+  }, [queryClient]);
 
   const approveExternalMutation = useMutation({
     mutationFn: async (remoteClient: any) => {
