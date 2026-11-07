@@ -621,9 +621,7 @@ export default function Layout() {
     subItems?: Array<{ name: string; href: string; icon: any }>;
   }> = [
     { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { name: 'Estoque', href: '/inventory', icon: Smartphone },
-    { name: 'Eletrônicos', href: '/consoles', icon: Tv },
-    { name: 'Brindes & Acc', href: '/gifts', icon: Gift },
+    { name: 'Produtos', href: '/products', icon: Package },
     { name: 'Vendas', href: '/sales', icon: ShoppingCart },
     { name: 'Clientes', href: '/clients', icon: Users },
     { name: 'Fornecedores', href: '/suppliers', icon: Truck },

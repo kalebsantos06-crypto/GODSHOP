@@ -37,7 +37,7 @@ function lazyWithRetry<T extends ComponentType<any>>(
 }
 
 // Resilient on-demand lazy loading for heavy sub-pages
-const Inventory = lazyWithRetry(() => import('./pages/Inventory'));
+const Inventory = lazyWithRetry(() => import('./pages/Products'));
 const Sales = lazyWithRetry(() => import('./pages/Sales'));
 const ConsolesStock = lazyWithRetry(() => import('./pages/ConsolesStock'));
 const GiftsAndAccessories = lazyWithRetry(() => import('./pages/GiftsAndAccessories'));
@@ -268,7 +268,7 @@ function AppContent() {
             <Route element={<ProtectedRoute />}>
               <Route path="/" element={<Layout />}>
                 <Route index element={<Dashboard />} />
-                <Route path="inventory" element={<Inventory />} />
+                <Route path="products" element={<Inventory />} />
                 <Route path="consoles" element={<ConsolesStock />} />
                 <Route path="gifts" element={<GiftsAndAccessories />} />
                 <Route path="sales" element={<Sales />} />

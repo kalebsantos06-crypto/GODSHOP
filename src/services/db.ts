@@ -1,5 +1,5 @@
 import { supabase, clearStaleAuthTokens } from '../lib/supabase';
-import { iPhone, Client, Supplier, Sale, PriceTableItem, Console, ProductPhoto } from '../types';
+import { iPhone, Client, Supplier, Sale, PriceTableItem, Console, ProductPhoto, Product } from '../types';
 import { broadcastLocalChange } from './realtime';
 import { safeSetLocalStorage, safeSaveStoreSetting } from '../utils/imageStorageUtils';
 
@@ -1263,29 +1263,9 @@ export const db = {
   iphones: {
     list: async () => {
       try {
-        let query = supabase.from('iphones').select('*');
-        const { data, error } = await query.order('buy_date', { ascending: false });
+        const { data, error } = await supabase.from('iphones').select('*').order('buy_date', { ascending: false });
         if (error) throw error;
-        tryCacheUserIdFromRows(data);
-        
-        const deletedIds = getLocalDeletedIds('iphones');
-        const local = getLocalData('iphones');
-        const localMap = new Map(local.map((item: any) => [item.id, item]));
-        const merged = (data || [])
-          .filter((dbItem: any) => dbItem && dbItem.id && !deletedIds.includes(dbItem.id))
-          .map((dbItem: any) => {
-            const localItem = localMap.get(dbItem.id);
-            if (localItem) {
-              return { ...localItem, ...dbItem, ram: dbItem.ram || localItem.ram || '' };
-            }
-            return dbItem;
-          });
-        local.forEach((l: any) => {
-          if (l && l.id && !deletedIds.includes(l.id) && !merged.some((m: any) => m.id === l.id)) {
-            merged.push(l);
-          }
-        });
-
+        const merged = data || [];
         setLocalData('iphones', merged);
         return merged as iPhone[];
       } catch (err: any) {
@@ -1295,170 +1275,94 @@ export const db = {
     },
     create: async (data: Omit<iPhone, 'id'>) => {
       const id = generateId();
-      clearLocalDeleteRecord('iphones', id);
-      const rawInsert = { ...data, id } as any;
+      const insertData = { ...data, id } as any;
       try {
-        const userId = await getCurrentUserId();
-        if (userId) {
-          rawInsert.user_id = userId;
-        }
-        const insertData = sanitizeIphoneForSupabase(rawInsert);
-        let { data: newItem, error } = await supabase.from('iphones').insert(insertData).select().single();
-        
-        if (error) {
-          const isCheckConstraintError = error.code === '23514' || error.message?.includes('check constraint');
-          const isColumnError = error.code === '42703' || error.message?.includes('user_id') || error.message?.includes('coluna') || error.message?.includes('column');
-          
-          if (isCheckConstraintError) {
-             const cleanData = { ...insertData };
-             if (cleanData.condition && cleanData.condition.includes('_')) {
-                 cleanData.condition = cleanData.condition.split('_')[0];
-             } else {
-                 cleanData.condition = 'seminovo';
-             }
-             const { data: retryItem, error: retryError } = await supabase.from('iphones').insert(cleanData).select().single();
-             if (!retryError) {
-               newItem = { ...insertData, ...retryItem, condition: insertData.condition };
-               error = null;
-             } else {
-                error = retryError;
-             }
-          }
-          
-          if (error && isColumnError) {
-            const match = error.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
-            if (match && match[1]) {
-              if (!missingColumnsByTable['iphones']) missingColumnsByTable['iphones'] = new Set();
-              missingColumnsByTable['iphones'].add(match[1]);
-            }
-            const cleanData = { ...insertData };
-            delete cleanData.user_id;
-            if (match && match[1]) delete cleanData[match[1]];
-            delete cleanData.ram;
-            
-            // Just in case it also has a condition constraint
-            if (cleanData.condition && cleanData.condition.includes('_')) {
-                 cleanData.condition = cleanData.condition.split('_')[0];
-            }
-
-            const { data: retryItem, error: retryError } = await supabase.from('iphones').insert(cleanData).select().single();
-            if (!retryError) {
-              newItem = { ...insertData, ...retryItem, condition: insertData.condition };
-              error = null;
-            } else {
-              newItem = { ...insertData };
-              error = null;
-            }
-          }
-        }
-
-        if (error) {
-          if (error.code === '42501' || error.message?.includes('row-level security')) {
-            console.warn('RLS Violation on iphones table. Falling back to local storage.', error);
-          }
-          const fallbackItem = { ...insertData } as iPhone;
-          const local = getLocalData('iphones');
-          setLocalData('iphones', [...local, fallbackItem]);
-          cloudApi.upsertItem('iphones', fallbackItem).catch(err => console.warn('[Cloud Upsert iPhone] Warn:', err));
-          notifyDataMutation('iphones', 'create', fallbackItem);
-          return fallbackItem;
-        }
-
-        const itemToReturn = { ...insertData, ...newItem };
+        const { data: newItem, error } = await supabase.from('iphones').insert(insertData).select().single();
+        if (error) throw error;
         const local = getLocalData('iphones');
-        setLocalData('iphones', [...local, itemToReturn]);
-        cloudApi.upsertItem('iphones', itemToReturn).catch(err => console.warn('[Cloud Upsert iPhone] Warn:', err));
-        notifyDataMutation('iphones', 'create', itemToReturn);
-        return itemToReturn as iPhone;
+        setLocalData('iphones', [...local, newItem]);
+        return newItem as iPhone;
       } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-        }
+        notifyOffline(err);
         const newItem = { ...data, id } as iPhone;
         const local = getLocalData('iphones');
         setLocalData('iphones', [...local, newItem]);
-        cloudApi.upsertItem('iphones', newItem).catch(err => console.warn('[Cloud Upsert iPhone] Warn:', err));
-        notifyDataMutation('iphones', 'create', newItem);
         return newItem;
       }
     },
     update: async (id: string, data: Partial<iPhone>) => {
       try {
-        const updateData = sanitizeIphoneForSupabase({ ...data });
-
-        if (missingColumnsByTable['iphones']) {
-          for (const col of missingColumnsByTable['iphones']) {
-            delete updateData[col];
-          }
-        }
-
-        try {
-          let currentError = null;
-          const { error } = await supabase.from('iphones').update(updateData).eq('id', id);
-          currentError = error;
-          
-          if (currentError) {
-            const isCheckConstraintError = currentError.code === '23514' || currentError.message?.includes('check constraint');
-            if (isCheckConstraintError && updateData.condition && updateData.condition.includes('_')) {
-                updateData.condition = updateData.condition.split('_')[0];
-                const { error: retryError } = await supabase.from('iphones').update(updateData).eq('id', id);
-                currentError = retryError;
-            }
-          }
-          
-          if (currentError) {
-            const isColumnError = currentError.code === '42703' || currentError.message?.includes('user_id') || currentError.message?.includes('coluna') || currentError.message?.includes('column');
-            if (isColumnError) {
-              const match = currentError.message?.match(/"([^"]+)"/) || error.message?.match(/column ['"](.+?)['"]/);
-              if (match && match[1]) {
-                if (!missingColumnsByTable['iphones']) missingColumnsByTable['iphones'] = new Set();
-                missingColumnsByTable['iphones'].add(match[1]);
-                delete updateData[match[1]];
-              }
-              const { user_id, ...cleanData } = updateData;
-              await supabase.from('iphones').update(cleanData).eq('id', id);
-            }
-          }
-        } catch (dbErr) {
-          console.warn('Could not update iphone in Supabase, continuing with local update:', dbErr);
-        }
-
-        const now = new Date().toISOString();
-        const local = getLocalData('iphones');
-        setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data, updated_at: now } : item));
-        cloudApi.updateItem('iphones', id, { ...updateData, updated_at: now }).catch(err => console.warn('[Cloud Update iPhone] Warn:', err));
-        notifyDataMutation('iphones', 'update', { id, ...data, updated_at: now });
-      } catch (err: any) {
-        if (isConnectionError(err)) {
-          notifyOffline(err);
-        }
-        console.warn('Fallback updating iphone locally:', err);
+        await supabase.from('iphones').update(data).eq('id', id);
         const local = getLocalData('iphones');
         setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data } : item));
-        cloudApi.updateItem('iphones', id, data).catch(err => console.warn('[Cloud Update iPhone] Warn:', err));
-        notifyDataMutation('iphones', 'update', { id, ...data });
+      } catch (err: any) {
+        notifyOffline(err);
+        const local = getLocalData('iphones');
+        setLocalData('iphones', local.map(item => item.id === id ? { ...item, ...data } : item));
       }
     },
     delete: async (id: string) => {
-      recordLocalDelete('iphones', id);
       const local = getLocalData('iphones');
       setLocalData('iphones', local.filter(item => item.id !== id));
-      cloudApi.deleteItem('iphones', id).catch(err => console.warn('[Cloud Delete] Warn:', err));
-      notifyDataMutation('iphones', 'delete', { id });
-
       try {
-        const userId = await getCurrentUserId();
-        let query = supabase.from('iphones').delete().eq('id', id);
-        if (userId) {
-          query = query;
-        }
-        await query;
+        await supabase.from('iphones').delete().eq('id', id);
       } catch (err: any) {
-        console.warn('Supabase delete error (handled):', err);
+        notifyOffline(err);
+      }
+    }
+  },
+  products: {
+    list: async () => {
+      try {
+        const { data, error } = await supabase.from('products').select('*').order('name', { ascending: true });
+        if (error) throw error;
+        setLocalData('products', data || []);
+        return data as Product[];
+      } catch (err: any) {
+        notifyOffline(err);
+        return getLocalData('products') as Product[];
+      }
+    },
+    create: async (data: Omit<Product, 'id'>) => {
+      const id = generateId();
+      const insertData = { ...data, id } as any;
+      try {
+        const { data: newItem, error } = await supabase.from('products').insert(insertData).select().single();
+        if (error) throw error;
+        const local = getLocalData('products');
+        setLocalData('products', [...local, newItem]);
+        return newItem as Product;
+      } catch (err: any) {
+        notifyOffline(err);
+        const newItem = { ...data, id } as Product;
+        const local = getLocalData('products');
+        setLocalData('products', [...local, newItem]);
+        return newItem;
+      }
+    },
+    update: async (id: string, data: Partial<Product>) => {
+      try {
+        await supabase.from('products').update(data).eq('id', id);
+        const local = getLocalData('products');
+        setLocalData('products', local.map(item => item.id === id ? { ...item, ...data } : item));
+      } catch (err: any) {
+        notifyOffline(err);
+        const local = getLocalData('products');
+        setLocalData('products', local.map(item => item.id === id ? { ...item, ...data } : item));
+      }
+    },
+    delete: async (id: string) => {
+      const local = getLocalData('products');
+      setLocalData('products', local.filter(item => item.id !== id));
+      try {
+        await supabase.from('products').delete().eq('id', id);
+      } catch (err: any) {
+        notifyOffline(err);
       }
     }
   },
   clients: {
+
     list: async () => {
       try {
         let query = supabase.from('clients').select('*');
@@ -2847,34 +2751,7 @@ export const db = {
       return insertData;
     }
   },
-  products: {
-    list: async () => {
-      try {
-        let query = supabase.from('products').select('*');
-        const { data, error } = await query.order('name');
-        if (error) throw error;
-        setLocalData('products', data || []);
-        return data || [];
-      } catch (err: any) {
-        console.warn('Error listing products from Supabase, falling back to local:', err);
-        return getLocalData('products');
-      }
-    },
-    create: async (data: any) => {
-      const id = generateId();
-      const userId = await getCurrentUserId();
-      const insertData = { ...data, id, user_id: userId };
-      try {
-        const { error } = await supabase.from('products').insert([insertData]);
-        if (error) throw error;
-      } catch (err: any) {
-        console.warn('Fallback saving product locally:', err);
-      }
-      const local = getLocalData('products');
-      setLocalData('products', [insertData, ...local]);
-      return insertData;
-    }
-  },
+
   product_units: {
     list: async () => {
       try {

@@ -1,3 +1,21 @@
+
+export interface Product {
+  id: string;
+  name: string;
+  category: string;
+  description?: string;
+  buy_price: number;
+  sell_price?: number;
+  cost_price?: number;
+  stock_quantity: number;
+  supplier_id?: string;
+  supplier?: string;
+  status: 'disponivel' | 'vendido';
+  details?: any;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface iPhone {
   id: string;
   model: string;
