@@ -1,6 +1,7 @@
 import { supabase, clearStaleAuthTokens } from '../lib/supabase';
 import { iPhone, Client, Supplier, Sale, PriceTableItem, Console, ProductPhoto, Product } from '../types';
 import { broadcastLocalChange } from './realtime';
+import { enqueueOfflineOperation, replaySyncQueue } from './syncQueue';
 import { safeSetLocalStorage, safeSaveStoreSetting } from '../utils/imageStorageUtils';
 
 let authenticatedUserId: string | null = null;
@@ -206,7 +207,8 @@ export function sanitizeSaleForSupabase(item: any): any {
     'supplier',
     'first_installment_date_formatted',
     'client_name',
-    'item_name'
+    'item_name',
+    'updated_at'
   ];
   salesCalculatedFields.forEach(col => delete clean[col]);
 
@@ -417,7 +419,7 @@ export const getCloudApiUrl = (endpoint: string): string => {
       baseUrl = customServer.replace(/\/$/, '');
     } else {
       const origin = window.location.origin;
-      if (origin && origin.startsWith('http') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+      if (origin && origin.startsWith('http')) {
         baseUrl = origin;
       }
     }
@@ -425,14 +427,6 @@ export const getCloudApiUrl = (endpoint: string): string => {
   if (!baseUrl) {
     // Default fallback to the latest known production URL for this project
     baseUrl = 'https://ais-dev-vaaqegsewou44zzapwefq3-387330212853.us-west2.run.app';
-    
-    // If we're on a browser, try current origin as a last resort
-    if (typeof window !== 'undefined' && window.location.origin.startsWith('http')) {
-      const currentOrigin = window.location.origin;
-      if (!currentOrigin.includes('localhost') && !currentOrigin.includes('127.0.0.1')) {
-         baseUrl = currentOrigin;
-      }
-    }
   }
   const cleanBase = baseUrl.replace(/\/$/, '');
   const cleanEnd = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
@@ -445,6 +439,18 @@ export const notifyDataMutation = (table: string, action: 'create' | 'update' | 
       window.dispatchEvent(new CustomEvent('device_data_mutated', { detail: { table, action, item } }));
       broadcastLocalChange(table);
     }
+    
+    // Enqueue mutation for persistent offline replay when online
+    if (item && item.id) {
+      const qAction = action === 'delete' ? 'delete' : 'upsert';
+      enqueueOfflineOperation(table, qAction, item);
+    }
+
+    // Attempt instant replay if network is online
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      replaySyncQueue().catch(() => {});
+    }
+
     // Also trigger cloud push in background to keep server cloud database synchronized
     setTimeout(() => {
       db.pushToCloud().catch(err => console.warn('[Auto Cloud Push] Warn:', err));
@@ -627,18 +633,30 @@ export const db = {
     authenticatedUserId = null;
     lastKnownUserIdFromRows = null;
   },
-  getBuyPrice: (sale: any, iphonesList: any[] = [], consolesList: any[] = []) => {
-    if (sale?.items && Array.isArray(sale.items) && sale.items.length > 0) {
+  getBuyPrice: (sale: any, iphonesList: any[] = [], consolesList: any[] = [], productsList: any[] = []) => {
+    let items = sale?.items;
+    if (typeof items === 'string') {
+      try {
+        const parsed = JSON.parse(items);
+        if (Array.isArray(parsed)) items = parsed;
+      } catch (e) {}
+    }
+    if (items && Array.isArray(items) && items.length > 0) {
       let totalBuy = 0;
-      for (const item of sale.items) {
+      for (const item of items) {
         if (item.cost_price !== undefined && item.cost_price !== null) {
           totalBuy += Number(item.cost_price || 0) * (item.quantity || 1);
+        } else if (item.buy_price !== undefined && item.buy_price !== null) {
+          totalBuy += Number(item.buy_price || 0) * (item.quantity || 1);
         } else if (item.type === 'iphone') {
           const iphone = iphonesList.find((i: any) => i.id === item.id) || getLocalData('iphones').find((i: any) => i.id === item.id);
-          totalBuy += Number(iphone?.buy_price || iphone?.cost_price || 0);
+          totalBuy += Number(iphone?.buy_price || iphone?.cost_price || 0) * (item.quantity || 1);
         } else if (item.type === 'console') {
           const consoleItem = consolesList.find((c: any) => c.id === item.id) || getLocalData('consoles').find((c: any) => c.id === item.id);
-          totalBuy += Number(consoleItem?.buy_price || consoleItem?.cost_price || 0);
+          totalBuy += Number(consoleItem?.buy_price || consoleItem?.cost_price || 0) * (item.quantity || 1);
+        } else if (item.type === 'product') {
+          const prod = productsList.find((p: any) => p.id === item.id) || getLocalData('products').find((p: any) => p.id === item.id);
+          totalBuy += Number(prod?.buy_price || prod?.cost_price || 0) * (item.quantity || 1);
         } else {
           totalBuy += Number(item.price || 0) * (item.quantity || 1);
         }
@@ -661,6 +679,10 @@ export const db = {
       const consoleItem = consolesList.find((c: any) => c.id === sale.console_id) || getLocalData('consoles').find((c: any) => c.id === sale.console_id);
       if (consoleItem) buyPrice = Number(consoleItem.buy_price || consoleItem.cost_price || 0);
     }
+    if (!buyPrice && sale?.product_id) {
+      const prodItem = productsList.find((p: any) => p.id === sale.product_id) || getLocalData('products').find((p: any) => p.id === sale.product_id);
+      if (prodItem) buyPrice = Number(prodItem.buy_price || prodItem.cost_price || 0);
+    }
     if (!buyPrice) {
       const clientName = (sale?.client_name || sale?.client?.name || '').toLowerCase();
       const saleId = sale?.id || '';
@@ -676,9 +698,9 @@ export const db = {
     }
     return buyPrice;
   },
-  getProfit: (sale: any, iphonesList: any[] = [], consolesList: any[] = []) => {
+  getProfit: (sale: any, iphonesList: any[] = [], consolesList: any[] = [], productsList: any[] = []) => {
     const sellPrice = Number(sale?.sell_price || 0);
-    const buyPrice = db.getBuyPrice(sale, iphonesList, consolesList);
+    const buyPrice = db.getBuyPrice(sale, iphonesList, consolesList, productsList);
     return sellPrice - buyPrice;
   },
 
@@ -1263,14 +1285,37 @@ export const db = {
   iphones: {
     list: async () => {
       try {
+        let items: iPhone[] = [];
         const { data, error } = await supabase.from('iphones').select('*').order('buy_date', { ascending: false });
-        if (error) throw error;
-        const merged = data || [];
-        setLocalData('iphones', merged);
-        return merged as iPhone[];
+        if (!error && data && data.length > 0) {
+          const deletedIds = getLocalDeletedIds('iphones');
+          const local = getLocalData('iphones');
+          const localOnly = local.filter((l: any) => l && l.id && !deletedIds.includes(l.id) && !data.some(d => d.id === l.id));
+          items = [...data.filter(d => !deletedIds.includes(d.id)), ...localOnly];
+        } else {
+          items = getLocalData('iphones');
+          if (items.length === 0) {
+            const cloudItems = await cloudApi.fetchTable('iphones');
+            if (cloudItems && cloudItems.length > 0) {
+              items = cloudItems;
+            }
+          }
+        }
+        if (items.length > 0) {
+          setLocalData('iphones', items);
+        }
+        return items as iPhone[];
       } catch (err: any) {
         notifyOffline(err);
-        return getLocalData('iphones') as iPhone[];
+        let local = getLocalData('iphones');
+        if (local.length === 0) {
+          const cloud = await cloudApi.fetchTable('iphones');
+          if (cloud && cloud.length > 0) {
+            local = cloud;
+            setLocalData('iphones', local);
+          }
+        }
+        return local as iPhone[];
       }
     },
     create: async (data: Omit<iPhone, 'id'>) => {
@@ -1314,10 +1359,140 @@ export const db = {
   products: {
     list: async () => {
       try {
-        const { data, error } = await supabase.from('products').select('*').order('name', { ascending: true });
-        if (error) throw error;
-        setLocalData('products', data || []);
-        return data as Product[];
+        let supaData: any[] = [];
+        try {
+          const { data, error } = await supabase.from('products').select('*').order('name', { ascending: true });
+          if (!error && data) {
+            supaData = data;
+          }
+        } catch (e) {}
+
+        if (!supaData || supaData.length === 0) {
+          try {
+            const cloudProducts = await cloudApi.fetchTable('products');
+            if (Array.isArray(cloudProducts) && cloudProducts.length > 0) {
+              supaData = cloudProducts;
+            }
+          } catch (e) {}
+        }
+
+        const localData = getLocalData('products') || [];
+        const deletedIds = getLocalDeletedIds('products');
+
+        const map = new Map<string, any>();
+        for (const item of supaData) {
+          if (item && item.id && !deletedIds.includes(item.id)) map.set(item.id, item);
+        }
+        for (const item of localData) {
+          if (item && item.id && !deletedIds.includes(item.id) && !map.has(item.id)) {
+            map.set(item.id, item);
+          }
+        }
+
+        // Remove any default fallback placeholder products if present
+        for (const [key, val] of map.entries()) {
+          if (key.startsWith('prod-def-') || val?.id?.startsWith('prod-def-')) {
+            map.delete(key);
+          }
+        }
+
+        // Also extract products from completed sales so sold products appear in inventory with status 'vendido'
+        const salesList = getLocalData('sales') || [];
+        const iphonesList = getLocalData('iphones') || [];
+        const consolesList = getLocalData('consoles') || [];
+
+        for (const sale of salesList) {
+          if (!sale) continue;
+          let saleItems = sale.items;
+          if (typeof saleItems === 'string') {
+            try { saleItems = JSON.parse(saleItems); } catch(e) { saleItems = []; }
+          }
+          if (Array.isArray(saleItems) && saleItems.length > 0) {
+            for (const it of saleItems) {
+              const prodId = it.id || `sale-item-${sale.id}-${it.name}`;
+              let buyPrice = Number(it.cost_price || 0);
+              if (!buyPrice && it.type === 'iphone' && it.id) {
+                const foundIphone = iphonesList.find(i => i.id === it.id);
+                if (foundIphone) buyPrice = Number(foundIphone.buy_price || 0);
+              } else if (!buyPrice && it.type === 'console' && it.id) {
+                const foundConsole = consolesList.find(c => c.id === it.id);
+                if (foundConsole) buyPrice = Number(foundConsole.buy_price || 0);
+              }
+              if (!buyPrice) buyPrice = Number(sale.buy_price || 0);
+
+              if (!map.has(prodId)) {
+                map.set(prodId, {
+                  id: prodId,
+                  name: it.name || it.model || 'Produto Vendido',
+                  category: it.type === 'iphone' ? 'iPhone' : (it.type === 'console' ? 'Games' : 'Smartphone'),
+                  description: `Vendido em ${sale.sale_date || 'Data recente'}`,
+                  buy_price: buyPrice,
+                  sell_price: Number(it.price || sale.sell_price || 0),
+                  stock_quantity: 0,
+                  status: 'vendido',
+                  created_at: sale.sale_date || new Date().toISOString()
+                });
+              } else {
+                const existing = map.get(prodId);
+                if (existing) {
+                  existing.status = 'vendido';
+                  existing.stock_quantity = 0;
+                  if (!existing.buy_price || existing.buy_price === 0) {
+                    existing.buy_price = buyPrice;
+                  }
+                }
+              }
+            }
+          } else {
+            let itemName = sale.item_name;
+            let cat = 'iPhone';
+            let prodId = sale.product_id || sale.iphone_id || sale.console_id || `sale-${sale.id}`;
+            let buyPrice = Number(sale.buy_price || 0);
+
+            if (sale.iphone_id) {
+              const foundIphone = iphonesList.find(i => i.id === sale.iphone_id);
+              if (foundIphone) {
+                itemName = `${foundIphone.model} ${foundIphone.storage || ''} (${foundIphone.color || ''})`.trim();
+                if (!buyPrice) buyPrice = Number(foundIphone.buy_price || 0);
+              }
+              cat = 'iPhone';
+            } else if (sale.console_id) {
+              const foundConsole = consolesList.find(c => c.id === sale.console_id);
+              if (foundConsole) {
+                itemName = `${foundConsole.model} - ${foundConsole.version || ''}`.trim();
+                if (!buyPrice) buyPrice = Number(foundConsole.buy_price || 0);
+              }
+              cat = 'Games';
+            }
+
+            if (itemName && !map.has(prodId)) {
+              map.set(prodId, {
+                id: prodId,
+                name: itemName,
+                category: cat,
+                description: `Vendido para ${sale.client_name || 'Cliente'}`,
+                buy_price: buyPrice,
+                sell_price: Number(sale.sell_price || 0),
+                stock_quantity: 0,
+                status: 'vendido',
+                created_at: sale.sale_date || new Date().toISOString()
+              });
+            } else if (prodId && map.has(prodId)) {
+              const existing = map.get(prodId);
+              if (existing) {
+                existing.status = 'vendido';
+                existing.stock_quantity = 0;
+                if (!existing.buy_price || existing.buy_price === 0) {
+                  existing.buy_price = buyPrice;
+                }
+              }
+            }
+          }
+        }
+
+        let merged = Array.from(map.values());
+        setLocalData('products', merged);
+        return merged as Product[];
       } catch (err: any) {
         notifyOffline(err);
         return getLocalData('products') as Product[];
@@ -1949,10 +2124,25 @@ export const db = {
   sales: {
     list: async () => {
       try {
-        let query = supabase.from('sales').select('*');
-        const { data, error } = await query.order('sale_date', { ascending: false });
-        if (error) throw error;
-        tryCacheUserIdFromRows(data);
+        let supaData: any[] = [];
+        try {
+          const { data, error } = await supabase.from('sales').select('*').order('sale_date', { ascending: false });
+          if (!error && data) {
+            supaData = data;
+            tryCacheUserIdFromRows(supaData);
+          }
+        } catch (e) {}
+
+        if ((!supaData || supaData.length === 0)) {
+          try {
+            const cloudSales = await cloudApi.fetchTable('sales');
+            if (Array.isArray(cloudSales) && cloudSales.length > 0) {
+              supaData = cloudSales;
+            }
+          } catch (e) {}
+        }
+
+        const data = supaData;
         
         // Enrich data immediately with localData cache (including any cached signature_data)
         const localDataCache = getLocalData('sales');
@@ -2281,6 +2471,16 @@ export const db = {
             } catch (e) {
               console.warn(`Failed to mark accessory ${item.id} as vendido:`, e);
             }
+          } else if (item.type === 'product' && item.id) {
+            try {
+              console.log('Updating product stock/status on sale:', item.id);
+              const prod = (getLocalData('products') || []).find((p: any) => p.id === item.id);
+              const newQty = Math.max(0, (prod?.stock_quantity || 1) - (item.quantity || 1));
+              const newStatus = newQty === 0 ? 'vendido' : 'disponivel';
+              await supabase.from('products').update({ stock_quantity: newQty, status: newStatus, updated_at: nowIso }).eq('id', item.id);
+            } catch (e) {
+              console.warn(`Failed to update product ${item.id}:`, e);
+            }
           }
         }
 
@@ -2301,9 +2501,11 @@ export const db = {
         const localIphones = getLocalData('iphones');
         const localConsoles = getLocalData('consoles');
         const localGifts = getLocalData('gifts');
+        const localProducts = getLocalData('products');
         let updatedIphones = [...localIphones];
         let updatedConsoles = [...localConsoles];
         let updatedGifts = [...localGifts];
+        let updatedProducts = [...localProducts];
 
         for (const item of saleItems) {
           if (item.type === 'iphone' && item.id) {
@@ -2312,6 +2514,14 @@ export const db = {
             updatedConsoles = updatedConsoles.map(c => c.id === item.id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
           } else if (item.type === 'accessory' && item.id) {
             updatedGifts = updatedGifts.map(g => g.id === item.id ? { ...g, status: 'vendido', updated_at: nowIso } : g);
+          } else if (item.type === 'product' && item.id) {
+            updatedProducts = updatedProducts.map(p => {
+              if (p.id === item.id) {
+                const newQty = Math.max(0, (p.stock_quantity || 1) - (item.quantity || 1));
+                return { ...p, stock_quantity: newQty, status: newQty === 0 ? 'vendido' : 'disponivel', updated_at: nowIso };
+              }
+              return p;
+            });
           }
         }
 
@@ -2321,10 +2531,14 @@ export const db = {
         if (data.console_id) {
           updatedConsoles = updatedConsoles.map(c => c.id === data.console_id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
         }
+        if (data.product_id) {
+          updatedProducts = updatedProducts.map(p => p.id === data.product_id ? { ...p, status: 'vendido', updated_at: nowIso } : p);
+        }
 
         setLocalData('iphones', updatedIphones);
         setLocalData('consoles', updatedConsoles);
         setLocalData('gifts', updatedGifts);
+        setLocalData('products', updatedProducts);
         
         cloudApi.upsertItem('sales', localNewItem).catch(err => console.warn('[Cloud Upsert Sale] Warn:', err));
         notifyDataMutation('sales', 'create', localNewItem);
@@ -2342,9 +2556,11 @@ export const db = {
         const localIphones = getLocalData('iphones');
         const localConsoles = getLocalData('consoles');
         const localGifts = getLocalData('gifts');
+        const localProducts = getLocalData('products');
         let updatedIphones = [...localIphones];
         let updatedConsoles = [...localConsoles];
         let updatedGifts = [...localGifts];
+        let updatedProducts = [...localProducts];
 
         for (const item of saleItems) {
           if (item.type === 'iphone' && item.id) {
@@ -2353,6 +2569,14 @@ export const db = {
             updatedConsoles = updatedConsoles.map(c => c.id === item.id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
           } else if (item.type === 'accessory' && item.id) {
             updatedGifts = updatedGifts.map(g => g.id === item.id ? { ...g, status: 'vendido', updated_at: nowIso } : g);
+          } else if (item.type === 'product' && item.id) {
+            updatedProducts = updatedProducts.map(p => {
+              if (p.id === item.id) {
+                const newQty = Math.max(0, (p.stock_quantity || 1) - (item.quantity || 1));
+                return { ...p, stock_quantity: newQty, status: newQty === 0 ? 'vendido' : 'disponivel', updated_at: nowIso };
+              }
+              return p;
+            });
           }
         }
 
@@ -2362,10 +2586,14 @@ export const db = {
         if (data.console_id) {
           updatedConsoles = updatedConsoles.map(c => c.id === data.console_id ? { ...c, status: 'vendido', updated_at: nowIso } : c);
         }
+        if (data.product_id) {
+          updatedProducts = updatedProducts.map(p => p.id === data.product_id ? { ...p, status: 'vendido', updated_at: nowIso } : p);
+        }
 
         setLocalData('iphones', updatedIphones);
         setLocalData('consoles', updatedConsoles);
         setLocalData('gifts', updatedGifts);
+        setLocalData('products', updatedProducts);
 
         cloudApi.upsertItem('sales', newItem).catch(err => console.warn('[Cloud Upsert Sale] Warn:', err));
         notifyDataMutation('sales', 'create', newItem);

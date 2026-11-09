@@ -13,6 +13,7 @@ import { db } from './services/db';
 import { AuthProvider } from './types/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { initRealtimeSync } from './services/realtime';
+import { initSyncQueueAutoReplay, replaySyncQueue } from './services/syncQueue';
 import { backgroundService } from './services/backgroundService';
 import LoadingScreen from './components/LoadingScreen';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -162,8 +163,9 @@ function AppContent() {
     let isSubscribed = true;
     let isSyncing = false;
 
-    // Initialize background execution
+    // Initialize background execution & offline sync queue
     backgroundService.init();
+    const unbindQueueReplay = initSyncQueueAutoReplay();
 
     const performSync = async () => {
       if (isSyncing || !isSubscribed) return;
@@ -217,6 +219,7 @@ function AppContent() {
       isSubscribed = false;
       clearInterval(interval);
       unregisterBgSync();
+      unbindQueueReplay();
       window.removeEventListener('focus', handleFocusOrActivity);
       window.removeEventListener('visibilitychange', handleFocusOrActivity);
     };

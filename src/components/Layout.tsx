@@ -20,6 +20,7 @@ import { addDays, addMonths, startOfDay, differenceInDays, format } from 'date-f
 import { formatBRL } from '../lib/formatCurrency';
 import { checkNotificationPermission, requestNotificationPermission, openNotificationSettings, showNotification, scheduleBackgroundNotifications } from '../lib/pushNotifications';
 import { safeSaveStoreSetting } from '../utils/imageStorageUtils';
+import { SyncDiagnosticModal } from './SyncDiagnosticModal';
 
 export default function Layout() {
   const queryClient = useQueryClient();
@@ -40,6 +41,7 @@ export default function Layout() {
   const [notifTab, setNotifTab] = useState<'recent' | 'all'>('recent');
   const [activeFloatingNotif, setActiveFloatingNotif] = useState<NotificationItem | null>(null);
   const [notifPermission, setNotifPermission] = useState<string>('default');
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
 
   useEffect(() => {
     // Check real native permission on mount
@@ -1066,22 +1068,23 @@ export default function Layout() {
             </button>
           )}
 
-          {/* Realtime Supabase Connection Badge */}
-          <div 
+          {/* Realtime Supabase Connection Badge & Diagnostic Button */}
+          <button 
+            onClick={() => setIsDiagnosticOpen(true)}
             className={cn(
-              "hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] font-bold tracking-wider uppercase transition-all shadow-md",
+              "hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] font-bold tracking-wider uppercase transition-all shadow-md cursor-pointer hover:scale-105",
               isRealtimeConnected 
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                : "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20"
             )}
-            title={isRealtimeConnected ? "Sincronização em Tempo Real Supabase Ativa ⚡" : "Reconectando Sincronização Supabase..."}
+            title="Abrir Painel de Diagnóstico de Sincronização em Tempo Real (Web, APK & EXE)"
           >
             <span className={cn(
               "h-2 w-2 rounded-full shrink-0",
               isRealtimeConnected ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
             )} />
-            <span>{isRealtimeConnected ? "Realtime" : "Reconectando"}</span>
-          </div>
+            <span>{isRealtimeConnected ? "Realtime ⚡" : "Reconectando"}</span>
+          </button>
 
 
 
@@ -1554,6 +1557,9 @@ export default function Layout() {
           </div>
         </div>
       )}
+
+      {/* Sync Diagnostic Modal Panel */}
+      <SyncDiagnosticModal isOpen={isDiagnosticOpen} onClose={() => setIsDiagnosticOpen(false)} />
 
     </div>
   );

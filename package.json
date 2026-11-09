@@ -2,12 +2,19 @@
   "name": "react-example",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:web": "vite build",
+    "build:electron": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --target=node18 --outdir=dist-electron --external:electron",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "build:android": "vite build && npx cap sync android",
+    "electron:dev": "vite build && npm run build:electron && electron .",
+    "electron:build": "vite build && npm run build:electron && electron-builder",
     "start": "node dist/server.cjs",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist dist-electron",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -54,10 +61,30 @@
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.2",
     "autoprefixer": "^10.4.21",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
+  },
+  "build": {
+    "appId": "com.godshop.app",
+    "productName": "GODSHOP Pro",
+    "directories": {
+      "output": "dist-electron-build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
   }
 }

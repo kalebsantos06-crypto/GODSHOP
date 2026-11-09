@@ -82,14 +82,43 @@ export default function Inventory() {
     }
   };
 
+  const [statusFilter, setStatusFilter] = useState<'all' | 'disponivel' | 'vendido'>('all');
+
+  const filteredProducts = products.filter(product => {
+    const isSold = product.status === 'vendido' || (product.stock_quantity ?? 1) === 0;
+    if (statusFilter === 'disponivel') return !isSold;
+    if (statusFilter === 'vendido') return isSold;
+    return true;
+  });
+
   if (isLoading) return <div>Carregando...</div>;
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Estoque de Produtos</h1>
-          <p className="text-muted-foreground text-sm mt-1">Gerencie seus produtos</p>
+          <p className="text-muted-foreground text-sm mt-1">Gerencie seu estoque e produtos cadastrados</p>
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => setStatusFilter('all')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${statusFilter === 'all' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+            >
+              Todos ({products.length})
+            </button>
+            <button
+              onClick={() => setStatusFilter('disponivel')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${statusFilter === 'disponivel' ? 'bg-emerald-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+            >
+              Disponíveis ({products.filter(p => p.status !== 'vendido' && (p.stock_quantity ?? 1) > 0).length})
+            </button>
+            <button
+              onClick={() => setStatusFilter('vendido')}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${statusFilter === 'vendido' ? 'bg-amber-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+            >
+              Vendidos ({products.filter(p => p.status === 'vendido' || (p.stock_quantity ?? 1) === 0).length})
+            </button>
+          </div>
         </div>
         <button 
           onClick={() => {
@@ -183,45 +212,60 @@ export default function Inventory() {
                 <th className="px-4 py-3 font-medium">Nome</th>
                 <th className="px-4 py-3 font-medium">Categoria</th>
                 <th className="px-4 py-3 font-medium">Qtd</th>
+                <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Preço (Compra)</th>
                 <th className="px-4 py-3 font-medium">Preço (Venda)</th>
                 <th className="px-4 py-3 font-medium text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {products.map((product) => (
-                <tr key={product.id} className="hover:bg-muted/50">
-                  <td className="px-4 py-3 font-medium">{product.name}</td>
-                  <td className="px-4 py-3">{product.category}</td>
-                  <td className="px-4 py-3">{product.stock_quantity}</td>
-                  <td className="px-4 py-3">{formatBRL(product.buy_price)}</td>
-                  <td className="px-4 py-3">{product.sell_price ? formatBRL(product.sell_price) : '-'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button 
-                        onClick={() => {
-                          setEditingProduct(product);
-                          setIsAdding(false);
-                          window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }}
-                        className="text-muted-foreground hover:text-foreground p-2 rounded-md transition-colors"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button 
-                        onClick={() => setDeleteId(product.id)}
-                        className="text-destructive hover:bg-destructive/10 p-2 rounded-md transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {products.length === 0 && (
+              {filteredProducts.map((product) => {
+                const isSold = product.status === 'vendido' || (product.stock_quantity ?? 1) === 0;
+                return (
+                  <tr key={product.id} className="hover:bg-muted/50">
+                    <td className="px-4 py-3 font-medium">{product.name}</td>
+                    <td className="px-4 py-3">{product.category}</td>
+                    <td className="px-4 py-3">{product.stock_quantity}</td>
+                    <td className="px-4 py-3">
+                      {isSold ? (
+                        <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                          Vendido
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                          Disponível
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">{formatBRL(product.buy_price)}</td>
+                    <td className="px-4 py-3">{product.sell_price ? formatBRL(product.sell_price) : '-'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button 
+                          onClick={() => {
+                            setEditingProduct(product);
+                            setIsAdding(false);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="text-muted-foreground hover:text-foreground p-2 rounded-md transition-colors"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button 
+                          onClick={() => setDeleteId(product.id)}
+                          className="text-destructive hover:bg-destructive/10 p-2 rounded-md transition-colors"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredProducts.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                    Nenhum produto cadastrado.
+                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                    Nenhum produto encontrado com este filtro.
                   </td>
                 </tr>
               )}

@@ -236,12 +236,27 @@ export default function GuaranteeNote() {
     queryFn: () => db.prices.list(),
   });
 
-  const isLoading = isLoadingSales || isLoadingIphones || isLoadingConsoles || isLoadingClients || isLoadingPrices;
+  const { data: products = [], isLoading: isLoadingProducts } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => db.products.list(),
+  });
+
+  const isLoading = isLoadingSales || isLoadingIphones || isLoadingConsoles || isLoadingClients || isLoadingPrices || isLoadingProducts;
 
   // Derive data only after hooks
   const sale = useMemo(() => sales.find(s => s.id === id), [sales, id]);
   const client = useMemo(() => sale ? getSaleClient(sale, clients) : null, [sale, clients]);
-  const saleItems = sale?.items || [];
+  const saleItems = useMemo(() => {
+    if (!sale?.items) return [];
+    if (Array.isArray(sale.items)) return sale.items;
+    if (typeof sale.items === 'string') {
+      try {
+        const parsed = JSON.parse(sale.items);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return [];
+  }, [sale]);
   
   const iphone = useMemo(() => {
     const itemFromItems = saleItems.find(item => item.type === 'iphone');
@@ -254,6 +269,12 @@ export default function GuaranteeNote() {
     if (itemFromItems) return consoles.find(c => c.id === itemFromItems.id);
     return sale ? consoles.find(c => c.id === sale.console_id) : null;
   }, [sale, saleItems, consoles]);
+
+  const productItem = useMemo(() => {
+    const itemFromItems = saleItems.find(item => item.type === 'product');
+    if (itemFromItems) return products.find(p => p.id === itemFromItems.id);
+    return sale?.product_id ? products.find(p => p.id === sale.product_id) : null;
+  }, [sale, saleItems, products]);
 
   const warrantyMonths = useMemo(() => {
     if (sale?.warranty_months) return Number(sale.warranty_months);
@@ -831,13 +852,22 @@ export default function GuaranteeNote() {
                 </div>
               ) : (
                 <div className="p-4 border-l-4 border-[#D4AF37] bg-slate-50/80 rounded-r-xl">
-                  <p className="font-black text-slate-900 uppercase text-sm">{iphone ? `iPhone ${iphone.model}` : (consoleItem ? `${consoleItem.model}` : 'Equipamento')}</p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2 text-[11px] text-slate-600 font-bold uppercase tracking-tight">
-                    {iphone?.storage && <div><span className="block text-[9px] text-slate-400">Armazenamento</span>{iphone.storage}</div>}
-                    {iphone?.color && <div><span className="block text-[9px] text-slate-400">Cor</span>{iphone.color}</div>}
-                    {iphone?.condition && <div><span className="block text-[9px] text-slate-400">Condição</span>{getConditionLabel(iphone.condition)}</div>}
-                    {iphone?.imei && <div className="col-span-2"><span className="block text-[9px] text-slate-400">Número de Série / IMEI</span><span className="font-mono text-xs">{iphone.imei}</span></div>}
-                  </div>
+                  <p className="font-black text-slate-900 uppercase text-sm">{iphone ? `iPhone ${iphone.model}` : (consoleItem ? `${consoleItem.model}` : (productItem ? productItem.name : (sale.item_name || 'Equipamento')))}</p>
+                  {productItem ? (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2 text-[11px] text-slate-600 font-bold uppercase tracking-tight">
+                      {productItem.details?.storage && <div><span className="block text-[9px] text-slate-400">Armazenamento</span>{productItem.details.storage}</div>}
+                      {productItem.details?.color && <div><span className="block text-[9px] text-slate-400">Cor</span>{productItem.details.color}</div>}
+                      {productItem.category && <div><span className="block text-[9px] text-slate-400">Categoria</span>{productItem.category}</div>}
+                      {productItem.details?.imei && <div className="col-span-2"><span className="block text-[9px] text-slate-400">Número de Série / IMEI</span><span className="font-mono text-xs">{productItem.details.imei}</span></div>}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2 text-[11px] text-slate-600 font-bold uppercase tracking-tight">
+                      {iphone?.storage && <div><span className="block text-[9px] text-slate-400">Armazenamento</span>{iphone.storage}</div>}
+                      {iphone?.color && <div><span className="block text-[9px] text-slate-400">Cor</span>{iphone.color}</div>}
+                      {iphone?.condition && <div><span className="block text-[9px] text-slate-400">Condição</span>{getConditionLabel(iphone.condition)}</div>}
+                      {iphone?.imei && <div className="col-span-2"><span className="block text-[9px] text-slate-400">Número de Série / IMEI</span><span className="font-mono text-xs">{iphone.imei}</span></div>}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -80,6 +80,12 @@ export default function Dashboard() {
     staleTime: 1000 * 60 * 5,
   });
 
+  const { data: products = [], isLoading: isLoadingProducts, refetch: refetchProducts } = useQuery({
+    queryKey: ['products'],
+    queryFn: () => db.products.list(),
+    staleTime: 1000 * 60 * 5,
+  });
+
   const [isSendingAutomation, setIsSendingAutomation] = useState(false);
   const [lastSync, setLastSync] = useState<string>(() => localStorage.getItem('last_cloud_sync_ts') || '');
 
@@ -96,21 +102,23 @@ export default function Dashboard() {
   // 2. Logic and Memoized values
   const availableIphones = useMemo(() => iphones.filter(p => p.status === 'disponivel'), [iphones]);
   const availableConsoles = useMemo(() => consoles.filter(p => p.status === 'disponivel'), [consoles]);
-  const availableCount = availableIphones.length + availableConsoles.length;
+  const availableProducts = useMemo(() => products.filter(p => p.status === 'disponivel' && (p.stock_quantity === undefined || p.stock_quantity > 0)), [products]);
+  const availableCount = availableIphones.length + availableConsoles.length + availableProducts.length;
   const soldCount = sales.length;
   
   const totalProfit = useMemo(() => {
     return sales.reduce((sum, sale) => {
-      return sum + db.getProfit(sale, iphones, consoles);
+      return sum + db.getProfit(sale, iphones, consoles, products);
     }, 0);
-  }, [sales, iphones, consoles]);
+  }, [sales, iphones, consoles, products]);
 
   const totalRevenue = useMemo(() => sales.reduce((sum, sale) => sum + (Number(sale.sell_price) || 0), 0), [sales]);
 
   const totalStockCost = useMemo(() => {
     return availableIphones.reduce((sum, i) => sum + (Number(i.buy_price) || 0), 0) +
-           availableConsoles.reduce((sum, c) => sum + (Number(c.buy_price) || 0), 0);
-  }, [availableIphones, availableConsoles]);
+           availableConsoles.reduce((sum, c) => sum + (Number(c.buy_price) || 0), 0) +
+           availableProducts.reduce((sum, p) => sum + (Number(p.buy_price || p.cost_price) || 0), 0);
+  }, [availableIphones, availableConsoles, availableProducts]);
 
   const totalReceived = useMemo(() => {
     return sales.reduce((sum, sale) => {
@@ -157,32 +165,46 @@ export default function Dashboard() {
   const profitPreview = useMemo(() => {
     return sales.slice(0, 3).map(sale => {
       let label = 'Venda';
-      if (sale.iphone_id) {
+      if (sale.items && Array.isArray(sale.items) && sale.items.length > 0) {
+        label = sale.items.map((it: any) => it.name).join(' + ');
+      } else if (sale.iphone_id) {
         const item = iphones.find(i => i.id === sale.iphone_id);
         label = item ? `${item.model} ${item.storage}` : 'iPhone';
       } else if (sale.console_id) {
         const item = consoles.find(c => c.id === sale.console_id);
         label = item ? `${item.model} ${item.version}` : 'Console';
+      } else if (sale.product_id) {
+        const item = products.find(p => p.id === sale.product_id);
+        label = item ? item.name : 'Produto';
+      } else if (sale.item_name) {
+        label = sale.item_name;
       }
       const client = clients.find(c => c.id === sale.client_id);
       const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
       return {
         label: clientDisplay,
-        value: formatBRL(db.getProfit(sale, iphones, consoles)),
+        value: formatBRL(db.getProfit(sale, iphones, consoles, products)),
         sublabel: safeFormatDate(sale.sale_date, 'dd/MM')
       };
     });
-  }, [sales, iphones, consoles, clients]);
+  }, [sales, iphones, consoles, products, clients]);
 
   const revenuePreview = useMemo(() => {
     return sales.slice(0, 3).map(sale => {
       let label = 'Venda';
-      if (sale.iphone_id) {
+      if (sale.items && Array.isArray(sale.items) && sale.items.length > 0) {
+        label = sale.items.map((it: any) => it.name).join(' + ');
+      } else if (sale.iphone_id) {
         const item = iphones.find(i => i.id === sale.iphone_id);
         label = item ? `${item.model} ${item.storage}` : 'iPhone';
       } else if (sale.console_id) {
         const item = consoles.find(c => c.id === sale.console_id);
         label = item ? `${item.model} ${item.version}` : 'Console';
+      } else if (sale.product_id) {
+        const item = products.find(p => p.id === sale.product_id);
+        label = item ? item.name : 'Produto';
+      } else if (sale.item_name) {
+        label = sale.item_name;
       }
       const client = clients.find(c => c.id === sale.client_id);
       const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
@@ -192,7 +214,7 @@ export default function Dashboard() {
         sublabel: safeFormatDate(sale.sale_date, 'dd/MM')
       };
     });
-  }, [sales, iphones, consoles, clients]);
+  }, [sales, iphones, consoles, products, clients]);
 
   const stockCostPreview = useMemo(() => {
     return [...availableIphones, ...availableConsoles]
@@ -208,12 +230,19 @@ export default function Dashboard() {
   const salesPreview = useMemo(() => {
     return sales.slice(0, 3).map(sale => {
       let label = 'Venda';
-      if (sale.iphone_id) {
+      if (sale.items && Array.isArray(sale.items) && sale.items.length > 0) {
+        label = sale.items.map((it: any) => it.name).join(' + ');
+      } else if (sale.iphone_id) {
         const item = iphones.find(i => i.id === sale.iphone_id);
         label = item ? `${item.model}` : 'iPhone';
       } else if (sale.console_id) {
         const item = consoles.find(c => c.id === sale.console_id);
         label = item ? `${item.model}` : 'Console';
+      } else if (sale.product_id) {
+        const item = products.find(p => p.id === sale.product_id);
+        label = item ? item.name : 'Produto';
+      } else if (sale.item_name) {
+        label = sale.item_name;
       }
       const client = clients.find(c => c.id === sale.client_id);
       const clientDisplay = client ? `${client.name.split(' ')[0]} (${label})` : label;
@@ -223,7 +252,7 @@ export default function Dashboard() {
         sublabel: sale.payment_method
       };
     });
-  }, [sales, iphones, consoles, clients]);
+  }, [sales, iphones, consoles, products, clients]);
 
   const stockPreview = useMemo(() => {
     return [...availableIphones, ...availableConsoles]
@@ -246,7 +275,7 @@ export default function Dashboard() {
         });
         if (modelSales.length === 0) return null;
         const profit = modelSales.reduce((sum, s) => {
-          const p = db.getProfit(s, iphones, consoles);
+          const p = db.getProfit(s, iphones, consoles, products);
           return sum + (isNaN(p) ? 0 : p);
         }, 0);
         return { model, avg: profit / modelSales.length };
@@ -259,7 +288,7 @@ export default function Dashboard() {
         value: formatBRL(item.avg),
         sublabel: 'Média por modelo'
       }));
-  }, [iphones, consoles, sales]);
+  }, [iphones, consoles, products, sales]);
 
   const monthlyData = useMemo(() => {
     try {
@@ -278,7 +307,7 @@ export default function Dashboard() {
           return !isNaN(d.getTime()) && d >= monthStart && d <= monthEnd;
         });
         const profit = monthSales.reduce((sum, sale) => {
-          const p = db.getProfit(sale, iphones, consoles);
+          const p = db.getProfit(sale, iphones, consoles, products);
           return sum + (isNaN(p) ? 0 : p);
         }, 0);
         return {
@@ -289,7 +318,7 @@ export default function Dashboard() {
     } catch (e) {
       return [];
     }
-  }, [sales, iphones, consoles]);
+  }, [sales, iphones, consoles, products]);
 
   const allNotificationsList = useMemo(() => {
     return getSaleNotifications(sales || [], clients || [], iphones || [], consoles || []);

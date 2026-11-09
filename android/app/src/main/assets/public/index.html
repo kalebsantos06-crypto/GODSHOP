@@ -12,34 +12,44 @@
     <meta name="description" content="Dashboard para gerenciamento de estoque, vendas e controle fiscal de iPhones e Consoles com sincronização em nuvem." />
     <meta property="og:title" content="GODSHOP" />
     <meta property="og:description" content="Dashboard para gerenciamento de estoque, vendas e controle fiscal de iPhones e Consoles com sincronização em nuvem." />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512.png" />
-    <link rel="shortcut icon" href="/pwa-192.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <script>
-      // Suppress benign Vite HMR WebSocket connection errors in sandbox/cloud preview environments
+      // Suppress benign Vite HMR WebSocket connection errors & Chrome Origin Trial warnings
       window.addEventListener('unhandledrejection', function(e) {
         var reason = e && (e.reason || e);
         var str = String(reason && (reason.message || reason) || '');
-        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened')) {
+        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened') || str.includes('writer') || str.includes('rewriter') || str.includes('proofreader')) {
           e.preventDefault();
           if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         }
       });
       window.addEventListener('error', function(e) {
         var str = String(e && (e.message || e) || '');
-        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened')) {
+        if (str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened') || str.includes('writer') || str.includes('rewriter') || str.includes('proofreader')) {
           e.preventDefault();
           if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         }
       });
     </script>
     <title>GODSHOP</title>
-    <script type="module" crossorigin src="/assets/index-BcTFB06E.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-wvBEmJgi.css">
+    <script type="module" crossorigin src="/assets/index-CSyTk__y.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BgR3VSTT.css">
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="margin:0;background-color:#0f172a;color:#f8fafc;">
+    <div id="root">
+      <div style="min-height:100vh;background:linear-gradient(135deg, #0f172a 0%, #020617 100%);color:#ffffff;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:20px;text-align:center;">
+        <div style="margin-bottom:12px;font-size:28px;font-weight:900;letter-spacing:0.2em;color:#ffffff;">
+          GOD<span style="font-weight:100;color:#10b981;">SHOP</span>
+        </div>
+        <div style="font-size:11px;color:#38bdf8;letter-spacing:0.15em;text-transform:uppercase;font-weight:600;">
+          Carregando Sistema Executivo...
+        </div>
+      </div>
+    </div>
   </body>
 </html>

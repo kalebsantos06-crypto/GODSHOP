@@ -93,7 +93,7 @@ export interface Console {
 }
 
 export interface SaleItem {
-  type: 'iphone' | 'console' | 'gift' | 'accessory';
+  type: 'iphone' | 'console' | 'gift' | 'accessory' | 'product';
   id: string;
   name: string;
   price: number;
@@ -138,6 +138,8 @@ export interface Sale {
   warranty_term_id?: string;
   iphone_id?: string;
   console_id?: string;
+  product_id?: string;
+  item_name?: string;
   items?: SaleItem[];
   client_id: string;
   client_name?: string;

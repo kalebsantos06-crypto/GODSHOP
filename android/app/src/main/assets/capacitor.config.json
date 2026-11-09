@@ -1,5 +1,9 @@
 {
 	"appId": "com.godshop.app",
-	"appName": "godshop",
-	"webDir": "dist"
+	"appName": "Godshop",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	},
+	"android": {}
 }

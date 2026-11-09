@@ -1,16 +1,2 @@
-import { getBaseUrl } from './utils/url';
-
-/**
- * Centralized Configuration for Godshop
- * Handles production settings, Supabase keys, and public app URL.
- */
-
-export const config = {
-  supabaseUrl: (typeof localStorage !== 'undefined' && localStorage.getItem('custom_supabase_url')) || import.meta.env.VITE_SUPABASE_URL || 'https://placeholder-project.supabase.co',
-  supabaseAnonKey: (typeof localStorage !== 'undefined' && localStorage.getItem('custom_supabase_key')) || import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key',
-  appUrl: typeof window !== 'undefined' ? window.location.origin : 'https://godshop.pages.dev'
-};
-
-export const getAppBaseUrl = (): string => {
-  return getBaseUrl();
-};
+export * from './config/index';
+export { config as default } from './config/index';

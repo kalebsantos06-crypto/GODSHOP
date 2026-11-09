@@ -8,7 +8,7 @@ const getRawUrl = (): string => {
     const custom = typeof localStorage !== 'undefined' ? localStorage.getItem('custom_supabase_url') : null;
     if (custom && custom.trim()) return custom.trim();
   } catch (e) {}
-  return import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  return (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_SUPABASE_URL) || DEFAULT_SUPABASE_URL;
 };
 
 const getRawKey = (): string => {
@@ -16,7 +16,7 @@ const getRawKey = (): string => {
     const custom = typeof localStorage !== 'undefined' ? localStorage.getItem('custom_supabase_key') : null;
     if (custom && custom.trim()) return custom.trim();
   } catch (e) {}
-  return import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+  return (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_SUPABASE_ANON_KEY) || DEFAULT_SUPABASE_ANON_KEY;
 };
 
 let supabaseUrl = getRawUrl();

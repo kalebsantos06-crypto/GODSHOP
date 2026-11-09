@@ -15,6 +15,7 @@ interface QuitacaoModalProps {
   client: any;
   iphone?: any;
   consoleObj?: any;
+  productName?: string;
 }
 
 export default function QuitacaoModal({
@@ -23,7 +24,8 @@ export default function QuitacaoModal({
   sale,
   client,
   iphone,
-  consoleObj
+  consoleObj,
+  productName
 }: QuitacaoModalProps) {
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -33,11 +35,12 @@ export default function QuitacaoModal({
   const clientCpf = client?.cpf || sale?.client_cpf || sale?.client?.cpf || 'Não informado';
   const clientPhone = client?.phone || sale?.client_phone || sale?.client?.phone || sale?.phone || '';
 
-  const itemName = iphone
-    ? `${iphone.model} ${iphone.storage || ''} (${iphone.color || ''})`
-    : consoleObj
-    ? `[${consoleObj.category === 'tv' ? 'TV' : 'Eletrônico'}] ${consoleObj.model} - ${consoleObj.version || ''}`
-    : 'Aparelho / Produto';
+  const itemName = productName
+    || (iphone
+      ? `${iphone.model} ${iphone.storage || ''} (${iphone.color || ''})`
+      : consoleObj
+      ? `[${consoleObj.category === 'tv' ? 'TV' : 'Eletrônico'}] ${consoleObj.model} - ${consoleObj.version || ''}`
+      : (sale?.item_name || 'Aparelho / Produto'));
 
   const totalValue = sale.sell_price || 0;
   const downPayment = sale.down_payment || 0;
