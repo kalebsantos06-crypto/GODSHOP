@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, clearStaleAuthTokens } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
 import LoadingScreen from '../components/LoadingScreen';
+import { db } from '../services/db';
 
 export interface AuthContextType {
   user: User | null;
@@ -234,7 +235,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn("Sign out from server failed/offline:", e);
     }
-    const { db } = await import('../services/db');
     db.clearUser();
     setUser(null);
     setIsAuthenticated(false);

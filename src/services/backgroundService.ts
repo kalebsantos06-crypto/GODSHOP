@@ -3,6 +3,7 @@ import { App } from '@capacitor/app';
 import { NativeSettings, AndroidSettings } from 'capacitor-native-settings';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { backupService } from './backupService';
+import { localBackupStorage } from './localBackupStorage';
 
 const STORAGE_KEY_BG_ENABLED = 'godshop_background_mode_enabled';
 const LAST_BACKUP_KEY = 'godshop_last_auto_backup_date';
@@ -185,7 +186,6 @@ class BackgroundService {
       }
 
       // Salvar nos metadados de backups locais
-      const { localBackupStorage } = await import('./localBackupStorage');
       localBackupStorage.saveMetadata({
         id: `auto_${Date.now()}`,
         name: fileName,

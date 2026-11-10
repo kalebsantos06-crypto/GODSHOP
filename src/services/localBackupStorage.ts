@@ -37,8 +37,11 @@ export const localBackupStorage = {
   saveMetadata(item: LocalBackupItem): void {
     try {
       const list = this.getStoredMetadata();
-      const filtered = list.filter(b => b.name !== item.name && b.id !== item.id);
-      filtered.unshift(item);
+      // Remove 'content' before saving to localStorage to prevent QuotaExceededError
+      const { content, ...itemWithoutContent } = item;
+      
+      const filtered = list.filter(b => b.name !== itemWithoutContent.name && b.id !== itemWithoutContent.id);
+      filtered.unshift(itemWithoutContent);
       // Manter até 50 históricos de backup
       const trimmed = filtered.slice(0, 50);
       localStorage.setItem(STORAGE_KEY_METADATA, JSON.stringify(trimmed));
